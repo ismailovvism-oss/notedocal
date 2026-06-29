@@ -84,9 +84,11 @@ export const HIJRI_MONTHS = [
   'зуль-хиджа',
 ];
 
-/** Откуда взята хиджра-дата: 'observed' — по наблюдениям пользователя (точная),
- *  'computed' — из расчётного календаря (предположительная). */
-export type HijriSource = 'observed' | 'computed';
+/** Откуда взята хиджра-дата:
+ *  'admin'    — официальный календарь администратора (точная);
+ *  'observed' — личное наблюдение пользователя (точная);
+ *  'computed' — расчётный календарь Умм аль-Кура (предположительная). */
+export type HijriSource = 'admin' | 'observed' | 'computed';
 
 export interface HijriDate {
   day: number;
@@ -96,18 +98,18 @@ export interface HijriDate {
 }
 
 /**
- * Хиджра-дата для конкретного дня с учётом личных наблюдений.
+ * Разрешить дату по набору наблюдений-«якорей» или вернуть null.
  *
- * Логика: находим ближайшее наблюдение-«якорь», начавшееся не позже этого дня.
- * Месяц длится 29–30 дней, поэтому:
- *  - если известна граница следующего месяца (есть следующий якорь в пределах
+ * Находим ближайший якорь, начавшийся не позже дня. Месяц длится 29–30 дней:
+ *  - если известна граница следующего месяца (следующий якорь в пределах
  *    30 дней) — все дни до неё точные;
- *  - если следующего якоря нет (или он далеко, т.е. наблюдение пропущено) —
- *    точными считаем только дни 1..29; день 30 и далее неоднозначны и берутся
- *    из расчётного календаря как предположительные.
+ *  - если следующего якоря нет (или он далеко — наблюдение пропущено) —
+ *    точными считаем только дни 1..29; день 30 и далее неоднозначны → null.
  */
-export function hijriFor(d: Date, sightings: MoonSighting[]): HijriDate {
-  const key = dayKey(d);
+function resolveAnchors(
+  key: string,
+  sightings: MoonSighting[],
+): { day: number; month: number; year: number } | null {
   const anchors = sightings
     .filter((s) => !s.deleted)
     .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
@@ -126,10 +128,35 @@ export function hijriFor(d: Date, sightings: MoonSighting[]): HijriDate {
     const dom = diffDays(prev.startDate, key) + 1; // номер дня в месяце
     const monthLen = next ? diffDays(prev.startDate, next.startDate) : Infinity;
     const certain = monthLen <= 30 ? dom <= monthLen : dom <= 29;
-    if (certain) {
-      return { day: dom, month: prev.hijriMonth, year: prev.hijriYear, source: 'observed' };
-    }
+    if (certain) return { day: dom, month: prev.hijriMonth, year: prev.hijriYear };
   }
+  return null;
+}
+
+/**
+ * Хиджра-дата с учётом приоритета источников.
+ *
+ * По умолчанию официальные данные администратора перебивают всё. Если
+ * пользователь отключил официальный календарь (`useAdmin = false`) — берутся
+ * только его личные наблюдения, затем расчётный календарь.
+ *
+ * Приоритет при useAdmin=true:  админ → личное → расчёт.
+ * Приоритет при useAdmin=false: личное → расчёт.
+ */
+export function hijriFor(
+  d: Date,
+  own: MoonSighting[],
+  admin: MoonSighting[],
+  useAdmin: boolean,
+): HijriDate {
+  const key = dayKey(d);
+
+  if (useAdmin) {
+    const a = resolveAnchors(key, admin);
+    if (a) return { ...a, source: 'admin' };
+  }
+  const o = resolveAnchors(key, own);
+  if (o) return { ...o, source: 'observed' };
 
   const p = hijriParts(d);
   return { day: p.day, month: p.month, year: p.year, source: 'computed' };
@@ -139,6 +166,18 @@ export function hijriFor(d: Date, sightings: MoonSighting[]): HijriDate {
 export function formatHijri(h: HijriDate): string {
   const base = `${h.day} ${HIJRI_MONTHS[h.month - 1] ?? ''} ${h.year}`.trim();
   return h.source === 'computed' ? `≈ ${base}` : base;
+}
+
+/** Краткая подпись источника даты. */
+export function hijriSourceLabel(source: HijriSource): string {
+  switch (source) {
+    case 'admin':
+      return 'официальная';
+    case 'observed':
+      return 'ваше наблюдение';
+    default:
+      return 'расчётная';
+  }
 }
 
 /** Номер дня по хиджре — для отображения в ячейке календаря (расчётный). */

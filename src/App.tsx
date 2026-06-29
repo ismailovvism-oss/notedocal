@@ -26,13 +26,30 @@ export default function App() {
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
   const [sightings, setSightings] = useLocalStorage<MoonSighting[]>('ndc.sightings', []);
+  // Официальный календарь админа (общий документ) и предпочтение его использовать.
+  const [adminSightings, setAdminSightings] = useLocalStorage<MoonSighting[]>('ndc.admin', []);
+  const [useAdmin, setUseAdmin] = useLocalStorage<boolean>('ndc.useAdmin', true);
 
-  const sync = useCloudSync({ tasks, setTasks, notes, setNotes, sightings, setSightings });
+  const sync = useCloudSync({
+    tasks,
+    setTasks,
+    notes,
+    setNotes,
+    sightings,
+    setSightings,
+    adminSightings,
+    setAdminSightings,
+  });
+  const isAdmin = sync.isAdmin;
 
   // В интерфейс отдаём данные без надгробий (мягко удалённых записей).
   const visibleTasks = useMemo(() => visible(tasks), [tasks]);
   const visibleNotes = useMemo(() => visible(notes), [notes]);
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
+  const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
+
+  // Админ показывает официальный календарь всегда; остальные — по переключателю.
+  const effectiveUseAdmin = isAdmin || useAdmin;
 
   const today = new Date();
 
@@ -43,7 +60,9 @@ export default function App() {
           <span className="logo">🌙</span>
           <div>
             <h1>notedocal</h1>
-            <p className="hijri-today">{formatHijri(hijriFor(today, visibleSightings))}</p>
+            <p className="hijri-today">
+              {formatHijri(hijriFor(today, visibleSightings, visibleAdmin, effectiveUseAdmin))}
+            </p>
           </div>
         </div>
 
@@ -75,10 +94,15 @@ export default function App() {
           <CalendarView
             tasks={visibleTasks}
             notes={visibleNotes}
-            sightings={visibleSightings}
+            ownSightings={visibleSightings}
+            adminSightings={visibleAdmin}
+            useAdmin={useAdmin}
+            setUseAdmin={setUseAdmin}
+            isAdmin={isAdmin}
+            editSightings={isAdmin ? visibleAdmin : visibleSightings}
+            setEditSightings={isAdmin ? setAdminSightings : setSightings}
             setTasks={setTasks}
             setNotes={setNotes}
-            setSightings={setSightings}
           />
         )}
         {tab === 'tasks' && <TasksView tasks={visibleTasks} setTasks={setTasks} />}

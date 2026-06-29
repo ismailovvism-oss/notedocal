@@ -1,10 +1,12 @@
-// Облачная синхронизация заметок и задач через Cloud Firestore.
+// Облачная синхронизация заметок, задач и наблюдений через Cloud Firestore.
 //
-// Модель данных: на каждого пользователя — один документ `users/{uid}` с
-// полями `tasks` и `notes` (полные массивы). При входе локальные данные
-// сливаются с облачными по принципу «последнее изменение побеждает»
-// (Last-Write-Wins по updatedAt, надгробия учитываются), затем оба
-// направления поддерживаются в актуальном состоянии в реальном времени.
+// Модель данных:
+//  - `users/{uid}` — приватные данные пользователя (tasks, notes, личные
+//    наблюдения sightings). Сливаются по принципу «последнее изменение
+//    побеждает» (LWW по updatedAt, с надгробиями) и держатся в реальном времени.
+//  - `shared/calendar` — общий «официальный» календарь наблюдений админа.
+//    Читают ВСЕ (в т.ч. без входа), пишет только админ (проверка по email в
+//    правилах Firestore). Подписка работает независимо от входа.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -17,7 +19,7 @@ import {
   type User,
 } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { auth, db, firebaseEnabled, googleProvider } from './firebase';
+import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
 import type { MoonSighting, Note, Task } from '../types';
 
@@ -30,25 +32,33 @@ interface Params {
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   sightings: MoonSighting[];
   setSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
+  /** Официальный календарь наблюдений (общий документ). */
+  adminSightings: MoonSighting[];
+  setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
 }
 
 interface Result {
   enabled: boolean;
   user: User | null;
   status: SyncStatus;
+  /** Текущий вошедший пользователь — администратор (по email). */
+  isAdmin: boolean;
   signIn: () => Promise<void>;
   signOutUser: () => Promise<void>;
 }
 
-/** Подпись набора данных — стабильна независимо от порядка элементов.
+/** Подпись одного списка — стабильна независимо от порядка элементов.
  *  Меняется при любой правке (updatedAt) и при удалении (deleted). */
+function partSig(l: { id: string; updatedAt: number; deleted?: boolean }[]): string {
+  return l
+    .map((i) => `${i.id}:${i.updatedAt}:${i.deleted ? 1 : 0}`)
+    .sort()
+    .join('|');
+}
+
+/** Подпись пользовательского документа (tasks + notes + личные наблюдения). */
 function sig(tasks: Task[], notes: Note[], sightings: MoonSighting[]): string {
-  const part = (l: { id: string; updatedAt: number; deleted?: boolean }[]) =>
-    l
-      .map((i) => `${i.id}:${i.updatedAt}:${i.deleted ? 1 : 0}`)
-      .sort()
-      .join('|');
-  return `${part(tasks)}//${part(notes)}//${part(sightings)}`;
+  return `${partSig(tasks)}//${partSig(notes)}//${partSig(sightings)}`;
 }
 
 /** Привести задачу к виду без undefined (Firestore не принимает undefined). */
@@ -97,24 +107,32 @@ export function useCloudSync({
   setNotes,
   sightings,
   setSightings,
+  adminSightings,
+  setAdminSightings,
 }: Params): Result {
   const [user, setUser] = useState<User | null>(null);
   const [status, setStatus] = useState<SyncStatus>(
     firebaseEnabled ? 'signed-out' : 'disabled',
   );
 
+  const isAdmin = !!user?.email && user.email === ADMIN_EMAIL;
+
   // Свежие значения для использования внутри колбэков подписки без переподписки.
   const tasksRef = useRef(tasks);
   const notesRef = useRef(notes);
   const sightingsRef = useRef(sightings);
+  const adminRef = useRef(adminSightings);
   tasksRef.current = tasks;
   notesRef.current = notes;
   sightingsRef.current = sightings;
+  adminRef.current = adminSightings;
 
   // Подпись последних синхронизированных данных — чтобы не зацикливать
   // «получили из облака → записали обратно».
   const lastSyncedRef = useRef<string>('');
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAdminSyncedRef = useRef<string>('');
+  const adminWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Слежение за состоянием входа ---
   useEffect(() => {
@@ -189,6 +207,55 @@ export function useCloudSync({
     };
   }, [tasks, notes, sightings, user]);
 
+  // --- Подписка на общий («официальный») календарь админа ---
+  // Работает независимо от входа: документ доступен на чтение всем.
+  useEffect(() => {
+    if (!firebaseEnabled || !db) return;
+    const ref = doc(db, SHARED_DOC.collection, SHARED_DOC.id);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const data = snap.data() as { sightings?: MoonSighting[] } | undefined;
+        const cloud = data?.sightings ?? [];
+        if (isAdmin) {
+          // Админ редактирует этот документ — сливаем с локальными правками.
+          setAdminSightings(mergeById(cloud, adminRef.current));
+          lastAdminSyncedRef.current = partSig(cloud);
+        } else {
+          // Остальные только читают — зеркалим облако.
+          setAdminSightings(cloud);
+        }
+      },
+      () => {
+        // Нет доступа/сети — оставляем локальный кэш как есть.
+      },
+    );
+    return unsub;
+  }, [isAdmin, setAdminSightings]);
+
+  // --- Выгрузка официального календаря (только админ, с дебаунсом) ---
+  useEffect(() => {
+    if (!firebaseEnabled || !db || !isAdmin) return;
+    const cur = partSig(adminSightings);
+    if (cur === lastAdminSyncedRef.current) return;
+
+    if (adminWriteTimer.current) clearTimeout(adminWriteTimer.current);
+    adminWriteTimer.current = setTimeout(() => {
+      lastAdminSyncedRef.current = cur;
+      const ref = doc(db!, SHARED_DOC.collection, SHARED_DOC.id);
+      setDoc(ref, {
+        sightings: adminSightings.map(cleanSighting),
+        updatedAt: Date.now(),
+      }).catch(() => {
+        lastAdminSyncedRef.current = '';
+      });
+    }, 600);
+
+    return () => {
+      if (adminWriteTimer.current) clearTimeout(adminWriteTimer.current);
+    };
+  }, [adminSightings, isAdmin]);
+
   const signIn = useCallback(async () => {
     if (!auth) return;
     try {
@@ -205,7 +272,7 @@ export function useCloudSync({
     // Локальные данные не трогаем — остаются на устройстве.
   }, []);
 
-  return { enabled: firebaseEnabled, user, status, signIn, signOutUser };
+  return { enabled: firebaseEnabled, user, status, isAdmin, signIn, signOutUser };
 }
 
 // Реэкспорт для возможного использования провайдера в других местах.
