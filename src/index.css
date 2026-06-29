@@ -558,6 +558,48 @@ button {
   color: var(--muted);
 }
 
+/* Кликабельный чип с хиджра-датой в панели дня */
+.hijri-chip {
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+}
+.hijri-chip.approx {
+  opacity: 0.75;
+  font-style: italic;
+}
+.moon-badge {
+  font-style: normal;
+}
+.hijri-chip .chev {
+  color: var(--muted);
+  font-size: 11px;
+}
+.moon-summary {
+  margin: 0;
+}
+.moon-record {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Раскрытая панель наблюдений — отдельной карточкой */
+.day-panel .moon-panel {
+  margin: 4px 0 8px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
 /* ---------- Наблюдения молодого месяца ---------- */
 .moon-panel {
   display: flex;

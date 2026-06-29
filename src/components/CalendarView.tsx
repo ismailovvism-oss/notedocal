@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { MoonSighting, Note, SightingMethod, Task } from '../types';
 import {
   HIJRI_MONTHS,
+  type HijriDate,
   WEEKDAYS,
   addDaysKey,
   dayKey,
@@ -54,6 +55,7 @@ export function CalendarView({
 }: Props) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string>(todayKey());
+  const [moonOpen, setMoonOpen] = useState(false);
 
   // Админ всегда видит официальный календарь; остальные — по переключателю.
   const effUseAdmin = isAdmin || useAdmin;
@@ -87,6 +89,8 @@ export function CalendarView({
 
   const selDate = fromKey(selected);
   const selHijri = hijriFor(selDate, ownSightings, adminSightings, effUseAdmin);
+  // 29–30-й день — возможный конец месяца (когда фиксируют начало следующего).
+  const monthEnd = selHijri.day >= 29;
 
   return (
     <section className="view">
@@ -145,23 +149,26 @@ export function CalendarView({
       <div className="day-panel">
         <div className="day-panel-head">
           <h2>{selDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-          <p className={`hijri-today ${selHijri.certain ? '' : 'approx'}`}>
-            {formatHijri(selHijri)}
-            <span className="hijri-hint"> · {hijriSourceLabel(selHijri)}</span>
-          </p>
-          {selHijri.anchor && (
-            <p className="hijri-fix muted small">
-              Начало месяца зафиксировано: {selHijri.anchor.method === 'count' ? '🌑' : '🌙'}{' '}
-              {sightingMethodLabel(selHijri.anchor.method)}
-              {selHijri.anchor.note ? ` — ${selHijri.anchor.note}` : ''}
-            </p>
-          )}
+          <button
+            className={`hijri-chip ${selHijri.certain ? '' : 'approx'}`}
+            onClick={() => setMoonOpen((o) => !o)}
+            aria-expanded={moonOpen}
+          >
+            <span>{formatHijri(selHijri)}</span>
+            {monthEnd && (
+              <span className="moon-badge" title="Возможен конец месяца">
+                🌙
+              </span>
+            )}
+            <span className="chev">{moonOpen ? '▴' : '▾'}</span>
+          </button>
         </div>
 
-        <div className="day-section">
-          <h3 className="day-section-title">Молодой месяц</h3>
+        {moonOpen && (
           <MoonPanel
             selected={selected}
+            hijri={selHijri}
+            monthEnd={monthEnd}
             editSightings={editSightings}
             setEditSightings={setEditSightings}
             isAdmin={isAdmin}
@@ -169,7 +176,7 @@ export function CalendarView({
             setUseAdmin={setUseAdmin}
             hasAdminData={adminSightings.length > 0}
           />
-        </div>
+        )}
 
         <div className="day-section">
           <h3 className="day-section-title">Задачи на день</h3>
@@ -197,6 +204,8 @@ function gregLong(key: string): string {
 /** Блок ввода и управления наблюдениями молодого месяца. */
 function MoonPanel({
   selected,
+  hijri,
+  monthEnd,
   editSightings,
   setEditSightings,
   isAdmin,
@@ -205,6 +214,8 @@ function MoonPanel({
   hasAdminData,
 }: {
   selected: string;
+  hijri: HijriDate;
+  monthEnd: boolean;
   editSightings: MoonSighting[];
   setEditSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
   isAdmin: boolean;
@@ -256,6 +267,17 @@ function MoonPanel({
 
   return (
     <div className="moon-panel">
+      <p className="moon-summary muted small">
+        {hijriSourceLabel(hijri)}
+        {hijri.anchor && (
+          <>
+            {' · '}
+            {hijri.anchor.method === 'count' ? '🌑' : '🌙'} {sightingMethodLabel(hijri.anchor.method)}
+            {hijri.anchor.note ? ` — «${hijri.anchor.note}»` : ''}
+          </>
+        )}
+      </p>
+
       {isAdmin ? (
         <p className="muted small">
           🛡 Вы редактируете <b>календарь {CALENDAR_BRAND}</b> — его видят все пользователи.
@@ -337,13 +359,20 @@ function MoonPanel({
           </div>
         </div>
       ) : (
-        <div className="moon-buttons">
-          <button className="btn moon-btn" onClick={() => openForm('sighting')}>
-            🌙 Видел молодой месяц вечером этого дня
-          </button>
-          <button className="btn moon-btn" onClick={() => openForm('count')}>
-            🌑 Не видел — этот день 30-й, закрыть месяц
-          </button>
+        <div className="moon-record">
+          <p className="muted small">
+            {monthEnd
+              ? 'Возможно, сегодня последний день месяца — отметьте начало нового:'
+              : 'Отметить начало месяца с этого дня:'}
+          </p>
+          <div className="moon-buttons">
+            <button className="btn moon-btn" onClick={() => openForm('sighting')}>
+              🌙 Видел молодой месяц вечером этого дня
+            </button>
+            <button className="btn moon-btn" onClick={() => openForm('count')}>
+              🌑 Не видел — этот день 30-й, закрыть месяц
+            </button>
+          </div>
         </div>
       )}
 
