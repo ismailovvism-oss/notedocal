@@ -21,7 +21,7 @@ import {
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
-import type { MoonSighting, Note, Task } from '../types';
+import type { Checklist, MoonSighting, Note, Task } from '../types';
 
 export type SyncStatus = 'disabled' | 'signed-out' | 'syncing' | 'synced' | 'offline';
 
@@ -32,6 +32,8 @@ interface Params {
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   sightings: MoonSighting[];
   setSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
+  checklists: Checklist[];
+  setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
   /** Официальный календарь наблюдений (общий документ). */
   adminSightings: MoonSighting[];
   setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
@@ -56,9 +58,14 @@ function partSig(l: { id: string; updatedAt: number; deleted?: boolean }[]): str
     .join('|');
 }
 
-/** Подпись пользовательского документа (tasks + notes + личные наблюдения). */
-function sig(tasks: Task[], notes: Note[], sightings: MoonSighting[]): string {
-  return `${partSig(tasks)}//${partSig(notes)}//${partSig(sightings)}`;
+/** Подпись пользовательского документа. */
+function sig(
+  tasks: Task[],
+  notes: Note[],
+  sightings: MoonSighting[],
+  checklists: Checklist[],
+): string {
+  return `${partSig(tasks)}//${partSig(notes)}//${partSig(sightings)}//${partSig(checklists)}`;
 }
 
 /** Привести задачу к виду без undefined (Firestore не принимает undefined). */
@@ -101,6 +108,22 @@ function cleanSighting(s: MoonSighting): MoonSighting {
   };
 }
 
+function cleanChecklist(c: Checklist): Checklist {
+  return {
+    id: c.id,
+    title: c.title ?? '',
+    date: c.date ?? null,
+    items: (c.items ?? []).map((it) => ({
+      id: it.id,
+      text: it.text ?? '',
+      done: !!it.done,
+    })),
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt ?? c.createdAt ?? 0,
+    deleted: c.deleted ?? false,
+  };
+}
+
 export function useCloudSync({
   tasks,
   setTasks,
@@ -108,6 +131,8 @@ export function useCloudSync({
   setNotes,
   sightings,
   setSightings,
+  checklists,
+  setChecklists,
   adminSightings,
   setAdminSightings,
 }: Params): Result {
@@ -122,10 +147,12 @@ export function useCloudSync({
   const tasksRef = useRef(tasks);
   const notesRef = useRef(notes);
   const sightingsRef = useRef(sightings);
+  const checklistsRef = useRef(checklists);
   const adminRef = useRef(adminSightings);
   tasksRef.current = tasks;
   notesRef.current = notes;
   sightingsRef.current = sightings;
+  checklistsRef.current = checklists;
   adminRef.current = adminSightings;
 
   // Подпись последних синхронизированных данных — чтобы не зацикливать
@@ -155,41 +182,47 @@ export function useCloudSync({
       ref,
       (snap) => {
         const data = snap.data() as
-          | { tasks?: Task[]; notes?: Note[]; sightings?: MoonSighting[] }
+          | {
+              tasks?: Task[];
+              notes?: Note[];
+              sightings?: MoonSighting[];
+              checklists?: Checklist[];
+            }
           | undefined;
         const cloudTasks = data?.tasks ?? [];
         const cloudNotes = data?.notes ?? [];
         const cloudSightings = data?.sightings ?? [];
+        const cloudChecklists = data?.checklists ?? [];
 
         // Сливаем облако с текущими локальными данными (LWW).
         const mergedTasks = mergeById(cloudTasks, tasksRef.current);
         const mergedNotes = mergeById(cloudNotes, notesRef.current);
         const mergedSightings = mergeById(cloudSightings, sightingsRef.current);
+        const mergedChecklists = mergeById(cloudChecklists, checklistsRef.current);
 
         setTasks(mergedTasks);
         setNotes(mergedNotes);
         setSightings(mergedSightings);
+        setChecklists(mergedChecklists);
 
         // Помечаем как синхронизированное состояние облака. Если после слияния
         // у нас есть более новые локальные данные, эффект записи ниже их
         // дольёт (его подпись будет отличаться от облачной).
-        lastSyncedRef.current = sig(cloudTasks, cloudNotes, cloudSightings);
-        // Данные с сервера — синхронизировано. Кэш при реальном офлайне —
-        // офлайн; кэш при наличии сети — ещё идёт синхронизация (не пугаем
-        // пользователя «офлайном», пока канал договаривается).
-        if (!snap.metadata.fromCache) setStatus('synced');
-        else if (typeof navigator !== 'undefined' && !navigator.onLine) setStatus('offline');
-        else setStatus((s) => (s === 'synced' ? 'synced' : 'syncing'));
+        lastSyncedRef.current = sig(cloudTasks, cloudNotes, cloudSightings, cloudChecklists);
+        // Вошёл и есть сеть → синхронизировано. Подробности «кэш/сервер»
+        // пользователю не важны и только путают (кружок «висел»).
+        const online = typeof navigator === 'undefined' || navigator.onLine;
+        setStatus(online ? 'synced' : 'offline');
       },
       () => setStatus('offline'),
     );
     return unsub;
-  }, [user, setTasks, setNotes, setSightings]);
+  }, [user, setTasks, setNotes, setSightings, setChecklists]);
 
   // --- Выгрузка локальных изменений в облако (с дебаунсом) ---
   useEffect(() => {
     if (!firebaseEnabled || !db || !user) return;
-    const cur = sig(tasks, notes, sightings);
+    const cur = sig(tasks, notes, sightings, checklists);
     if (cur === lastSyncedRef.current) return;
 
     if (writeTimer.current) clearTimeout(writeTimer.current);
@@ -200,6 +233,7 @@ export function useCloudSync({
         tasks: tasks.map(cleanTask),
         notes: notes.map(cleanNote),
         sightings: sightings.map(cleanSighting),
+        checklists: checklists.map(cleanChecklist),
         updatedAt: Date.now(),
       }).catch(() => {
         // Запись не удалась — сбрасываем подпись, попробуем при следующем
@@ -211,7 +245,7 @@ export function useCloudSync({
     return () => {
       if (writeTimer.current) clearTimeout(writeTimer.current);
     };
-  }, [tasks, notes, sightings, user]);
+  }, [tasks, notes, sightings, checklists, user]);
 
   // --- Подписка на общий («официальный») календарь админа ---
   // Работает независимо от входа: документ доступен на чтение всем.
