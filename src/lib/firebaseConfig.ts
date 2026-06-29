@@ -19,13 +19,15 @@ const fallback = {
   measurementId: 'G-RWRGK1XF7R',
 };
 
+// Используем `||`, а не `??`: на CI незаданные переменные приходят пустой
+// строкой `""` (а не undefined), и она тоже должна уходить в откат на fallback.
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? fallback.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? fallback.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? fallback.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? fallback.storageBucket,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || fallback.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || fallback.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || fallback.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || fallback.storageBucket,
   messagingSenderId:
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? fallback.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? fallback.appId,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID ?? fallback.measurementId,
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || fallback.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || fallback.appId,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || fallback.measurementId,
 };
