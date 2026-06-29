@@ -1,6 +1,6 @@
 // Утилиты для работы с датами: григорианский и исламский (хиджра) календари.
 
-import type { MoonSighting } from '../types';
+import type { MoonSighting, SightingMethod } from '../types';
 import { CALENDAR_BRAND } from './firebase';
 
 /** Ключ дня в формате YYYY-MM-DD по локальному времени. */
@@ -99,6 +99,8 @@ export interface HijriDate {
   /** Точная (подтверждённая наблюдением/счётом текущего месяца) или
    *  предположительная (счёт будущих/прошлых месяцев, либо Умм аль-Кура). */
   certain: boolean;
+  /** Фиксация, задавшая этот месяц (если день внутри подтверждённого месяца). */
+  anchor?: MoonSighting;
 }
 
 /** Сдвинуть месяц хиджры (1..12) на delta с переносом года. */
@@ -123,7 +125,7 @@ function shiftHijriMonth(month: number, year: number, delta: number): { month: n
 function resolveAnchors(
   key: string,
   sightings: MoonSighting[],
-): { day: number; month: number; year: number; certain: boolean } | null {
+): { day: number; month: number; year: number; certain: boolean; anchor?: MoonSighting } | null {
   const anchors = sightings
     .filter((s) => !s.deleted)
     .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
@@ -146,15 +148,28 @@ function resolveAnchors(
     // Месяц с известной границей (следующее наблюдение в пределах 30 дней) —
     // все дни точные.
     if (monthLen <= 30 && offset < monthLen) {
-      return { day: offset + 1, month: prev.hijriMonth, year: prev.hijriYear, certain: true };
+      return {
+        day: offset + 1,
+        month: prev.hijriMonth,
+        year: prev.hijriYear,
+        certain: true,
+        anchor: prev,
+      };
     }
 
     // Иначе считаем вперёд 30-дневными месяцами (досчёт по хадису).
     const monthsForward = Math.floor(offset / 30);
     const dom = (offset % 30) + 1;
     const { month, year } = shiftHijriMonth(prev.hijriMonth, prev.hijriYear, monthsForward);
-    // Текущий месяц (досчитанный до 30) — точный; будущие месяцы — предположение.
-    return { day: dom, month, year, certain: monthsForward === 0 };
+    // Текущий месяц (досчитанный до 30) — точный, его задаёт якорь prev;
+    // будущие месяцы — предположение без якоря.
+    return {
+      day: dom,
+      month,
+      year,
+      certain: monthsForward === 0,
+      anchor: monthsForward === 0 ? prev : undefined,
+    };
   }
 
   // key раньше первого якоря: считаем назад 30-дневными месяцами.
@@ -202,6 +217,11 @@ export function hijriSourceLabel(h: HijriDate): string {
   if (h.source === 'computed') return 'расчётная';
   const who = h.source === 'admin' ? `по ${CALENDAR_BRAND}` : 'ваше наблюдение';
   return h.certain ? who : `${who} · счёт`;
+}
+
+/** Подпись способа фиксации начала месяца. */
+export function sightingMethodLabel(method: SightingMethod | undefined): string {
+  return method === 'count' ? 'досчёт до 30 (хадис)' : 'наблюдение молодого месяца';
 }
 
 /** Номер дня по хиджре — для отображения в ячейке календаря (расчётный). */
