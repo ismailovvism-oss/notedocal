@@ -66,4 +66,4 @@ export interface MoonSighting {
   deleted?: boolean;
 }
 
-export type Tab = 'calendar' | 'tasks' | 'notes';
+export type Tab = 'calendar' | 'tasks' | 'notes' | 'months';

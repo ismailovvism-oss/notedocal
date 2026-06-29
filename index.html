@@ -8,6 +8,16 @@
     <meta name="description" content="Заметки, задачи и календарь с хиджра-датами." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>notedocal — заметки · задачи · календарь</title>
+    <script>
+      // Применяем тему до отрисовки, чтобы не было мигания.
+      try {
+        var t = localStorage.getItem('ndc.theme');
+        if (t !== 'light' && t !== 'dark') {
+          t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

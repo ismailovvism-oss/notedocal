@@ -21,6 +21,15 @@ export const todayKey = (): string => dayKey(new Date());
 
 export const isSameDay = (a: Date, b: Date): boolean => dayKey(a) === dayKey(b);
 
+/** Дата по-русски: «12 марта 2026». */
+export function gregLong(key: string): string {
+  return fromKey(key).toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 /** Прибавить n дней к ключу YYYY-MM-DD и вернуть новый ключ. */
 export function addDaysKey(key: string, n: number): string {
   const d = fromKey(key);
