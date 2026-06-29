@@ -40,6 +40,7 @@ export function TasksView({ tasks, setTasks, fixedDate }: Props) {
       due: (fixedDate ?? due) || null,
       priority,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     });
     setTitle('');
     if (!fixedDate) setDue('');

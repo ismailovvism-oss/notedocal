@@ -9,6 +9,10 @@ export interface Task {
   due: string | null;
   priority: 'low' | 'normal' | 'high';
   createdAt: number;
+  /** Время последнего изменения — для слияния при синхронизации. */
+  updatedAt: number;
+  /** Мягкое удаление (надгробие) — чтобы удаление доезжало до других устройств. */
+  deleted?: boolean;
 }
 
 /** Текстовая заметка. */
@@ -20,6 +24,15 @@ export interface Note {
   date: string | null;
   createdAt: number;
   updatedAt: number;
+  /** Мягкое удаление (надгробие) — чтобы удаление доезжало до других устройств. */
+  deleted?: boolean;
+}
+
+/** Запись с идентификатором и временем изменения — основа для слияния. */
+export interface Syncable {
+  id: string;
+  updatedAt: number;
+  deleted?: boolean;
 }
 
 export type Tab = 'calendar' | 'tasks' | 'notes';
