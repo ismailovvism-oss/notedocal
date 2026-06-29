@@ -129,7 +129,7 @@ export function CalendarView({
               onClick={() => setSelected(key)}
             >
               <span className="greg">{d.getDate()}</span>
-              <span className={`hijri ${h.source === 'computed' ? 'approx' : ''}`}>{h.day}</span>
+              <span className={`hijri ${h.certain ? '' : 'approx'}`}>{h.day}</span>
               {c && (
                 <span className="dots">
                   {c.tasks > 0 && <i className="dot dot-task" />}
@@ -144,9 +144,9 @@ export function CalendarView({
       <div className="day-panel">
         <div className="day-panel-head">
           <h2>{selDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-          <p className={`hijri-today ${selHijri.source === 'computed' ? 'approx' : ''}`}>
+          <p className={`hijri-today ${selHijri.certain ? '' : 'approx'}`}>
             {formatHijri(selHijri)}
-            <span className="hijri-hint"> · {hijriSourceLabel(selHijri.source)}</span>
+            <span className="hijri-hint"> · {hijriSourceLabel(selHijri)}</span>
           </p>
         </div>
 
