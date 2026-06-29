@@ -36,8 +36,6 @@ export function CalendarView({
 }: Props) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string>(todayKey());
-  // На телефоне выбор дня открывает отдельный экран дня (оверлей).
-  const [dayOpen, setDayOpen] = useState(false);
 
   const grid = useMemo(
     () => monthGrid(cursor.getFullYear(), cursor.getMonth()),
@@ -64,11 +62,6 @@ export function CalendarView({
   const month = cursor.getMonth();
   const shift = (delta: number) =>
     setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
-
-  function pick(key: string) {
-    setSelected(key);
-    setDayOpen(true);
-  }
 
   const selDate = fromKey(selected);
   const selHijri = hijriFor(selDate, ownSightings, adminSightings, useAdmin);
@@ -113,7 +106,7 @@ export function CalendarView({
                   isToday ? 'today' : '',
                   isSel ? 'sel' : '',
                 ].join(' ')}
-                onClick={() => pick(key)}
+                onClick={() => setSelected(key)}
               >
                 <span className="greg">{d.getDate()}</span>
                 <span className={`hijri ${h.certain ? '' : 'approx'}`}>{h.day}</span>
@@ -129,11 +122,8 @@ export function CalendarView({
         </div>
       </div>
 
-      <aside className={`day-side ${dayOpen ? 'open' : ''}`}>
+      <aside className="day-side">
         <div className="day-side-head">
-          <button className="day-back icon-btn" onClick={() => setDayOpen(false)} aria-label="Назад">
-            ‹
-          </button>
           <div>
             <h2 className="day-date">
               {selDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}

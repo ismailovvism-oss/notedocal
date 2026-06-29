@@ -174,7 +174,12 @@ export function useCloudSync({
         // у нас есть более новые локальные данные, эффект записи ниже их
         // дольёт (его подпись будет отличаться от облачной).
         lastSyncedRef.current = sig(cloudTasks, cloudNotes, cloudSightings);
-        setStatus(snap.metadata.fromCache ? 'offline' : 'synced');
+        // Данные с сервера — синхронизировано. Кэш при реальном офлайне —
+        // офлайн; кэш при наличии сети — ещё идёт синхронизация (не пугаем
+        // пользователя «офлайном», пока канал договаривается).
+        if (!snap.metadata.fromCache) setStatus('synced');
+        else if (typeof navigator !== 'undefined' && !navigator.onLine) setStatus('offline');
+        else setStatus((s) => (s === 'synced' ? 'synced' : 'syncing'));
       },
       () => setStatus('offline'),
     );

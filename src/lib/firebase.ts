@@ -30,10 +30,10 @@ if (firebaseEnabled) {
   // при нескольких открытых вкладках.
   dbInstance = initializeFirestore(app, {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-    // Авто-определение long polling: realtime-канал Firestore (WebChannel)
+    // Принудительный long polling: realtime-канал Firestore (WebChannel)
     // блокируется некоторыми сетями/прокси, из-за чего синхронизация «висит»
-    // в офлайне на кэше. Long polling это обходит.
-    experimentalAutoDetectLongPolling: true,
+    // в офлайне на кэше. Force надёжнее авто-определения в таких сетях.
+    experimentalForceLongPolling: true,
   });
 }
 
