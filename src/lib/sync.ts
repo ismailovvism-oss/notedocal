@@ -93,6 +93,7 @@ function cleanSighting(s: MoonSighting): MoonSighting {
     startDate: s.startDate,
     hijriMonth: s.hijriMonth,
     hijriYear: s.hijriYear,
+    method: s.method ?? 'sighting',
     note: s.note ?? '',
     createdAt: s.createdAt,
     updatedAt: s.updatedAt ?? s.createdAt ?? 0,

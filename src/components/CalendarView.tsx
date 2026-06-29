@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { MoonSighting, Note, Task } from '../types';
+import type { MoonSighting, Note, SightingMethod, Task } from '../types';
 import {
   HIJRI_MONTHS,
   WEEKDAYS,
@@ -12,6 +12,7 @@ import {
   hijriParts,
   hijriSourceLabel,
   monthGrid,
+  sightingMethodLabel,
   todayKey,
 } from '../lib/dates';
 import { uid, useListActions } from '../lib/storage';
@@ -148,6 +149,13 @@ export function CalendarView({
             {formatHijri(selHijri)}
             <span className="hijri-hint"> · {hijriSourceLabel(selHijri)}</span>
           </p>
+          {selHijri.anchor && (
+            <p className="hijri-fix muted small">
+              Начало месяца зафиксировано: {selHijri.anchor.method === 'count' ? '🌑' : '🌙'}{' '}
+              {sightingMethodLabel(selHijri.anchor.method)}
+              {selHijri.anchor.note ? ` — ${selHijri.anchor.note}` : ''}
+            </p>
+          )}
         </div>
 
         <div className="day-section">
@@ -205,41 +213,45 @@ function MoonPanel({
   hasAdminData: boolean;
 }) {
   const { add, remove } = useListActions(setEditSightings);
-  // Вечером выбранного дня видим молодой месяц → 1-е число завтра.
+  // Выбранный день — последний день месяца → 1-е число нового месяца завтра.
   const startDate = addDaysKey(selected, 1);
   const computed = hijriParts(fromKey(startDate));
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<SightingMethod | null>(null);
   const [hijriMonth, setHijriMonth] = useState(computed.month);
   const [hijriYear, setHijriYear] = useState(computed.year);
+  const [note, setNote] = useState('');
 
-  // Уже отмечено наблюдение на этот вечер?
+  // Уже отмечена фиксация на этот переход?
   const existing = editSightings.find((s) => s.startDate === startDate);
 
-  // Все наблюдения по убыванию даты — для списка.
+  // Все фиксации по убыванию даты — для списка.
   const sorted = useMemo(
     () => [...editSightings].sort((a, b) => (a.startDate < b.startDate ? 1 : -1)),
     [editSightings],
   );
 
-  function openForm() {
+  function openForm(method: SightingMethod) {
     setHijriMonth(computed.month);
     setHijriYear(computed.year);
-    setOpen(true);
+    setNote('');
+    setOpen(method);
   }
 
   function save() {
+    if (!open) return;
     const now = Date.now();
     add({
       id: uid(),
       startDate,
       hijriMonth,
       hijriYear,
-      note: '',
+      method: open,
+      note: note.trim(),
       createdAt: now,
       updatedAt: now,
     });
-    setOpen(false);
+    setOpen(null);
   }
 
   return (
@@ -263,15 +275,32 @@ function MoonPanel({
 
       {existing ? (
         <p className="muted small">
-          ✓ Отмечено: молодой месяц виден вечером этого дня — с {gregLong(startDate)} идёт{' '}
-          {HIJRI_MONTHS[existing.hijriMonth - 1]} {existing.hijriYear}.
+          ✓ Зафиксировано: с {gregLong(startDate)} идёт {HIJRI_MONTHS[existing.hijriMonth - 1]}{' '}
+          {existing.hijriYear} ({existing.method === 'count' ? '🌑' : '🌙'}{' '}
+          {sightingMethodLabel(existing.method)}).
         </p>
       ) : open ? (
         <div className="moon-form">
           <p className="muted small">
-            Молодой месяц виден вечером {gregLong(selected)}. 1-е число нового месяца —{' '}
-            {gregLong(startDate)}. Какой это месяц?
+            {open === 'sighting'
+              ? `Молодой месяц виден вечером ${gregLong(selected)}.`
+              : `${gregLong(selected)} — последний (30-й) день месяца, молодой месяц не виден.`}{' '}
+            1-е число нового месяца — {gregLong(startDate)}.
           </p>
+          <div className="moon-form-methods">
+            <label className="radio">
+              <input
+                type="radio"
+                checked={open === 'sighting'}
+                onChange={() => setOpen('sighting')}
+              />
+              🌙 Видел молодой месяц
+            </label>
+            <label className="radio">
+              <input type="radio" checked={open === 'count'} onChange={() => setOpen('count')} />
+              🌑 Досчёт до 30
+            </label>
+          </div>
           <div className="moon-form-row">
             <select
               className="input input-select"
@@ -292,19 +321,30 @@ function MoonPanel({
               aria-label="Год хиджры"
             />
           </div>
+          <input
+            className="input"
+            placeholder="Как зафиксировано (необязательно): кто видел, где, по чьему объявлению…"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
           <div className="moon-form-actions">
             <button className="btn btn-primary" onClick={save}>
               Сохранить
             </button>
-            <button className="btn" onClick={() => setOpen(false)}>
+            <button className="btn" onClick={() => setOpen(null)}>
               Отмена
             </button>
           </div>
         </div>
       ) : (
-        <button className="btn moon-btn" onClick={openForm}>
-          🌙 Видел молодой месяц вечером этого дня
-        </button>
+        <div className="moon-buttons">
+          <button className="btn moon-btn" onClick={() => openForm('sighting')}>
+            🌙 Видел молодой месяц вечером этого дня
+          </button>
+          <button className="btn moon-btn" onClick={() => openForm('count')}>
+            🌑 Не видел — этот день 30-й, закрыть месяц
+          </button>
+        </div>
       )}
 
       {sorted.length > 0 && (
@@ -316,11 +356,12 @@ function MoonPanel({
                   {HIJRI_MONTHS[s.hijriMonth - 1]} {s.hijriYear}
                 </span>
                 <span className="muted small">
-                  1-е число: {gregLong(s.startDate)} · наблюдение вечером{' '}
-                  {gregLong(addDaysKey(s.startDate, -1))}
+                  1-е число: {gregLong(s.startDate)} · {s.method === 'count' ? '🌑' : '🌙'}{' '}
+                  {sightingMethodLabel(s.method)}
                 </span>
+                {s.note && <span className="muted small moon-item-note">«{s.note}»</span>}
               </div>
-              <button className="icon-btn" onClick={() => remove(s.id)} aria-label="Удалить наблюдение">
+              <button className="icon-btn" onClick={() => remove(s.id)} aria-label="Удалить фиксацию">
                 ✕
               </button>
             </li>
