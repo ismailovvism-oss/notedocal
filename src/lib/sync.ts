@@ -19,7 +19,7 @@ import {
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
-import type { Note, Task } from '../types';
+import type { MoonSighting, Note, Task } from '../types';
 
 export type SyncStatus = 'disabled' | 'signed-out' | 'syncing' | 'synced' | 'offline';
 
@@ -28,6 +28,8 @@ interface Params {
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   notes: Note[];
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
+  sightings: MoonSighting[];
+  setSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
 }
 
 interface Result {
@@ -40,13 +42,13 @@ interface Result {
 
 /** Подпись набора данных — стабильна независимо от порядка элементов.
  *  Меняется при любой правке (updatedAt) и при удалении (deleted). */
-function sig(tasks: Task[], notes: Note[]): string {
+function sig(tasks: Task[], notes: Note[], sightings: MoonSighting[]): string {
   const part = (l: { id: string; updatedAt: number; deleted?: boolean }[]) =>
     l
       .map((i) => `${i.id}:${i.updatedAt}:${i.deleted ? 1 : 0}`)
       .sort()
       .join('|');
-  return `${part(tasks)}//${part(notes)}`;
+  return `${part(tasks)}//${part(notes)}//${part(sightings)}`;
 }
 
 /** Привести задачу к виду без undefined (Firestore не принимает undefined). */
@@ -75,7 +77,27 @@ function cleanNote(n: Note): Note {
   };
 }
 
-export function useCloudSync({ tasks, setTasks, notes, setNotes }: Params): Result {
+function cleanSighting(s: MoonSighting): MoonSighting {
+  return {
+    id: s.id,
+    startDate: s.startDate,
+    hijriMonth: s.hijriMonth,
+    hijriYear: s.hijriYear,
+    note: s.note ?? '',
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt ?? s.createdAt ?? 0,
+    deleted: s.deleted ?? false,
+  };
+}
+
+export function useCloudSync({
+  tasks,
+  setTasks,
+  notes,
+  setNotes,
+  sightings,
+  setSightings,
+}: Params): Result {
   const [user, setUser] = useState<User | null>(null);
   const [status, setStatus] = useState<SyncStatus>(
     firebaseEnabled ? 'signed-out' : 'disabled',
@@ -84,8 +106,10 @@ export function useCloudSync({ tasks, setTasks, notes, setNotes }: Params): Resu
   // Свежие значения для использования внутри колбэков подписки без переподписки.
   const tasksRef = useRef(tasks);
   const notesRef = useRef(notes);
+  const sightingsRef = useRef(sightings);
   tasksRef.current = tasks;
   notesRef.current = notes;
+  sightingsRef.current = sightings;
 
   // Подпись последних синхронизированных данных — чтобы не зацикливать
   // «получили из облака → записали обратно».
@@ -111,32 +135,37 @@ export function useCloudSync({ tasks, setTasks, notes, setNotes }: Params): Resu
     const unsub = onSnapshot(
       ref,
       (snap) => {
-        const data = snap.data() as { tasks?: Task[]; notes?: Note[] } | undefined;
+        const data = snap.data() as
+          | { tasks?: Task[]; notes?: Note[]; sightings?: MoonSighting[] }
+          | undefined;
         const cloudTasks = data?.tasks ?? [];
         const cloudNotes = data?.notes ?? [];
+        const cloudSightings = data?.sightings ?? [];
 
         // Сливаем облако с текущими локальными данными (LWW).
         const mergedTasks = mergeById(cloudTasks, tasksRef.current);
         const mergedNotes = mergeById(cloudNotes, notesRef.current);
+        const mergedSightings = mergeById(cloudSightings, sightingsRef.current);
 
         setTasks(mergedTasks);
         setNotes(mergedNotes);
+        setSightings(mergedSightings);
 
         // Помечаем как синхронизированное состояние облака. Если после слияния
         // у нас есть более новые локальные данные, эффект записи ниже их
         // дольёт (его подпись будет отличаться от облачной).
-        lastSyncedRef.current = sig(cloudTasks, cloudNotes);
+        lastSyncedRef.current = sig(cloudTasks, cloudNotes, cloudSightings);
         setStatus(snap.metadata.fromCache ? 'offline' : 'synced');
       },
       () => setStatus('offline'),
     );
     return unsub;
-  }, [user, setTasks, setNotes]);
+  }, [user, setTasks, setNotes, setSightings]);
 
   // --- Выгрузка локальных изменений в облако (с дебаунсом) ---
   useEffect(() => {
     if (!firebaseEnabled || !db || !user) return;
-    const cur = sig(tasks, notes);
+    const cur = sig(tasks, notes, sightings);
     if (cur === lastSyncedRef.current) return;
 
     if (writeTimer.current) clearTimeout(writeTimer.current);
@@ -146,6 +175,7 @@ export function useCloudSync({ tasks, setTasks, notes, setNotes }: Params): Resu
       setDoc(ref, {
         tasks: tasks.map(cleanTask),
         notes: notes.map(cleanNote),
+        sightings: sightings.map(cleanSighting),
         updatedAt: Date.now(),
       }).catch(() => {
         // Запись не удалась — сбрасываем подпись, попробуем при следующем
@@ -157,7 +187,7 @@ export function useCloudSync({ tasks, setTasks, notes, setNotes }: Params): Resu
     return () => {
       if (writeTimer.current) clearTimeout(writeTimer.current);
     };
-  }, [tasks, notes, user]);
+  }, [tasks, notes, sightings, user]);
 
   const signIn = useCallback(async () => {
     if (!auth) return;
