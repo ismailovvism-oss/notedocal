@@ -71,34 +71,40 @@ Linux и Android. Чтобы данные были **едины** на всех 
   исчезает и на других.
 - Всё работает офлайн: правки копятся локально и досинхронизируются при сети.
 
-### Настройка (один раз, ~5 минут)
+### Настройка
 
-1. Создайте проект на <https://console.firebase.google.com>.
-2. **Project settings → General → Your apps** → добавьте Web-приложение (`</>`)
-   и скопируйте значения из объекта `firebaseConfig`.
-3. **Authentication → Sign-in method** → включите провайдер **Google**.
-   В **Authentication → Settings → Authorized domains** добавьте домен, где
-   размещено приложение (например, `<ваш-логин>.github.io`), и `localhost`.
-4. **Firestore Database** → создайте базу (Production mode). На вкладке **Rules**
-   задайте правила — каждый пользователь видит только свои данные:
+Проект Firebase для этого приложения **уже настроен**, а его публичный веб-конфиг
+зашит в [`src/lib/firebaseConfig.ts`](src/lib/firebaseConfig.ts) — поэтому
+никаких дополнительных действий для работы синхронизации не требуется: соберите
+и задеплойте приложение, нажмите «Войти через Google» — и всё.
 
-   ```
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       match /users/{uid} {
-         allow read, write: if request.auth != null && request.auth.uid == uid;
-       }
-     }
-   }
-   ```
+Действующие правила Firestore (каждый пользователь видит только свои данные):
 
-5. Локально: `cp .env.example .env` и впишите значения из шага 2.
-6. Для GitHub Pages: в репозитории **Settings → Secrets and variables → Actions →
-   вкладка Variables** добавьте те же ключи (`VITE_FIREBASE_API_KEY` и т. д.).
-   Workflow деплоя подставит их при сборке.
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
+```
 
-> Ключи веб-конфига Firebase **не секретны** — они публичны в любом
-> Firebase-приложении. Доступ к данным защищают правила Firestore выше, а не
-> сокрытие ключей. Поэтому для GitHub Pages используются *Variables*, а не
-> *Secrets*.
+> Ключи веб-конфига Firebase **не секретны** — они всё равно попадают в собранный
+> JS, видимый в браузере. Доступ к данным защищают правила Firestore выше и
+> список авторизованных доменов в Firebase Authentication, а не сокрытие ключей.
+
+### Свой проект Firebase (необязательно)
+
+Если хотите подключить **другой** проект Firebase (например, отдельный для
+разработки), не меняя код:
+
+1. Создайте проект на <https://console.firebase.google.com>, добавьте
+   Web-приложение, включите провайдер **Google** в Authentication и в
+   **Authorized domains** добавьте свой домен и `localhost`.
+2. Создайте базу **Firestore** и задайте правила, как выше.
+3. Локально: `cp .env.example .env` и впишите ключи нового проекта — переменные
+   `VITE_FIREBASE_*` перекрывают значения по умолчанию.
+4. Для GitHub Pages: те же ключи добавьте в **Settings → Secrets and variables →
+   Actions → вкладка Variables**; workflow деплоя подставит их при сборке.

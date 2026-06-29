@@ -1,9 +1,9 @@
 // Инициализация Firebase: вход через Google + Cloud Firestore.
 //
-// Конфиг берётся из переменных окружения Vite (файл .env, см. .env.example).
-// Ключи веб-конфига Firebase НЕ являются секретом — это публичные
-// идентификаторы проекта; доступ к данным ограничивается правилами Firestore,
-// а не сокрытием этих ключей.
+// Конфиг — в ./firebaseConfig.ts (публичные веб-ключи; переменные окружения
+// VITE_FIREBASE_* перекрывают их). Ключи Firebase не секретны: доступ к данным
+// ограничивают правила Firestore и список авторизованных доменов, а не
+// сокрытие этих ключей.
 
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
@@ -13,17 +13,9 @@ import {
   persistentMultipleTabManager,
   type Firestore,
 } from 'firebase/firestore';
+import { firebaseConfig as config } from './firebaseConfig';
 
-const config = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
-
-/** Настроен ли Firebase (заданы ли ключи в окружении). */
+/** Настроен ли Firebase (есть ли ключи конфига). */
 export const firebaseEnabled = Boolean(config.apiKey && config.projectId);
 
 let app: FirebaseApp | undefined;
