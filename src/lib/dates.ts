@@ -1,6 +1,7 @@
 // Утилиты для работы с датами: григорианский и исламский (хиджра) календари.
 
 import type { MoonSighting } from '../types';
+import { CALENDAR_BRAND } from './firebase';
 
 /** Ключ дня в формате YYYY-MM-DD по локальному времени. */
 export function dayKey(d: Date): string {
@@ -172,7 +173,7 @@ export function formatHijri(h: HijriDate): string {
 export function hijriSourceLabel(source: HijriSource): string {
   switch (source) {
     case 'admin':
-      return 'официальная';
+      return `по ${CALENDAR_BRAND}`;
     case 'observed':
       return 'ваше наблюдение';
     default:
