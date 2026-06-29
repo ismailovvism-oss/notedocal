@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { MoonSighting, Note, Task } from '../types';
+import type { Checklist, MoonSighting, Note } from '../types';
 import {
   WEEKDAYS,
   dayKey,
@@ -11,28 +11,28 @@ import {
   monthGrid,
   todayKey,
 } from '../lib/dates';
-import { TasksView } from './TasksView';
+import { ChecklistBoard } from './ChecklistBoard';
 import { NotesView } from './NotesView';
 
 interface Props {
-  tasks: Task[];
   notes: Note[];
+  checklists: Checklist[];
   ownSightings: MoonSighting[];
   adminSightings: MoonSighting[];
   /** Учитывать ли календарь Tawhiid (уже с учётом роли админа). */
   useAdmin: boolean;
-  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
+  setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
 }
 
 export function CalendarView({
-  tasks,
   notes,
+  checklists,
   ownSightings,
   adminSightings,
   useAdmin,
-  setTasks,
   setNotes,
+  setChecklists,
 }: Props) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string>(todayKey());
@@ -42,22 +42,23 @@ export function CalendarView({
     [cursor],
   );
 
+  // Точки на ячейках: списки задач и заметки этого дня.
   const counts = useMemo(() => {
     const m = new Map<string, { tasks: number; notes: number }>();
-    for (const t of tasks) {
-      if (!t.due) continue;
-      const c = m.get(t.due) ?? { tasks: 0, notes: 0 };
-      c.tasks += 1;
-      m.set(t.due, c);
+    for (const c of checklists) {
+      if (!c.date || c.deleted || c.items.length === 0) continue;
+      const e = m.get(c.date) ?? { tasks: 0, notes: 0 };
+      e.tasks += 1;
+      m.set(c.date, e);
     }
     for (const n of notes) {
       if (!n.date) continue;
-      const c = m.get(n.date) ?? { tasks: 0, notes: 0 };
-      c.notes += 1;
-      m.set(n.date, c);
+      const e = m.get(n.date) ?? { tasks: 0, notes: 0 };
+      e.notes += 1;
+      m.set(n.date, e);
     }
     return m;
-  }, [tasks, notes]);
+  }, [checklists, notes]);
 
   const month = cursor.getMonth();
   const shift = (delta: number) =>
@@ -135,8 +136,8 @@ export function CalendarView({
         </div>
 
         <div className="day-section">
-          <h3 className="day-section-title">Задачи</h3>
-          <TasksView tasks={tasks} setTasks={setTasks} fixedDate={selected} />
+          <h3 className="day-section-title">Списки задач</h3>
+          <ChecklistBoard date={selected} checklists={checklists} setChecklists={setChecklists} />
         </div>
 
         <div className="day-section">

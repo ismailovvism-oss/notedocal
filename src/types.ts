@@ -66,4 +66,24 @@ export interface MoonSighting {
   deleted?: boolean;
 }
 
+/** Пункт списка задач. */
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+/** Список задач (чек-лист), привязанный к дню. */
+export interface Checklist {
+  id: string;
+  title: string;
+  /** День (YYYY-MM-DD), к которому относится список. */
+  date: string | null;
+  items: ChecklistItem[];
+  createdAt: number;
+  updatedAt: number;
+  /** Мягкое удаление (надгробие) — для синхронизации. */
+  deleted?: boolean;
+}
+
 export type Tab = 'calendar' | 'tasks' | 'notes' | 'months';

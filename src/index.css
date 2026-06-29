@@ -838,3 +838,150 @@ button {
 .months-readonly {
   margin-top: 22px;
 }
+
+/* ---------- Списки задач (чек-листы) ---------- */
+.cl-board {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cl-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cl-cols {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.cl-col-btn {
+  border: none;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 4px 10px;
+  font-size: 12px;
+  border-left: 1px solid var(--border);
+}
+.cl-col-btn:first-child {
+  border-left: none;
+}
+.cl-col-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.cl-empty {
+  padding: 6px 2px;
+  margin: 0;
+}
+
+/* Колонки: CSS multicol — карточки текут сверху вниз, как в Keep */
+.cl-grid {
+  columns: var(--cols, 1);
+  column-gap: 10px;
+}
+.cl-card {
+  break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+  margin-bottom: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+.cl-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.cl-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 2px 0;
+  outline: none;
+}
+.cl-count {
+  flex: none;
+}
+.cl-del-list {
+  font-size: 13px;
+  padding: 2px 4px;
+}
+
+.cl-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cl-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.cl-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid var(--low);
+  background: transparent;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.cl-item.done .cl-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.cl-item-text {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 4px 0;
+  outline: none;
+}
+.cl-item.done .cl-item-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.cl-del {
+  font-size: 12px;
+  padding: 2px 4px;
+  opacity: 0.4;
+}
+.cl-del:hover {
+  opacity: 1;
+}
+.cl-add-input {
+  width: 100%;
+  border: none;
+  border-top: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 0 2px;
+  margin-top: 3px;
+  outline: none;
+}
+.cl-add-input::placeholder {
+  color: var(--muted);
+}

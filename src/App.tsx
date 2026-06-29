@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { MoonSighting, Note, Tab, Task } from './types';
+import type { Checklist, MoonSighting, Note, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { formatHijri, hijriFor } from './lib/dates';
@@ -36,6 +36,7 @@ export default function App() {
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
   const [sightings, setSightings] = useLocalStorage<MoonSighting[]>('ndc.sightings', []);
+  const [checklists, setChecklists] = useLocalStorage<Checklist[]>('ndc.checklists', []);
   // Официальный календарь админа (общий документ) и предпочтение его использовать.
   const [adminSightings, setAdminSightings] = useLocalStorage<MoonSighting[]>('ndc.admin', []);
   const [useAdmin, setUseAdmin] = useLocalStorage<boolean>('ndc.useAdmin', true);
@@ -51,6 +52,8 @@ export default function App() {
     setNotes,
     sightings,
     setSightings,
+    checklists,
+    setChecklists,
     adminSightings,
     setAdminSightings,
   });
@@ -60,6 +63,7 @@ export default function App() {
   const visibleTasks = useMemo(() => visible(tasks), [tasks]);
   const visibleNotes = useMemo(() => visible(notes), [notes]);
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
+  const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
 
   // Админ показывает официальный календарь всегда; остальные — по переключателю.
@@ -114,13 +118,13 @@ export default function App() {
       <main className="content">
         {tab === 'calendar' && (
           <CalendarView
-            tasks={visibleTasks}
             notes={visibleNotes}
+            checklists={visibleChecklists}
             ownSightings={visibleSightings}
             adminSightings={visibleAdmin}
             useAdmin={effectiveUseAdmin}
-            setTasks={setTasks}
             setNotes={setNotes}
+            setChecklists={setChecklists}
           />
         )}
         {tab === 'tasks' && <TasksView tasks={visibleTasks} setTasks={setTasks} />}
