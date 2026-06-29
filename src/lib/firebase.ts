@@ -36,3 +36,13 @@ if (firebaseEnabled) {
 export const auth = authInstance;
 export const db = dbInstance;
 export const googleProvider = new GoogleAuthProvider();
+
+/**
+ * Email администратора. Его наблюдения молодого месяца пишутся в общий
+ * («официальный») документ Firestore, который читают все пользователи.
+ * Право записи в этот документ проверяется в правилах Firestore по email.
+ */
+export const ADMIN_EMAIL = 'ismailoffism@gmail.com';
+
+/** Путь к общему документу с официальным календарём наблюдений. */
+export const SHARED_DOC = { collection: 'shared', id: 'calendar' } as const;

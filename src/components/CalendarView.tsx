@@ -10,6 +10,7 @@ import {
   gregMonthTitle,
   hijriFor,
   hijriParts,
+  hijriSourceLabel,
   monthGrid,
   todayKey,
 } from '../lib/dates';
@@ -20,22 +21,40 @@ import { NotesView } from './NotesView';
 interface Props {
   tasks: Task[];
   notes: Note[];
-  sightings: MoonSighting[];
+  /** Личные наблюдения пользователя. */
+  ownSightings: MoonSighting[];
+  /** Официальный календарь админа (общий). */
+  adminSightings: MoonSighting[];
+  /** Использовать официальный календарь (предпочтение обычного пользователя). */
+  useAdmin: boolean;
+  setUseAdmin: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Текущий пользователь — администратор. */
+  isAdmin: boolean;
+  /** Набор, который пользователь редактирует (личный или, для админа, официальный). */
+  editSightings: MoonSighting[];
+  setEditSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
-  setSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
 }
 
 export function CalendarView({
   tasks,
   notes,
-  sightings,
+  ownSightings,
+  adminSightings,
+  useAdmin,
+  setUseAdmin,
+  isAdmin,
+  editSightings,
+  setEditSightings,
   setTasks,
   setNotes,
-  setSightings,
 }: Props) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string>(todayKey());
+
+  // Админ всегда видит официальный календарь; остальные — по переключателю.
+  const effUseAdmin = isAdmin || useAdmin;
 
   const grid = useMemo(
     () => monthGrid(cursor.getFullYear(), cursor.getMonth()),
@@ -65,7 +84,7 @@ export function CalendarView({
     setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
 
   const selDate = fromKey(selected);
-  const selHijri = hijriFor(selDate, sightings);
+  const selHijri = hijriFor(selDate, ownSightings, adminSightings, effUseAdmin);
 
   return (
     <section className="view">
@@ -96,7 +115,7 @@ export function CalendarView({
           const isToday = key === todayKey();
           const isSel = key === selected;
           const c = counts.get(key);
-          const h = hijriFor(d, sightings);
+          const h = hijriFor(d, ownSightings, adminSightings, effUseAdmin);
           return (
             <button
               key={key}
@@ -126,13 +145,21 @@ export function CalendarView({
           <h2>{selDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
           <p className={`hijri-today ${selHijri.source === 'computed' ? 'approx' : ''}`}>
             {formatHijri(selHijri)}
-            {selHijri.source === 'computed' && <span className="hijri-hint"> · расчётная</span>}
+            <span className="hijri-hint"> · {hijriSourceLabel(selHijri.source)}</span>
           </p>
         </div>
 
         <div className="day-section">
           <h3 className="day-section-title">Молодой месяц</h3>
-          <MoonPanel selected={selected} sightings={sightings} setSightings={setSightings} />
+          <MoonPanel
+            selected={selected}
+            editSightings={editSightings}
+            setEditSightings={setEditSightings}
+            isAdmin={isAdmin}
+            useAdmin={useAdmin}
+            setUseAdmin={setUseAdmin}
+            hasAdminData={adminSightings.length > 0}
+          />
         </div>
 
         <div className="day-section">
@@ -161,14 +188,22 @@ function gregLong(key: string): string {
 /** Блок ввода и управления наблюдениями молодого месяца. */
 function MoonPanel({
   selected,
-  sightings,
-  setSightings,
+  editSightings,
+  setEditSightings,
+  isAdmin,
+  useAdmin,
+  setUseAdmin,
+  hasAdminData,
 }: {
   selected: string;
-  sightings: MoonSighting[];
-  setSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
+  editSightings: MoonSighting[];
+  setEditSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
+  isAdmin: boolean;
+  useAdmin: boolean;
+  setUseAdmin: React.Dispatch<React.SetStateAction<boolean>>;
+  hasAdminData: boolean;
 }) {
-  const { add, remove } = useListActions(setSightings);
+  const { add, remove } = useListActions(setEditSightings);
   // Вечером выбранного дня видим молодой месяц → 1-е число завтра.
   const startDate = addDaysKey(selected, 1);
   const computed = hijriParts(fromKey(startDate));
@@ -178,12 +213,12 @@ function MoonPanel({
   const [hijriYear, setHijriYear] = useState(computed.year);
 
   // Уже отмечено наблюдение на этот вечер?
-  const existing = sightings.find((s) => s.startDate === startDate);
+  const existing = editSightings.find((s) => s.startDate === startDate);
 
   // Все наблюдения по убыванию даты — для списка.
   const sorted = useMemo(
-    () => [...sightings].sort((a, b) => (a.startDate < b.startDate ? 1 : -1)),
-    [sightings],
+    () => [...editSightings].sort((a, b) => (a.startDate < b.startDate ? 1 : -1)),
+    [editSightings],
   );
 
   function openForm() {
@@ -208,6 +243,23 @@ function MoonPanel({
 
   return (
     <div className="moon-panel">
+      {isAdmin ? (
+        <p className="muted small">
+          🛡 Вы редактируете <b>официальный календарь</b> — его видят все пользователи.
+        </p>
+      ) : (
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={useAdmin}
+            onChange={(e) => setUseAdmin(e.target.checked)}
+            disabled={!hasAdminData}
+          />
+          Использовать официальный календарь
+          {!hasAdminData && <span className="muted small"> (пока нет данных)</span>}
+        </label>
+      )}
+
       {existing ? (
         <p className="muted small">
           ✓ Отмечено: молодой месяц виден вечером этого дня — с {gregLong(startDate)} идёт{' '}
