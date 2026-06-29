@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Note, Tab, Task } from './types';
-import { useLocalStorage } from './lib/storage';
+import { useLocalStorage, visible } from './lib/storage';
+import { useCloudSync, type SyncStatus } from './lib/sync';
 import { hijriFull } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
 import { TasksView } from './components/TasksView';
@@ -12,10 +13,24 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'notes', label: 'Заметки', icon: '📝' },
 ];
 
+const STATUS_LABEL: Record<SyncStatus, string> = {
+  disabled: '',
+  'signed-out': 'Не синхронизируется',
+  syncing: 'Синхронизация…',
+  synced: 'Синхронизировано',
+  offline: 'Офлайн',
+};
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('calendar');
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
+
+  const sync = useCloudSync({ tasks, setTasks, notes, setNotes });
+
+  // В интерфейс отдаём данные без надгробий (мягко удалённых записей).
+  const visibleTasks = useMemo(() => visible(tasks), [tasks]);
+  const visibleNotes = useMemo(() => visible(notes), [notes]);
 
   const today = new Date();
 
@@ -29,14 +44,41 @@ export default function App() {
             <p className="hijri-today">{hijriFull(today)}</p>
           </div>
         </div>
+
+        {sync.enabled && (
+          <div className="account">
+            {sync.user ? (
+              <>
+                <span className="sync-status" title={STATUS_LABEL[sync.status]}>
+                  {sync.status === 'synced' ? '☁︎' : sync.status === 'offline' ? '⚠︎' : '⟳'}
+                </span>
+                {sync.user.photoURL && (
+                  <img className="avatar" src={sync.user.photoURL} alt="" referrerPolicy="no-referrer" />
+                )}
+                <button className="btn btn-small" onClick={sync.signOutUser}>
+                  Выйти
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-small btn-primary" onClick={sync.signIn}>
+                Войти через Google
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       <main className="content">
         {tab === 'calendar' && (
-          <CalendarView tasks={tasks} notes={notes} setTasks={setTasks} setNotes={setNotes} />
+          <CalendarView
+            tasks={visibleTasks}
+            notes={visibleNotes}
+            setTasks={setTasks}
+            setNotes={setNotes}
+          />
         )}
-        {tab === 'tasks' && <TasksView tasks={tasks} setTasks={setTasks} />}
-        {tab === 'notes' && <NotesView notes={notes} setNotes={setNotes} />}
+        {tab === 'tasks' && <TasksView tasks={visibleTasks} setTasks={setTasks} />}
+        {tab === 'notes' && <NotesView notes={visibleNotes} setNotes={setNotes} />}
       </main>
 
       <nav className="tabbar">

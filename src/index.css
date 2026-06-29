@@ -74,6 +74,36 @@ button {
   background: color-mix(in srgb, var(--bg) 85%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ---------- Аккаунт и синхронизация ---------- */
+.account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account .avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.sync-status {
+  font-size: 16px;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.btn-small {
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 .brand {
