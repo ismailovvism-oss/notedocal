@@ -2,14 +2,15 @@
   "name": "notedocal — заметки, задачи, календарь",
   "short_name": "notedocal",
   "description": "Заметки, список дел и календарь с григорианскими и хиджра-датами.",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#14161a",
   "theme_color": "#2f7d6b",
   "lang": "ru",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
