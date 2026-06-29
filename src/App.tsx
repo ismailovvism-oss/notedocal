@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { MoonSighting, Note, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
@@ -6,11 +6,13 @@ import { formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
 import { TasksView } from './components/TasksView';
 import { NotesView } from './components/NotesView';
+import { MonthsView } from './components/MonthsView';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'calendar', label: 'Календарь', icon: '📅' },
   { id: 'tasks', label: 'Задачи', icon: '✓' },
   { id: 'notes', label: 'Заметки', icon: '📝' },
+  { id: 'months', label: 'Месяцы', icon: '🌙' },
 ];
 
 const STATUS_LABEL: Record<SyncStatus, string> = {
@@ -21,14 +23,26 @@ const STATUS_LABEL: Record<SyncStatus, string> = {
   offline: 'Офлайн',
 };
 
+type Theme = 'light' | 'dark';
+
+const initialTheme: Theme =
+  typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('calendar');
+  const [theme, setTheme] = useLocalStorage<Theme>('ndc.theme', initialTheme);
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
   const [sightings, setSightings] = useLocalStorage<MoonSighting[]>('ndc.sightings', []);
   // Официальный календарь админа (общий документ) и предпочтение его использовать.
   const [adminSightings, setAdminSightings] = useLocalStorage<MoonSighting[]>('ndc.admin', []);
   const [useAdmin, setUseAdmin] = useLocalStorage<boolean>('ndc.useAdmin', true);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   const sync = useCloudSync({
     tasks,
@@ -66,9 +80,18 @@ export default function App() {
           </div>
         </div>
 
-        {sync.enabled && (
-          <div className="account">
-            {sync.user ? (
+        <div className="account">
+          <button
+            className="icon-btn theme-toggle"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            aria-label="Сменить тему"
+            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+
+          {sync.enabled &&
+            (sync.user ? (
               <>
                 <span className="sync-status" title={STATUS_LABEL[sync.status]}>
                   {sync.status === 'synced' ? '☁︎' : sync.status === 'offline' ? '⚠︎' : '⟳'}
@@ -84,9 +107,8 @@ export default function App() {
               <button className="btn btn-small btn-primary" onClick={sync.signIn}>
                 Войти через Google
               </button>
-            )}
-          </div>
-        )}
+            ))}
+        </div>
       </header>
 
       <main className="content">
@@ -96,17 +118,23 @@ export default function App() {
             notes={visibleNotes}
             ownSightings={visibleSightings}
             adminSightings={visibleAdmin}
-            useAdmin={useAdmin}
-            setUseAdmin={setUseAdmin}
-            isAdmin={isAdmin}
-            editSightings={isAdmin ? visibleAdmin : visibleSightings}
-            setEditSightings={isAdmin ? setAdminSightings : setSightings}
+            useAdmin={effectiveUseAdmin}
             setTasks={setTasks}
             setNotes={setNotes}
           />
         )}
         {tab === 'tasks' && <TasksView tasks={visibleTasks} setTasks={setTasks} />}
         {tab === 'notes' && <NotesView notes={visibleNotes} setNotes={setNotes} />}
+        {tab === 'months' && (
+          <MonthsView
+            editSightings={isAdmin ? visibleAdmin : visibleSightings}
+            setEditSightings={isAdmin ? setAdminSightings : setSightings}
+            adminSightings={visibleAdmin}
+            isAdmin={isAdmin}
+            useAdmin={useAdmin}
+            setUseAdmin={setUseAdmin}
+          />
+        )}
       </main>
 
       <nav className="tabbar">

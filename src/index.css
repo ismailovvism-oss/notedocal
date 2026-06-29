@@ -19,20 +19,18 @@
   color: var(--text);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --surface: #1d2025;
-    --surface-2: #24282e;
-    --border: #2e333a;
-    --text: #e8eaed;
-    --muted: #9099a3;
-    --accent: #4fb39b;
-    --accent-soft: #1f3a34;
-    --task: #4fb39b;
-    --note: #e0a85c;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
-  }
+:root[data-theme='dark'] {
+  --bg: #14161a;
+  --surface: #1d2025;
+  --surface-2: #24282e;
+  --border: #2e333a;
+  --text: #e8eaed;
+  --muted: #9099a3;
+  --accent: #4fb39b;
+  --accent-soft: #1f3a34;
+  --task: #4fb39b;
+  --note: #e0a85c;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
 * {
@@ -50,6 +48,7 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 button {
@@ -59,11 +58,18 @@ button {
 
 /* ---------- Каркас ---------- */
 .app {
+  width: 100%;
   max-width: 760px;
   margin: 0 auto;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+/* На широких экранах даём место под колонку дня в календаре. */
+@media (min-width: 760px) {
+  .app {
+    max-width: 940px;
+  }
 }
 
 .topbar {
@@ -78,6 +84,11 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.account {
+  margin-left: auto;
 }
 
 /* ---------- Аккаунт и синхронизация ---------- */
@@ -679,4 +690,162 @@ button {
 .moon-item-title {
   font-weight: 600;
   text-transform: capitalize;
+}
+
+/* ============================================================
+   Редизайн: тема, раскладка календаря, экран дня, вкладка «Месяцы»
+   ============================================================ */
+
+.theme-toggle {
+  font-size: 16px;
+}
+
+/* Узкие экраны (задачи/заметки/месяцы) — ограничиваем ширину для читаемости */
+.view-narrow {
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+/* ---------- Календарь: мастер-деталь ---------- */
+.cal-layout {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.cal-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Колонка дня */
+.day-side {
+  width: 320px;
+  flex: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.day-side-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.day-back {
+  display: none;
+}
+.day-date {
+  margin: 0;
+  font-size: 17px;
+  text-transform: capitalize;
+}
+.day-hijri {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+}
+.day-hijri.approx {
+  opacity: 0.7;
+  font-style: italic;
+}
+.day-src {
+  color: var(--muted);
+  font-weight: 400;
+  font-style: normal;
+}
+
+/* Телефон: колонка дня превращается в полноэкранный экран дня */
+@media (max-width: 759px) {
+  .day-side {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    width: auto;
+    border: none;
+    border-radius: 0;
+    background: var(--bg);
+    padding: 14px 18px calc(96px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+  }
+  .day-side.open {
+    transform: none;
+  }
+  .day-back {
+    display: inline-flex;
+  }
+}
+
+/* ---------- Вкладка «Месяцы» ---------- */
+.banner {
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text);
+  margin: 0 0 12px;
+}
+.months {
+  margin-top: 10px;
+}
+.month-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.month-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.month-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.month-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.month-item-title {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.month-item-note {
+  font-style: italic;
+}
+.month-item-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.months-readonly {
+  margin-top: 22px;
 }
