@@ -481,6 +481,11 @@ button {
   color: var(--accent);
   line-height: 1.1;
 }
+/* Предположительная (расчётная) хиджра-дата — бледнее и курсивом. */
+.cal-cell .hijri.approx {
+  opacity: 0.45;
+  font-style: italic;
+}
 .cal-cell.today {
   border-color: var(--accent);
 }
@@ -541,4 +546,70 @@ button {
 }
 .day-section .notes-grid {
   grid-template-columns: 1fr;
+}
+
+/* ---------- Хиджра: предположительная дата ---------- */
+.hijri-today.approx {
+  opacity: 0.7;
+  font-style: italic;
+}
+.hijri-hint {
+  font-style: normal;
+  color: var(--muted);
+}
+
+/* ---------- Наблюдения молодого месяца ---------- */
+.moon-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.moon-btn {
+  align-self: flex-start;
+}
+.moon-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.moon-form-row {
+  display: flex;
+  gap: 8px;
+}
+.moon-form-row .input-select {
+  flex: 1;
+}
+.input-year {
+  width: 90px;
+}
+.moon-form-actions {
+  display: flex;
+  gap: 8px;
+}
+.moon-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.moon-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.moon-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.moon-item-title {
+  font-weight: 600;
+  text-transform: capitalize;
 }

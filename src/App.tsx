@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { Note, Tab, Task } from './types';
+import type { MoonSighting, Note, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
-import { hijriFull } from './lib/dates';
+import { formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
 import { TasksView } from './components/TasksView';
 import { NotesView } from './components/NotesView';
@@ -25,12 +25,14 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('calendar');
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
+  const [sightings, setSightings] = useLocalStorage<MoonSighting[]>('ndc.sightings', []);
 
-  const sync = useCloudSync({ tasks, setTasks, notes, setNotes });
+  const sync = useCloudSync({ tasks, setTasks, notes, setNotes, sightings, setSightings });
 
   // В интерфейс отдаём данные без надгробий (мягко удалённых записей).
   const visibleTasks = useMemo(() => visible(tasks), [tasks]);
   const visibleNotes = useMemo(() => visible(notes), [notes]);
+  const visibleSightings = useMemo(() => visible(sightings), [sightings]);
 
   const today = new Date();
 
@@ -41,7 +43,7 @@ export default function App() {
           <span className="logo">🌙</span>
           <div>
             <h1>notedocal</h1>
-            <p className="hijri-today">{hijriFull(today)}</p>
+            <p className="hijri-today">{formatHijri(hijriFor(today, visibleSightings))}</p>
           </div>
         </div>
 
@@ -73,8 +75,10 @@ export default function App() {
           <CalendarView
             tasks={visibleTasks}
             notes={visibleNotes}
+            sightings={visibleSightings}
             setTasks={setTasks}
             setNotes={setNotes}
+            setSightings={setSightings}
           />
         )}
         {tab === 'tasks' && <TasksView tasks={visibleTasks} setTasks={setTasks} />}

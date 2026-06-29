@@ -1,5 +1,7 @@
 // Утилиты для работы с датами: григорианский и исламский (хиджра) календари.
 
+import type { MoonSighting } from '../types';
+
 /** Ключ дня в формате YYYY-MM-DD по локальному времени. */
 export function dayKey(d: Date): string {
   const y = d.getFullYear();
@@ -17,6 +19,20 @@ export function fromKey(key: string): Date {
 export const todayKey = (): string => dayKey(new Date());
 
 export const isSameDay = (a: Date, b: Date): boolean => dayKey(a) === dayKey(b);
+
+/** Прибавить n дней к ключу YYYY-MM-DD и вернуть новый ключ. */
+export function addDaysKey(key: string, n: number): string {
+  const d = fromKey(key);
+  d.setDate(d.getDate() + n);
+  return dayKey(d);
+}
+
+/** Целое число дней между двумя ключами (b − a). */
+export function diffDays(aKey: string, bKey: string): number {
+  const a = fromKey(aKey).getTime();
+  const b = fromKey(bKey).getTime();
+  return Math.round((b - a) / 86_400_000);
+}
 
 const GREG_MONTHS = [
   'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
@@ -40,19 +56,92 @@ const hijriDayFmt = new Intl.DateTimeFormat('en-u-ca-islamic-umalqura', {
   year: 'numeric',
 });
 
-/** Полная дата по хиджре: «14 мухаррам 1448 г. AH». */
+/** Полная дата по хиджре из встроенного календаря: «14 мухаррам 1448 г. AH». */
 export function hijriFull(d: Date): string {
   return hijriLong.format(d);
 }
 
-/** Числовые части даты по хиджре. */
+/** Числовые части даты по хиджре (по расчётному календарю Умм аль-Кура). */
 export function hijriParts(d: Date): { day: number; month: number; year: number } {
   const parts = hijriDayFmt.formatToParts(d);
   const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
   return { day: get('day'), month: get('month'), year: get('year') };
 }
 
-/** Номер дня по хиджре — для отображения в ячейке календаря. */
+/** Названия месяцев хиджры (1..12). */
+export const HIJRI_MONTHS = [
+  'мухаррам',
+  'сафар',
+  'раби-уль-авваль',
+  'раби-уль-ахир',
+  'джумада-уль-уля',
+  'джумада-уль-ахира',
+  'раджаб',
+  'шаабан',
+  'рамадан',
+  'шавваль',
+  'зуль-каада',
+  'зуль-хиджа',
+];
+
+/** Откуда взята хиджра-дата: 'observed' — по наблюдениям пользователя (точная),
+ *  'computed' — из расчётного календаря (предположительная). */
+export type HijriSource = 'observed' | 'computed';
+
+export interface HijriDate {
+  day: number;
+  month: number;
+  year: number;
+  source: HijriSource;
+}
+
+/**
+ * Хиджра-дата для конкретного дня с учётом личных наблюдений.
+ *
+ * Логика: находим ближайшее наблюдение-«якорь», начавшееся не позже этого дня.
+ * Месяц длится 29–30 дней, поэтому:
+ *  - если известна граница следующего месяца (есть следующий якорь в пределах
+ *    30 дней) — все дни до неё точные;
+ *  - если следующего якоря нет (или он далеко, т.е. наблюдение пропущено) —
+ *    точными считаем только дни 1..29; день 30 и далее неоднозначны и берутся
+ *    из расчётного календаря как предположительные.
+ */
+export function hijriFor(d: Date, sightings: MoonSighting[]): HijriDate {
+  const key = dayKey(d);
+  const anchors = sightings
+    .filter((s) => !s.deleted)
+    .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+
+  let prev: MoonSighting | null = null;
+  let next: MoonSighting | null = null;
+  for (const s of anchors) {
+    if (s.startDate <= key) prev = s;
+    else {
+      next = s;
+      break;
+    }
+  }
+
+  if (prev) {
+    const dom = diffDays(prev.startDate, key) + 1; // номер дня в месяце
+    const monthLen = next ? diffDays(prev.startDate, next.startDate) : Infinity;
+    const certain = monthLen <= 30 ? dom <= monthLen : dom <= 29;
+    if (certain) {
+      return { day: dom, month: prev.hijriMonth, year: prev.hijriYear, source: 'observed' };
+    }
+  }
+
+  const p = hijriParts(d);
+  return { day: p.day, month: p.month, year: p.year, source: 'computed' };
+}
+
+/** Отформатировать хиджра-дату: «14 рамадан 1447». Предположительные — со знаком «≈». */
+export function formatHijri(h: HijriDate): string {
+  const base = `${h.day} ${HIJRI_MONTHS[h.month - 1] ?? ''} ${h.year}`.trim();
+  return h.source === 'computed' ? `≈ ${base}` : base;
+}
+
+/** Номер дня по хиджре — для отображения в ячейке календаря (расчётный). */
 export const hijriDay = (d: Date): number => hijriParts(d).day;
 
 /** Сетка месяца: всегда 6 недель × 7 дней, неделя начинается с понедельника. */
