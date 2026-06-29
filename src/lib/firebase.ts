@@ -39,10 +39,13 @@ export const googleProvider = new GoogleAuthProvider();
 
 /**
  * Email администратора. Его наблюдения молодого месяца пишутся в общий
- * («официальный») документ Firestore, который читают все пользователи.
+ * документ Firestore (календарь Tawhiid), который читают все пользователи.
  * Право записи в этот документ проверяется в правилах Firestore по email.
  */
-export const ADMIN_EMAIL = 'ismailoffism@gmail.com';
+export const ADMIN_EMAIL = 'ismailovvism@gmail.com';
 
-/** Путь к общему документу с официальным календарём наблюдений. */
+/** Название бренда календаря наблюдений администратора. */
+export const CALENDAR_BRAND = 'Tawhiid';
+
+/** Путь к общему документу с календарём наблюдений Tawhiid. */
 export const SHARED_DOC = { collection: 'shared', id: 'calendar' } as const;

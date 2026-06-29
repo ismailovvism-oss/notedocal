@@ -15,6 +15,7 @@ import {
   todayKey,
 } from '../lib/dates';
 import { uid, useListActions } from '../lib/storage';
+import { CALENDAR_BRAND } from '../lib/firebase';
 import { TasksView } from './TasksView';
 import { NotesView } from './NotesView';
 
@@ -245,7 +246,7 @@ function MoonPanel({
     <div className="moon-panel">
       {isAdmin ? (
         <p className="muted small">
-          🛡 Вы редактируете <b>официальный календарь</b> — его видят все пользователи.
+          🛡 Вы редактируете <b>календарь {CALENDAR_BRAND}</b> — его видят все пользователи.
         </p>
       ) : (
         <label className="toggle">
@@ -255,7 +256,7 @@ function MoonPanel({
             onChange={(e) => setUseAdmin(e.target.checked)}
             disabled={!hasAdminData}
           />
-          Использовать официальный календарь
+          Использовать календарь {CALENDAR_BRAND}
           {!hasAdminData && <span className="muted small"> (пока нет данных)</span>}
         </label>
       )}
