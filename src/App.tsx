@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Checklist, MoonSighting, Note, Tab, Task } from './types';
+import type { CalEvent, Checklist, MoonSighting, Note, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { useReminders } from './lib/reminders';
@@ -38,6 +38,7 @@ export default function App() {
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
   const [sightings, setSightings] = useLocalStorage<MoonSighting[]>('ndc.sightings', []);
   const [checklists, setChecklists] = useLocalStorage<Checklist[]>('ndc.checklists', []);
+  const [events, setEvents] = useLocalStorage<CalEvent[]>('ndc.events', []);
   // Официальный календарь админа (общий документ) и предпочтение его использовать.
   const [adminSightings, setAdminSightings] = useLocalStorage<MoonSighting[]>('ndc.admin', []);
   const [useAdmin, setUseAdmin] = useLocalStorage<boolean>('ndc.useAdmin', true);
@@ -57,6 +58,8 @@ export default function App() {
     setSightings,
     checklists,
     setChecklists,
+    events,
+    setEvents,
     adminSightings,
     setAdminSightings,
   });
@@ -66,6 +69,7 @@ export default function App() {
   const visibleNotes = useMemo(() => visible(notes), [notes]);
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
   const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
+  const visibleEvents = useMemo(() => visible(events), [events]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
 
   // Админ показывает официальный календарь всегда; остальные — по переключателю.
@@ -122,11 +126,13 @@ export default function App() {
           <CalendarView
             notes={visibleNotes}
             checklists={visibleChecklists}
+            events={visibleEvents}
             ownSightings={visibleSightings}
             adminSightings={visibleAdmin}
             useAdmin={effectiveUseAdmin}
             setNotes={setNotes}
             setChecklists={setChecklists}
+            setEvents={setEvents}
           />
         )}
         {tab === 'tasks' && (

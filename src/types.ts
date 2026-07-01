@@ -98,4 +98,20 @@ export interface Checklist {
   deleted?: boolean;
 }
 
+/** Событие календаря (со временем), в отличие от задачи — без «выполнено». */
+export interface CalEvent {
+  id: string;
+  title: string;
+  /** День (YYYY-MM-DD). */
+  date: string;
+  /** Время начала HH:mm (необязательно). */
+  start?: string;
+  /** Время конца HH:mm (необязательно). */
+  end?: string;
+  desc?: string;
+  createdAt: number;
+  updatedAt: number;
+  deleted?: boolean;
+}
+
 export type Tab = 'calendar' | 'tasks' | 'notes' | 'months';

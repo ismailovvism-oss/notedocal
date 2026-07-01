@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { Checklist, MoonSighting, Note } from '../types';
+import type { CalEvent, Checklist, MoonSighting, Note } from '../types';
 import {
   WEEKDAYS,
   dayKey,
@@ -12,27 +12,32 @@ import {
   todayKey,
 } from '../lib/dates';
 import { ChecklistBoard } from './ChecklistBoard';
+import { EventsBoard } from './EventsBoard';
 import { NotesView } from './NotesView';
 
 interface Props {
   notes: Note[];
   checklists: Checklist[];
+  events: CalEvent[];
   ownSightings: MoonSighting[];
   adminSightings: MoonSighting[];
   /** Учитывать ли календарь Tawhiid (уже с учётом роли админа). */
   useAdmin: boolean;
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
+  setEvents: React.Dispatch<React.SetStateAction<CalEvent[]>>;
 }
 
 export function CalendarView({
   notes,
   checklists,
+  events,
   ownSightings,
   adminSightings,
   useAdmin,
   setNotes,
   setChecklists,
+  setEvents,
 }: Props) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string>(todayKey());
@@ -42,23 +47,31 @@ export function CalendarView({
     [cursor],
   );
 
-  // Точки на ячейках: списки задач и заметки этого дня.
+  // Точки на ячейках: списки задач, события и заметки этого дня.
   const counts = useMemo(() => {
-    const m = new Map<string, { tasks: number; notes: number }>();
+    const m = new Map<string, { tasks: number; notes: number; events: number }>();
+    const at = (key: string) => {
+      let e = m.get(key);
+      if (!e) {
+        e = { tasks: 0, notes: 0, events: 0 };
+        m.set(key, e);
+      }
+      return e;
+    };
     for (const c of checklists) {
       if (!c.date || c.deleted || c.items.length === 0) continue;
-      const e = m.get(c.date) ?? { tasks: 0, notes: 0 };
-      e.tasks += 1;
-      m.set(c.date, e);
+      at(c.date).tasks += 1;
+    }
+    for (const ev of events) {
+      if (!ev.date || ev.deleted) continue;
+      at(ev.date).events += 1;
     }
     for (const n of notes) {
       if (!n.date) continue;
-      const e = m.get(n.date) ?? { tasks: 0, notes: 0 };
-      e.notes += 1;
-      m.set(n.date, e);
+      at(n.date).notes += 1;
     }
     return m;
-  }, [checklists, notes]);
+  }, [checklists, events, notes]);
 
   const month = cursor.getMonth();
   const shift = (delta: number) =>
@@ -114,6 +127,7 @@ export function CalendarView({
                 {c && (
                   <span className="dots">
                     {c.tasks > 0 && <i className="dot dot-task" />}
+                    {c.events > 0 && <i className="dot dot-event" />}
                     {c.notes > 0 && <i className="dot dot-note" />}
                   </span>
                 )}
@@ -133,6 +147,11 @@ export function CalendarView({
               {formatHijri(selHijri)} <span className="day-src">· {hijriSourceLabel(selHijri)}</span>
             </p>
           </div>
+        </div>
+
+        <div className="day-section">
+          <h3 className="day-section-title">События</h3>
+          <EventsBoard date={selected} events={events} setEvents={setEvents} />
         </div>
 
         <div className="day-section">

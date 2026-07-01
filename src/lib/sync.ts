@@ -21,7 +21,7 @@ import {
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
-import type { Checklist, ChecklistItem, MoonSighting, Note, Task } from '../types';
+import type { CalEvent, Checklist, ChecklistItem, MoonSighting, Note, Task } from '../types';
 
 export type SyncStatus = 'disabled' | 'signed-out' | 'syncing' | 'synced' | 'offline';
 
@@ -34,6 +34,8 @@ interface Params {
   setSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
   checklists: Checklist[];
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
+  events: CalEvent[];
+  setEvents: React.Dispatch<React.SetStateAction<CalEvent[]>>;
   /** Официальный календарь наблюдений (общий документ). */
   adminSightings: MoonSighting[];
   setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
@@ -64,8 +66,9 @@ function sig(
   notes: Note[],
   sightings: MoonSighting[],
   checklists: Checklist[],
+  events: CalEvent[],
 ): string {
-  return `${partSig(tasks)}//${partSig(notes)}//${partSig(sightings)}//${partSig(checklists)}`;
+  return `${partSig(tasks)}//${partSig(notes)}//${partSig(sightings)}//${partSig(checklists)}//${partSig(events)}`;
 }
 
 /** Привести задачу к виду без undefined (Firestore не принимает undefined). */
@@ -121,6 +124,20 @@ function cleanItem(it: ChecklistItem): ChecklistItem {
   };
 }
 
+function cleanEvent(e: CalEvent): CalEvent {
+  return {
+    id: e.id,
+    title: e.title ?? '',
+    date: e.date,
+    start: e.start ?? '',
+    end: e.end ?? '',
+    desc: e.desc ?? '',
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt ?? e.createdAt ?? 0,
+    deleted: e.deleted ?? false,
+  };
+}
+
 function cleanChecklist(c: Checklist): Checklist {
   return {
     id: c.id,
@@ -142,6 +159,8 @@ export function useCloudSync({
   setSightings,
   checklists,
   setChecklists,
+  events,
+  setEvents,
   adminSightings,
   setAdminSightings,
 }: Params): Result {
@@ -157,11 +176,13 @@ export function useCloudSync({
   const notesRef = useRef(notes);
   const sightingsRef = useRef(sightings);
   const checklistsRef = useRef(checklists);
+  const eventsRef = useRef(events);
   const adminRef = useRef(adminSightings);
   tasksRef.current = tasks;
   notesRef.current = notes;
   sightingsRef.current = sightings;
   checklistsRef.current = checklists;
+  eventsRef.current = events;
   adminRef.current = adminSightings;
 
   // Подпись последних синхронизированных данных — чтобы не зацикливать
@@ -196,28 +217,32 @@ export function useCloudSync({
               notes?: Note[];
               sightings?: MoonSighting[];
               checklists?: Checklist[];
+              events?: CalEvent[];
             }
           | undefined;
         const cloudTasks = data?.tasks ?? [];
         const cloudNotes = data?.notes ?? [];
         const cloudSightings = data?.sightings ?? [];
         const cloudChecklists = data?.checklists ?? [];
+        const cloudEvents = data?.events ?? [];
 
         // Сливаем облако с текущими локальными данными (LWW).
         const mergedTasks = mergeById(cloudTasks, tasksRef.current);
         const mergedNotes = mergeById(cloudNotes, notesRef.current);
         const mergedSightings = mergeById(cloudSightings, sightingsRef.current);
         const mergedChecklists = mergeById(cloudChecklists, checklistsRef.current);
+        const mergedEvents = mergeById(cloudEvents, eventsRef.current);
 
         setTasks(mergedTasks);
         setNotes(mergedNotes);
         setSightings(mergedSightings);
         setChecklists(mergedChecklists);
+        setEvents(mergedEvents);
 
         // Помечаем как синхронизированное состояние облака. Если после слияния
         // у нас есть более новые локальные данные, эффект записи ниже их
         // дольёт (его подпись будет отличаться от облачной).
-        lastSyncedRef.current = sig(cloudTasks, cloudNotes, cloudSightings, cloudChecklists);
+        lastSyncedRef.current = sig(cloudTasks, cloudNotes, cloudSightings, cloudChecklists, cloudEvents);
         // Вошёл и есть сеть → синхронизировано. Подробности «кэш/сервер»
         // пользователю не важны и только путают (кружок «висел»).
         const online = typeof navigator === 'undefined' || navigator.onLine;
@@ -226,12 +251,12 @@ export function useCloudSync({
       () => setStatus('offline'),
     );
     return unsub;
-  }, [user, setTasks, setNotes, setSightings, setChecklists]);
+  }, [user, setTasks, setNotes, setSightings, setChecklists, setEvents]);
 
   // --- Выгрузка локальных изменений в облако (с дебаунсом) ---
   useEffect(() => {
     if (!firebaseEnabled || !db || !user) return;
-    const cur = sig(tasks, notes, sightings, checklists);
+    const cur = sig(tasks, notes, sightings, checklists, events);
     if (cur === lastSyncedRef.current) return;
 
     if (writeTimer.current) clearTimeout(writeTimer.current);
@@ -243,6 +268,7 @@ export function useCloudSync({
         notes: notes.map(cleanNote),
         sightings: sightings.map(cleanSighting),
         checklists: checklists.map(cleanChecklist),
+        events: events.map(cleanEvent),
         updatedAt: Date.now(),
       }).catch(() => {
         // Запись не удалась — сбрасываем подпись, попробуем при следующем
@@ -254,7 +280,7 @@ export function useCloudSync({
     return () => {
       if (writeTimer.current) clearTimeout(writeTimer.current);
     };
-  }, [tasks, notes, sightings, checklists, user]);
+  }, [tasks, notes, sightings, checklists, events, user]);
 
   // --- Подписка на общий («официальный») календарь админа ---
   // Работает независимо от входа: документ доступен на чтение всем.
