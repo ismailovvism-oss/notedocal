@@ -1475,8 +1475,15 @@ button {
   margin-bottom: 14px;
 }
 .ne-facets-spacer { flex: 1; }
-.ne-facets-group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ne-facets-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.ne-facets-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.ne-facets-ic { font-size: 14px; line-height: 1; }
 .ne-chip {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1487,6 +1494,22 @@ button {
   cursor: pointer;
 }
 .ne-chip.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+/* Иконочная кнопка (квадратная, только эмодзи). */
+.ne-ic { padding: 5px 9px; font-size: 15px; line-height: 1; }
+/* Кнопка «скрыть из списка»: перечёркнута, когда фильтр включён. */
+.ne-hide { position: relative; }
+.ne-hide.off { opacity: 0.5; }
+.ne-hide.off::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 50%;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--danger);
+  transform: rotate(-14deg);
+}
 
 /* Три колонки: папки | центр | теги. На телефоне складываются в стопку. */
 .ne-3 { display: flex; flex-direction: column; gap: 14px; }
@@ -1510,9 +1533,17 @@ button {
 .ne-panel-head:hover .ne-panel-chev { color: var(--text); }
 .ne-panel-body { padding: 0 12px 12px; }
 .ne-main { flex: 1; min-width: 0; }
-@media (min-width: 760px) {
+/* Когда хватает ширины — деревья становятся боковыми колонками.
+   Раздел выходит за пределы узкого мобильного контейнера (full-bleed),
+   чтобы на планшете/ПК было место для трёх колонок. */
+@media (min-width: 680px) {
+  .ne {
+    width: min(1180px, calc(100vw - 32px));
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
   .ne-3 { flex-direction: row; align-items: flex-start; gap: 16px; }
-  .ne-panel { width: 230px; flex: none; }
+  .ne-panel { width: 210px; flex: none; }
   .ne-panel-body { max-height: 70vh; overflow: auto; }
 }
 .ne-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 10px; }
