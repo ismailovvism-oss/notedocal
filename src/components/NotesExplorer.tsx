@@ -126,22 +126,42 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
         <h2>Заметки</h2>
       </div>
 
-      {/* Фильтры центрального списка + задел под фасеты/MOC */}
+      {/* Панель управления: показ деревьев + фильтры центра + задел под фасеты/MOC */}
       <div className="ne-facets">
-        <button
-          className={`ne-chip ${hideFolders ? 'on' : ''}`}
-          onClick={() => setHideFolders((v) => !v)}
-          title="Не показывать папки в центральном списке"
-        >
-          {hideFolders ? 'Папки скрыты' : 'Скрыть папки'}
-        </button>
-        <button
-          className={`ne-chip ${hideTags ? 'on' : ''}`}
-          onClick={() => setHideTags((v) => !v)}
-          title="Не показывать теги в центральном списке"
-        >
-          {hideTags ? 'Теги скрыты' : 'Скрыть теги'}
-        </button>
+        <span className="ne-facets-group">
+          <span className="ne-facets-label">Деревья</span>
+          <button
+            className={`ne-chip ${!leftClosed ? 'on' : ''}`}
+            onClick={() => setLeftClosed((v) => !v)}
+            title="Показать/скрыть дерево папок"
+          >
+            🗂 Папки
+          </button>
+          <button
+            className={`ne-chip ${!rightClosed ? 'on' : ''}`}
+            onClick={() => setRightClosed((v) => !v)}
+            title="Показать/скрыть дерево тегов"
+          >
+            🏷 Теги
+          </button>
+        </span>
+        <span className="ne-facets-group">
+          <span className="ne-facets-label">В списке</span>
+          <button
+            className={`ne-chip ${hideFolders ? 'on' : ''}`}
+            onClick={() => setHideFolders((v) => !v)}
+            title="Не показывать папки в центральном списке"
+          >
+            {hideFolders ? 'Папки скрыты' : 'Скрыть папки'}
+          </button>
+          <button
+            className={`ne-chip ${hideTags ? 'on' : ''}`}
+            onClick={() => setHideTags((v) => !v)}
+            title="Не показывать теги в центральном списке"
+          >
+            {hideTags ? 'Теги скрыты' : 'Скрыть теги'}
+          </button>
+        </span>
         <span className="ne-facets-spacer" />
         <span className="muted small">Фасеты · MOC — скоро</span>
       </div>
@@ -332,17 +352,18 @@ function TreePanel({
   onToggleExpand: (id: string) => void;
   onSelect: (trail: string[]) => void;
 }) {
+  if (collapsed) return null;
   return (
-    <aside className={`ne-panel ${collapsed ? 'collapsed' : ''}`}>
-      <button className="ne-panel-head" onClick={onToggleCollapse}>
-        <span className="ne-panel-chev">{collapsed ? '▸' : '▾'}</span> {title}
+    <aside className="ne-panel">
+      <button className="ne-panel-head" onClick={onToggleCollapse} title="Свернуть">
+        <span className="ne-panel-title">{title}</span>
+        <span className="ne-panel-chev">✕</span>
       </button>
-      {!collapsed && (
-        <div className="ne-panel-body">
-          {roots.length === 0 ? (
-            <span className="muted small">пусто</span>
-          ) : (
-            roots.map((r) => (
+      <div className="ne-panel-body">
+        {roots.length === 0 ? (
+          <span className="muted small">пусто</span>
+        ) : (
+          roots.map((r) => (
               <TreeNode
                 key={r.id}
                 id={r.id}
@@ -354,11 +375,10 @@ function TreePanel({
                 expanded={expanded}
                 onToggleExpand={onToggleExpand}
                 onSelect={onSelect}
-              />
-            ))
-          )}
-        </div>
-      )}
+            />
+          ))
+        )}
+      </div>
     </aside>
   );
 }

@@ -1475,6 +1475,8 @@ button {
   margin-bottom: 14px;
 }
 .ne-facets-spacer { flex: 1; }
+.ne-facets-group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ne-facets-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
 .ne-chip {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1503,13 +1505,14 @@ button {
   text-align: left;
   cursor: pointer;
 }
-.ne-panel-chev { color: var(--muted); font-size: 11px; width: 12px; }
+.ne-panel-title { flex: 1; min-width: 0; }
+.ne-panel-chev { color: var(--muted); font-size: 13px; }
+.ne-panel-head:hover .ne-panel-chev { color: var(--text); }
 .ne-panel-body { padding: 0 12px 12px; }
 .ne-main { flex: 1; min-width: 0; }
 @media (min-width: 760px) {
   .ne-3 { flex-direction: row; align-items: flex-start; gap: 16px; }
   .ne-panel { width: 230px; flex: none; }
-  .ne-panel.collapsed { width: auto; }
   .ne-panel-body { max-height: 70vh; overflow: auto; }
 }
 .ne-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 10px; }
