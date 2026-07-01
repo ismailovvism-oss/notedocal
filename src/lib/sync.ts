@@ -71,15 +71,14 @@ function partSig(l: { id: string; updatedAt: number; deleted?: boolean }[]): str
     .join('|');
 }
 
-/** Подпись пользовательского документа. */
+/** Подпись пользовательского документа (без заметок — они в подколлекции). */
 function sig(
   tasks: Task[],
-  notes: Note[],
   sightings: MoonSighting[],
   checklists: Checklist[],
   events: CalEvent[],
 ): string {
-  return `${partSig(tasks)}//${partSig(notes)}//${partSig(sightings)}//${partSig(checklists)}//${partSig(events)}`;
+  return `${partSig(tasks)}//${partSig(sightings)}//${partSig(checklists)}//${partSig(events)}`;
 }
 
 /** Привести задачу к виду без undefined (Firestore не принимает undefined). */
@@ -175,6 +174,77 @@ function cleanChecklist(c: Checklist): Checklist {
   };
 }
 
+/**
+ * Синхронизация одной подколлекции `users/{uid}/{path}` по документу на запись.
+ * Читает всю подколлекцию (onSnapshot), сливает с локальным (LWW по id) и пишет
+ * только изменённые записи (дифф по подписи updatedAt:deleted), батчами.
+ * Так документ `users/{uid}` не раздувается (лимит Firestore 1 МБ).
+ */
+function useCollectionSync<T extends { id: string; updatedAt: number; deleted?: boolean }>(
+  user: User | null,
+  path: string,
+  items: T[],
+  setItems: React.Dispatch<React.SetStateAction<T[]>>,
+  clean: (x: T) => T,
+): void {
+  const syncedRef = useRef<Map<string, string>>(new Map());
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const isig = (x: T) => `${x.updatedAt}:${x.deleted ? 1 : 0}`;
+
+  useEffect(() => {
+    if (!firebaseEnabled || !db || !user) return;
+    syncedRef.current = new Map();
+    const col = collection(db, 'users', user.uid, path);
+    return onSnapshot(
+      col,
+      (snap) => {
+        const cloud = snap.docs.map((d) => d.data() as T);
+        const m = syncedRef.current;
+        for (const r of cloud) m.set(r.id, isig(r));
+        setItems(mergeById(cloud, itemsRef.current));
+      },
+      () => {
+        /* нет доступа/сети — оставляем локальное */
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, path, setItems]);
+
+  useEffect(() => {
+    if (!firebaseEnabled || !db || !user) return;
+    const m = syncedRef.current;
+    const changed = items.filter((r) => m.get(r.id) !== isig(r));
+    if (changed.length === 0) return;
+
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      const col = collection(db!, 'users', user.uid, path);
+      const chunks: T[][] = [];
+      for (let i = 0; i < changed.length; i += 450) chunks.push(changed.slice(i, i + 450));
+      Promise.all(
+        chunks.map((chunk) => {
+          const batch = writeBatch(db!);
+          for (const r of chunk) batch.set(doc(col, r.id), clean(r));
+          return batch.commit();
+        }),
+      )
+        .then(() => {
+          for (const r of changed) m.set(r.id, isig(r));
+        })
+        .catch(() => {
+          /* повторим при следующем изменении */
+        });
+    }, 600);
+
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, user, path]);
+}
+
 export function useCloudSync({
   tasks,
   setTasks,
@@ -198,26 +268,21 @@ export function useCloudSync({
 
   const isAdmin = !!user?.email && user.email === ADMIN_EMAIL;
 
+  // Заметки и связи — в подколлекциях users/{uid}/{notes,relations}.
+  useCollectionSync(user, 'notes', notes, setNotes, cleanNote);
+  useCollectionSync(user, 'relations', relations, setRelations, cleanRelation);
+
   // Свежие значения для использования внутри колбэков подписки без переподписки.
   const tasksRef = useRef(tasks);
-  const notesRef = useRef(notes);
   const sightingsRef = useRef(sightings);
   const checklistsRef = useRef(checklists);
   const eventsRef = useRef(events);
-  const relationsRef = useRef(relations);
   const adminRef = useRef(adminSightings);
   tasksRef.current = tasks;
-  notesRef.current = notes;
   sightingsRef.current = sightings;
   checklistsRef.current = checklists;
   eventsRef.current = events;
-  relationsRef.current = relations;
   adminRef.current = adminSightings;
-
-  // Пооперационная синхронизация подколлекции связей: карта id -> подпись
-  // последнего синхронизированного состояния, чтобы писать только изменённое.
-  const relSyncedRef = useRef<Map<string, string>>(new Map());
-  const relWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Подпись последних синхронизированных данных — чтобы не зацикливать
   // «получили из облака → записали обратно».
@@ -234,10 +299,7 @@ export function useCloudSync({
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setStatus(u ? 'syncing' : 'signed-out');
-      if (!u) {
-        lastSyncedRef.current = '';
-        relSyncedRef.current = new Map();
-      }
+      if (!u) lastSyncedRef.current = '';
     });
   }, []);
 
@@ -251,27 +313,23 @@ export function useCloudSync({
         const data = snap.data() as
           | {
               tasks?: Task[];
-              notes?: Note[];
               sightings?: MoonSighting[];
               checklists?: Checklist[];
               events?: CalEvent[];
             }
           | undefined;
         const cloudTasks = data?.tasks ?? [];
-        const cloudNotes = data?.notes ?? [];
         const cloudSightings = data?.sightings ?? [];
         const cloudChecklists = data?.checklists ?? [];
         const cloudEvents = data?.events ?? [];
 
         // Сливаем облако с текущими локальными данными (LWW).
         const mergedTasks = mergeById(cloudTasks, tasksRef.current);
-        const mergedNotes = mergeById(cloudNotes, notesRef.current);
         const mergedSightings = mergeById(cloudSightings, sightingsRef.current);
         const mergedChecklists = mergeById(cloudChecklists, checklistsRef.current);
         const mergedEvents = mergeById(cloudEvents, eventsRef.current);
 
         setTasks(mergedTasks);
-        setNotes(mergedNotes);
         setSightings(mergedSightings);
         setChecklists(mergedChecklists);
         setEvents(mergedEvents);
@@ -279,7 +337,7 @@ export function useCloudSync({
         // Помечаем как синхронизированное состояние облака. Если после слияния
         // у нас есть более новые локальные данные, эффект записи ниже их
         // дольёт (его подпись будет отличаться от облачной).
-        lastSyncedRef.current = sig(cloudTasks, cloudNotes, cloudSightings, cloudChecklists, cloudEvents);
+        lastSyncedRef.current = sig(cloudTasks, cloudSightings, cloudChecklists, cloudEvents);
         // Вошёл и есть сеть → синхронизировано. Подробности «кэш/сервер»
         // пользователю не важны и только путают (кружок «висел»).
         const online = typeof navigator === 'undefined' || navigator.onLine;
@@ -288,12 +346,12 @@ export function useCloudSync({
       () => setStatus('offline'),
     );
     return unsub;
-  }, [user, setTasks, setNotes, setSightings, setChecklists, setEvents]);
+  }, [user, setTasks, setSightings, setChecklists, setEvents]);
 
   // --- Выгрузка локальных изменений в облако (с дебаунсом) ---
   useEffect(() => {
     if (!firebaseEnabled || !db || !user) return;
-    const cur = sig(tasks, notes, sightings, checklists, events);
+    const cur = sig(tasks, sightings, checklists, events);
     if (cur === lastSyncedRef.current) return;
 
     if (writeTimer.current) clearTimeout(writeTimer.current);
@@ -302,7 +360,6 @@ export function useCloudSync({
       const ref = doc(db!, 'users', user.uid);
       setDoc(ref, {
         tasks: tasks.map(cleanTask),
-        notes: notes.map(cleanNote),
         sightings: sightings.map(cleanSighting),
         checklists: checklists.map(cleanChecklist),
         events: events.map(cleanEvent),
@@ -317,61 +374,7 @@ export function useCloudSync({
     return () => {
       if (writeTimer.current) clearTimeout(writeTimer.current);
     };
-  }, [tasks, notes, sightings, checklists, events, user]);
-
-  // --- Подписка на подколлекцию связей users/{uid}/relations ---
-  useEffect(() => {
-    if (!firebaseEnabled || !db || !user) return;
-    const col = collection(db, 'users', user.uid, 'relations');
-    const unsub = onSnapshot(
-      col,
-      (snap) => {
-        const cloud = snap.docs.map((d) => d.data() as Relation);
-        const map = relSyncedRef.current;
-        for (const r of cloud) map.set(r.id, `${r.updatedAt}:${r.deleted ? 1 : 0}`);
-        setRelations(mergeById(cloud, relationsRef.current));
-      },
-      () => {
-        /* нет доступа/сети — оставляем локальное */
-      },
-    );
-    return unsub;
-  }, [user, setRelations]);
-
-  // --- Выгрузка изменённых связей (по одному документу, с дебаунсом) ---
-  useEffect(() => {
-    if (!firebaseEnabled || !db || !user) return;
-    const map = relSyncedRef.current;
-    const changed = relations.filter(
-      (r) => map.get(r.id) !== `${r.updatedAt}:${r.deleted ? 1 : 0}`,
-    );
-    if (changed.length === 0) return;
-
-    if (relWriteTimer.current) clearTimeout(relWriteTimer.current);
-    relWriteTimer.current = setTimeout(() => {
-      const col = collection(db!, 'users', user.uid, 'relations');
-      // Пишем пачками (лимит батча Firestore — 500 операций).
-      const chunks: Relation[][] = [];
-      for (let i = 0; i < changed.length; i += 450) chunks.push(changed.slice(i, i + 450));
-      Promise.all(
-        chunks.map((chunk) => {
-          const batch = writeBatch(db!);
-          for (const r of chunk) batch.set(doc(col, r.id), cleanRelation(r));
-          return batch.commit();
-        }),
-      )
-        .then(() => {
-          for (const r of changed) map.set(r.id, `${r.updatedAt}:${r.deleted ? 1 : 0}`);
-        })
-        .catch(() => {
-          /* повторим при следующем изменении */
-        });
-    }, 600);
-
-    return () => {
-      if (relWriteTimer.current) clearTimeout(relWriteTimer.current);
-    };
-  }, [relations, user]);
+  }, [tasks, sightings, checklists, events, user]);
 
   // --- Подписка на общий («официальный») календарь админа ---
   // Работает независимо от входа: документ доступен на чтение всем.
