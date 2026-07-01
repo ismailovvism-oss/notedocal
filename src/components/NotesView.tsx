@@ -146,6 +146,8 @@ export function NoteModal({
   const [date, setDate] = useState(note?.date ?? '');
   const [type, setType] = useState<NoteType>(note?.type ?? 'note');
   const [preview, setPreview] = useState(false);
+  // Существующая заметка открывается для чтения, новая — сразу в редакторе.
+  const [mode, setMode] = useState<'read' | 'edit'>(note ? 'read' : 'edit');
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   function surround(before: string, after = before) {
@@ -184,11 +186,60 @@ export function NoteModal({
     requestAnimationFrame(() => ta.focus());
   }
 
+  // --- Режим чтения: красивый отрендеренный вид ---
+  if (mode === 'read' && note) {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal modal-note" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head">
+            <div className="note-read-meta">
+              {type !== 'note' && (
+                <span className={`type-badge type-${type}`}>{TYPE_BADGE[type]}</span>
+              )}
+              {date && <span className="chip">{fromKey(date).toLocaleDateString('ru-RU')}</span>}
+            </div>
+            <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
+              ✕
+            </button>
+          </div>
+
+          <h2 className="note-read-title">{title || 'Без названия'}</h2>
+
+          {body.trim() ? (
+            <div className="md note-read-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+          ) : (
+            <p className="muted note-read-empty">Пусто. Нажмите «Редактировать», чтобы добавить текст.</p>
+          )}
+
+          {relations && <RelationsRead note={note} allNotes={allNotes} relations={relations} />}
+
+          <div className="modal-foot modal-foot-split">
+            {onDelete ? (
+              <button className="btn cl-danger" onClick={onDelete}>
+                Удалить
+              </button>
+            ) : (
+              <span />
+            )}
+            <button className="btn btn-primary" onClick={() => setMode('edit')}>
+              ✎ Редактировать
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-note" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div className="md-tabs">
+            {note && (
+              <button className="md-tab" onClick={() => setMode('read')} title="Вернуться к чтению">
+                ‹ Чтение
+              </button>
+            )}
             <button className={`md-tab ${!preview ? 'active' : ''}`} onClick={() => setPreview(false)}>
               Текст
             </button>
@@ -418,6 +469,47 @@ function RelationsSection({
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+function RelationsRead({
+  note,
+  allNotes,
+  relations,
+}: {
+  note: Note;
+  allNotes: Note[];
+  relations: Relation[];
+}) {
+  const byId = useMemo(() => new Map(allNotes.map((n) => [n.id, n])), [allNotes]);
+  const titleOf = (id: string) => byId.get(id)?.title || '(без названия)';
+
+  const groups: [string, string[]][] = [
+    ['Родители', getParents(note.id, relations).filter((id) => byId.has(id)).map(titleOf)],
+    ['Подзаметки', getChildren(note.id, relations).filter((id) => byId.has(id)).map(titleOf)],
+    ['Теги', getTags(note.id, relations).filter((id) => byId.has(id)).map(titleOf)],
+    ['Ссылки', getLinks(note.id, relations).filter((id) => byId.has(id)).map(titleOf)],
+    [
+      'Беклинки',
+      getBacklinks(note.id, relations).filter((b) => byId.has(b.from)).map((b) => titleOf(b.from)),
+    ],
+  ];
+  const shown = groups.filter(([, arr]) => arr.length > 0);
+  if (shown.length === 0) return null;
+
+  return (
+    <div className="note-read-rel">
+      {shown.map(([label, arr]) => (
+        <div key={label} className="nrr-group">
+          <span className="nrr-label">{label}</span>
+          {arr.map((t, i) => (
+            <span key={i} className="nrr-chip">
+              {t}
+            </span>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
