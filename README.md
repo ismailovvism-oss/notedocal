@@ -86,8 +86,9 @@ Linux и Android. Чтобы данные были **едины** на всех 
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Приватные данные пользователя
-    match /users/{uid} {
+    // Приватные данные пользователя: сам документ и все подколлекции
+    // (users/{uid}/relations/*, в будущем users/{uid}/notes/* и т.п.)
+    match /users/{uid}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
     // Календарь Tawhiid: читают все (в т.ч. без входа), пишет только админ

@@ -15,16 +15,44 @@ export interface Task {
   deleted?: boolean;
 }
 
-/** Текстовая заметка. */
+/** Роль заметки в системе организации. Любая заметка — это Note; роль задаётся
+ *  типом, а не отдельной сущностью. */
+export type NoteType = 'note' | 'folder' | 'tag' | 'moc' | 'concept' | 'source';
+
+/** Текстовая заметка (универсальная единица знаний). */
 export interface Note {
   id: string;
   title: string;
   body: string;
+  /** Роль заметки. Для старых заметок без поля — считается 'note'. */
+  type?: NoteType;
   /** Необязательная привязка к дню (YYYY-MM-DD). */
   date: string | null;
   createdAt: number;
   updatedAt: number;
   /** Мягкое удаление (надгробие) — чтобы удаление доезжало до других устройств. */
+  deleted?: boolean;
+}
+
+/** Тип связи между заметками:
+ *  'child' — подзаметка/иерархия (заменяет папки);
+ *  'tag'   — заметка помечена другой заметкой-тегом (даёт обычные и иерарх. теги);
+ *  'link'  — обычная смысловая ссылка. */
+export type RelationType = 'child' | 'tag' | 'link';
+
+/** Связь между двумя заметками (отдельная сущность). */
+export interface Relation {
+  id: string;
+  /** id заметки-источника. */
+  from: string;
+  /** id заметки-цели. */
+  to: string;
+  type: RelationType;
+  /** Порядок среди однотипных связей (для сортировки подзаметок). */
+  position?: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Мягкое удаление (надгробие) — для синхронизации. */
   deleted?: boolean;
 }
 

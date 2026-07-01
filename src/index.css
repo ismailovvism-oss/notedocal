@@ -1421,3 +1421,46 @@ button {
   background: var(--surface);
 }
 .modal-foot-split { justify-content: space-between; align-items: center; }
+
+/* ---------- Тип заметки и связи ---------- */
+.type-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.type-folder { background: color-mix(in srgb, var(--normal) 18%, transparent); color: var(--normal); }
+.type-tag { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.type-moc { background: color-mix(in srgb, var(--note) 20%, transparent); color: var(--note); }
+.type-concept { background: color-mix(in srgb, var(--high) 16%, transparent); color: var(--high); }
+.type-source { background: var(--surface-2); color: var(--text); }
+
+.rel-section {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rel-title { font-size: 12px; }
+.rel-error { color: var(--danger); margin: 0; }
+.rel-group { display: flex; flex-direction: column; gap: 4px; }
+.rel-group-head { font-size: 12px; font-weight: 600; color: var(--muted); }
+.rel-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.rel-name { flex: 1; min-width: 0; word-break: break-word; }
+.rel-del { font-size: 12px; padding: 2px 4px; }
+.rel-add { font-size: 13px; padding: 6px 8px; }

@@ -18,10 +18,18 @@ import {
   signOut as fbSignOut,
   type User,
 } from 'firebase/auth';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
-import type { CalEvent, Checklist, ChecklistItem, MoonSighting, Note, Task } from '../types';
+import type {
+  CalEvent,
+  Checklist,
+  ChecklistItem,
+  MoonSighting,
+  Note,
+  Relation,
+  Task,
+} from '../types';
 
 export type SyncStatus = 'disabled' | 'signed-out' | 'syncing' | 'synced' | 'offline';
 
@@ -36,6 +44,9 @@ interface Params {
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
   events: CalEvent[];
   setEvents: React.Dispatch<React.SetStateAction<CalEvent[]>>;
+  /** Связи между заметками (подколлекция users/{uid}/relations). */
+  relations: Relation[];
+  setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
   /** Официальный календарь наблюдений (общий документ). */
   adminSightings: MoonSighting[];
   setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
@@ -90,10 +101,24 @@ function cleanNote(n: Note): Note {
     id: n.id,
     title: n.title,
     body: n.body,
+    type: n.type ?? 'note',
     date: n.date ?? null,
     createdAt: n.createdAt,
     updatedAt: n.updatedAt ?? n.createdAt ?? 0,
     deleted: n.deleted ?? false,
+  };
+}
+
+function cleanRelation(r: Relation): Relation {
+  return {
+    id: r.id,
+    from: r.from,
+    to: r.to,
+    type: r.type,
+    position: r.position ?? 0,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.createdAt ?? 0,
+    deleted: r.deleted ?? false,
   };
 }
 
@@ -161,6 +186,8 @@ export function useCloudSync({
   setChecklists,
   events,
   setEvents,
+  relations,
+  setRelations,
   adminSightings,
   setAdminSightings,
 }: Params): Result {
@@ -177,13 +204,20 @@ export function useCloudSync({
   const sightingsRef = useRef(sightings);
   const checklistsRef = useRef(checklists);
   const eventsRef = useRef(events);
+  const relationsRef = useRef(relations);
   const adminRef = useRef(adminSightings);
   tasksRef.current = tasks;
   notesRef.current = notes;
   sightingsRef.current = sightings;
   checklistsRef.current = checklists;
   eventsRef.current = events;
+  relationsRef.current = relations;
   adminRef.current = adminSightings;
+
+  // Пооперационная синхронизация подколлекции связей: карта id -> подпись
+  // последнего синхронизированного состояния, чтобы писать только изменённое.
+  const relSyncedRef = useRef<Map<string, string>>(new Map());
+  const relWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Подпись последних синхронизированных данных — чтобы не зацикливать
   // «получили из облака → записали обратно».
@@ -200,7 +234,10 @@ export function useCloudSync({
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setStatus(u ? 'syncing' : 'signed-out');
-      if (!u) lastSyncedRef.current = '';
+      if (!u) {
+        lastSyncedRef.current = '';
+        relSyncedRef.current = new Map();
+      }
     });
   }, []);
 
@@ -281,6 +318,60 @@ export function useCloudSync({
       if (writeTimer.current) clearTimeout(writeTimer.current);
     };
   }, [tasks, notes, sightings, checklists, events, user]);
+
+  // --- Подписка на подколлекцию связей users/{uid}/relations ---
+  useEffect(() => {
+    if (!firebaseEnabled || !db || !user) return;
+    const col = collection(db, 'users', user.uid, 'relations');
+    const unsub = onSnapshot(
+      col,
+      (snap) => {
+        const cloud = snap.docs.map((d) => d.data() as Relation);
+        const map = relSyncedRef.current;
+        for (const r of cloud) map.set(r.id, `${r.updatedAt}:${r.deleted ? 1 : 0}`);
+        setRelations(mergeById(cloud, relationsRef.current));
+      },
+      () => {
+        /* нет доступа/сети — оставляем локальное */
+      },
+    );
+    return unsub;
+  }, [user, setRelations]);
+
+  // --- Выгрузка изменённых связей (по одному документу, с дебаунсом) ---
+  useEffect(() => {
+    if (!firebaseEnabled || !db || !user) return;
+    const map = relSyncedRef.current;
+    const changed = relations.filter(
+      (r) => map.get(r.id) !== `${r.updatedAt}:${r.deleted ? 1 : 0}`,
+    );
+    if (changed.length === 0) return;
+
+    if (relWriteTimer.current) clearTimeout(relWriteTimer.current);
+    relWriteTimer.current = setTimeout(() => {
+      const col = collection(db!, 'users', user.uid, 'relations');
+      // Пишем пачками (лимит батча Firestore — 500 операций).
+      const chunks: Relation[][] = [];
+      for (let i = 0; i < changed.length; i += 450) chunks.push(changed.slice(i, i + 450));
+      Promise.all(
+        chunks.map((chunk) => {
+          const batch = writeBatch(db!);
+          for (const r of chunk) batch.set(doc(col, r.id), cleanRelation(r));
+          return batch.commit();
+        }),
+      )
+        .then(() => {
+          for (const r of changed) map.set(r.id, `${r.updatedAt}:${r.deleted ? 1 : 0}`);
+        })
+        .catch(() => {
+          /* повторим при следующем изменении */
+        });
+    }, 600);
+
+    return () => {
+      if (relWriteTimer.current) clearTimeout(relWriteTimer.current);
+    };
+  }, [relations, user]);
 
   // --- Подписка на общий («официальный») календарь админа ---
   // Работает независимо от входа: документ доступен на чтение всем.
