@@ -926,9 +926,84 @@ button {
   gap: 1px;
 }
 .cl-item {
+  padding: 1px 0;
+}
+.cl-item-row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
+}
+.cl-act,
+.cl-del {
+  flex: none;
+  font-size: 13px;
+  padding: 2px 4px;
+  display: none;
+}
+/* Действия строки видны только при наведении/фокусе — текст занимает ширину */
+.cl-item-row:hover .cl-act,
+.cl-item-row:hover .cl-del,
+.cl-item-row:focus-within .cl-act,
+.cl-item-row:focus-within .cl-del {
+  display: inline-flex;
+}
+/* Подзадачи — с отступом и полосой слева */
+.cl-subitems {
+  list-style: none;
+  margin: 1px 0 2px;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--border);
+  margin-left: 8px;
+}
+.cl-subitem .cl-check {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+}
+.cl-subitem .cl-item-text {
+  font-size: 12px;
+}
+.cl-subadd {
+  padding-left: 22px;
+}
+/* Прицеплённая заметка */
+.cl-note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-left: 25px;
+  margin: 1px 0 3px;
+}
+.cl-note-chip {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--note);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cl-note-detach {
+  font-size: 11px;
+  padding: 2px 4px;
+  opacity: 0.5;
+}
+.cl-note-body {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.cl-note-select {
+  margin: 3px 0 3px 25px;
+  width: calc(100% - 25px);
+  font-size: 13px;
+  padding: 6px 8px;
 }
 .cl-check {
   flex: none;
@@ -962,14 +1037,6 @@ button {
 .cl-item.done .cl-item-text {
   text-decoration: line-through;
   color: var(--muted);
-}
-.cl-del {
-  font-size: 12px;
-  padding: 2px 4px;
-  opacity: 0.4;
-}
-.cl-del:hover {
-  opacity: 1;
 }
 .cl-add-input {
   width: 100%;

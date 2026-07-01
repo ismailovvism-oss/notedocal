@@ -117,6 +117,12 @@ function cleanChecklist(c: Checklist): Checklist {
       id: it.id,
       text: it.text ?? '',
       done: !!it.done,
+      noteId: it.noteId ?? null,
+      subitems: (it.subitems ?? []).map((s) => ({
+        id: s.id,
+        text: s.text ?? '',
+        done: !!s.done,
+      })),
     })),
     createdAt: c.createdAt,
     updatedAt: c.updatedAt ?? c.createdAt ?? 0,
