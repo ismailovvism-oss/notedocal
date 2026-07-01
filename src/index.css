@@ -1020,7 +1020,7 @@ button {
   justify-content: center;
   padding: 0;
 }
-.cl-item.done .cl-check {
+.cl-item.done > .cl-item-row > .cl-check {
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -1034,7 +1034,7 @@ button {
   padding: 4px 0;
   outline: none;
 }
-.cl-item.done .cl-item-text {
+.cl-item.done > .cl-item-row > .cl-item-text {
   text-decoration: line-through;
   color: var(--muted);
 }
@@ -1068,4 +1068,83 @@ button {
   font-size: 13px;
   padding: 6px 8px;
   resize: vertical;
+}
+
+/* ---------- Бейджи пункта ---------- */
+.cl-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cl-subcount {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+/* ---------- Окно задачи (модалка) ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 12px calc(24px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 520px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.modal-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.modal-row .field {
+  flex: 1;
+  min-width: 140px;
+}
+.modal-subs {
+  margin-top: 4px;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+.cl-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Checklist, MoonSighting, Note, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
+import { useReminders } from './lib/reminders';
 import { formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
 import { ChecklistBoard } from './components/ChecklistBoard';
@@ -44,6 +45,8 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useReminders(checklists);
 
   const sync = useCloudSync({
     tasks,

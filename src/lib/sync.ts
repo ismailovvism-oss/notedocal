@@ -21,7 +21,7 @@ import {
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
-import type { Checklist, MoonSighting, Note, Task } from '../types';
+import type { Checklist, ChecklistItem, MoonSighting, Note, Task } from '../types';
 
 export type SyncStatus = 'disabled' | 'signed-out' | 'syncing' | 'synced' | 'offline';
 
@@ -108,23 +108,25 @@ function cleanSighting(s: MoonSighting): MoonSighting {
   };
 }
 
+function cleanItem(it: ChecklistItem): ChecklistItem {
+  return {
+    id: it.id,
+    text: it.text ?? '',
+    done: !!it.done,
+    desc: it.desc ?? '',
+    date: it.date ?? null,
+    remindAt: it.remindAt ?? null,
+    noteId: it.noteId ?? null,
+    subitems: (it.subitems ?? []).map(cleanItem),
+  };
+}
+
 function cleanChecklist(c: Checklist): Checklist {
   return {
     id: c.id,
     title: c.title ?? '',
     date: c.date ?? null,
-    items: (c.items ?? []).map((it) => ({
-      id: it.id,
-      text: it.text ?? '',
-      done: !!it.done,
-      desc: it.desc ?? '',
-      noteId: it.noteId ?? null,
-      subitems: (it.subitems ?? []).map((s) => ({
-        id: s.id,
-        text: s.text ?? '',
-        done: !!s.done,
-      })),
-    })),
+    items: (c.items ?? []).map(cleanItem),
     createdAt: c.createdAt,
     updatedAt: c.updatedAt ?? c.createdAt ?? 0,
     deleted: c.deleted ?? false,
