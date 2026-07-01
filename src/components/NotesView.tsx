@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { Note } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { fromKey } from '../lib/dates';
+import { renderMarkdown } from '../lib/markdown';
 
 interface Props {
   notes: Note[];
@@ -11,33 +12,29 @@ interface Props {
 
 export function NotesView({ notes, setNotes, fixedDate }: Props) {
   const { add, update, remove } = useListActions(setNotes);
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
-  const [date, setDate] = useState('');
-  const [editing, setEditing] = useState<string | null>(null);
+  // null — закрыто, 'new' — новая заметка, иначе редактируемая.
+  const [editing, setEditing] = useState<Note | 'new' | null>(null);
 
   const list = useMemo(() => {
     const base = fixedDate ? notes.filter((n) => n.date === fixedDate) : notes;
     return [...base].sort((a, b) => b.updatedAt - a.updatedAt);
   }, [notes, fixedDate]);
 
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const t = title.trim();
-    const b = body.trim();
-    if (!t && !b) return;
+  function save(patch: Pick<Note, 'title' | 'body' | 'date'>) {
     const now = Date.now();
-    add({
-      id: uid(),
-      title: t || 'Без названия',
-      body: b,
-      date: fixedDate ?? (date || null),
-      createdAt: now,
-      updatedAt: now,
-    });
-    setTitle('');
-    setBody('');
-    setDate('');
+    if (editing && editing !== 'new') {
+      update(editing.id, { ...patch, updatedAt: now });
+    } else {
+      add({
+        id: uid(),
+        title: patch.title || 'Без названия',
+        body: patch.body,
+        date: fixedDate ?? patch.date ?? null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    setEditing(null);
   }
 
   return (
@@ -45,117 +42,216 @@ export function NotesView({ notes, setNotes, fixedDate }: Props) {
       {!fixedDate && (
         <div className="view-head">
           <h2>Заметки</h2>
-          <span className="muted">{notes.length}</span>
+          <button className="btn btn-small btn-primary" onClick={() => setEditing('new')}>
+            ＋ Заметка
+          </button>
         </div>
       )}
-
-      <form className="note-form" onSubmit={submit}>
-        <input
-          className="input"
-          placeholder="Заголовок"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <textarea
-          className="input textarea"
-          placeholder="Текст заметки…"
-          rows={3}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-        />
-        {!fixedDate && (
-          <label className="field">
-            <span className="field-label">Дата (необязательно)</span>
-            <input
-              className="input"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </label>
-        )}
-        <button className="btn btn-primary" type="submit">
-          Сохранить заметку
+      {fixedDate && (
+        <button className="btn btn-small ev-add" onClick={() => setEditing('new')}>
+          ＋ Заметка
         </button>
-      </form>
+      )}
 
       <ul className="list notes-grid">
         {list.length === 0 && <li className="empty">Заметок пока нет</li>}
         {list.map((n) => (
-          <li key={n.id} className="note-card">
-            {editing === n.id ? (
-              <NoteEditor
-                note={n}
-                onSave={(patch) => {
-                  update(n.id, { ...patch, updatedAt: Date.now() });
-                  setEditing(null);
+          <li key={n.id} className="note-card" onClick={() => setEditing(n)}>
+            <div className="note-head">
+              <h3>{n.title}</h3>
+              <button
+                className="icon-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  remove(n.id);
                 }}
-                onCancel={() => setEditing(null)}
-              />
-            ) : (
-              <>
-                <div className="note-head">
-                  <h3>{n.title}</h3>
-                  <div className="note-actions">
-                    <button className="icon-btn" onClick={() => setEditing(n.id)} aria-label="Изменить">
-                      ✎
-                    </button>
-                    <button className="icon-btn" onClick={() => remove(n.id)} aria-label="Удалить">
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                {n.body && <p className="note-body">{n.body}</p>}
-                <div className="note-foot">
-                  {n.date && <span className="chip">{fromKey(n.date).toLocaleDateString('ru-RU')}</span>}
-                  <span className="muted small">{relTime(n.updatedAt)}</span>
-                </div>
-              </>
+                aria-label="Удалить"
+              >
+                ✕
+              </button>
+            </div>
+            {n.body && (
+              <div className="md note-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(n.body) }} />
             )}
+            <div className="note-foot">
+              {n.date && <span className="chip">{fromKey(n.date).toLocaleDateString('ru-RU')}</span>}
+              <span className="muted small">{relTime(n.updatedAt)}</span>
+            </div>
           </li>
         ))}
       </ul>
+
+      {editing && (
+        <NoteModal
+          note={editing === 'new' ? null : editing}
+          fixedDate={fixedDate}
+          onSave={save}
+          onDelete={
+            editing !== 'new'
+              ? () => {
+                  remove(editing.id);
+                  setEditing(null);
+                }
+              : undefined
+          }
+          onClose={() => setEditing(null)}
+        />
+      )}
     </section>
   );
 }
 
-function NoteEditor({
+function NoteModal({
   note,
+  fixedDate,
   onSave,
-  onCancel,
+  onDelete,
+  onClose,
 }: {
-  note: Note;
-  onSave: (patch: Partial<Note>) => void;
-  onCancel: () => void;
+  note: Note | null;
+  fixedDate?: string;
+  onSave: (patch: Pick<Note, 'title' | 'body' | 'date'>) => void;
+  onDelete?: () => void;
+  onClose: () => void;
 }) {
-  const [title, setTitle] = useState(note.title);
-  const [body, setBody] = useState(note.body);
-  const [date, setDate] = useState(note.date ?? '');
+  const [title, setTitle] = useState(note?.title ?? '');
+  const [body, setBody] = useState(note?.body ?? '');
+  const [date, setDate] = useState(note?.date ?? '');
+  const [preview, setPreview] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  function surround(before: string, after = before) {
+    const ta = taRef.current;
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const sel = body.slice(s, e);
+    const next = body.slice(0, s) + before + sel + after + body.slice(e);
+    setBody(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(s + before.length, s + before.length + sel.length);
+    });
+  }
+
+  function linePrefix(prefix: string) {
+    const ta = taRef.current;
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const lineStart = body.lastIndexOf('\n', s - 1) + 1;
+    const next = body.slice(0, lineStart) + prefix + body.slice(lineStart);
+    setBody(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(s + prefix.length, s + prefix.length);
+    });
+  }
+
+  function insertCallout() {
+    const ta = taRef.current;
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const sel = body.slice(s, e) || 'текст';
+    const block = `> [!note] Заметка\n> ${sel}\n`;
+    const next = body.slice(0, s) + block + body.slice(e);
+    setBody(next);
+    requestAnimationFrame(() => ta.focus());
+  }
+
   return (
-    <div className="note-editor">
-      <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <textarea
-        className="input textarea"
-        rows={4}
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-      />
-      <label className="field">
-        <span className="field-label">Дата</span>
-        <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
-      <div className="note-actions">
-        <button
-          className="btn btn-primary"
-          onClick={() =>
-            onSave({ title: title.trim() || 'Без названия', body: body.trim(), date: date || null })
-          }
-        >
-          Сохранить
-        </button>
-        <button className="btn" onClick={onCancel}>
-          Отмена
-        </button>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-note" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="md-tabs">
+            <button className={`md-tab ${!preview ? 'active' : ''}`} onClick={() => setPreview(false)}>
+              Текст
+            </button>
+            <button className={`md-tab ${preview ? 'active' : ''}`} onClick={() => setPreview(true)}>
+              Просмотр
+            </button>
+          </div>
+          <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
+            ✕
+          </button>
+        </div>
+
+        <input
+          className="input modal-title"
+          placeholder="Заголовок"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+
+        {!preview ? (
+          <>
+            <div className="md-toolbar">
+              <button className="md-btn" title="Жирный" onClick={() => surround('**')}>
+                <b>Ж</b>
+              </button>
+              <button className="md-btn" title="Курсив" onClick={() => surround('*')}>
+                <i>К</i>
+              </button>
+              <button className="md-btn" title="Подчёркнутый" onClick={() => surround('<u>', '</u>')}>
+                <u>Ч</u>
+              </button>
+              <button className="md-btn" title="Зачёркнутый" onClick={() => surround('~~')}>
+                <s>З</s>
+              </button>
+              <span className="md-sep" />
+              <button className="md-btn" title="Заголовок" onClick={() => linePrefix('## ')}>
+                H
+              </button>
+              <button className="md-btn" title="Список" onClick={() => linePrefix('- ')}>
+                •
+              </button>
+              <button className="md-btn" title="Нумерованный" onClick={() => linePrefix('1. ')}>
+                1.
+              </button>
+              <button className="md-btn" title="Цитата" onClick={() => linePrefix('> ')}>
+                ❝
+              </button>
+              <button className="md-btn" title="Коллаут" onClick={insertCallout}>
+                💡
+              </button>
+              <button className="md-btn" title="Код" onClick={() => surround('`')}>
+                {'</>'}
+              </button>
+            </div>
+            <textarea
+              ref={taRef}
+              className="input md-editor"
+              placeholder="Текст заметки (Markdown)…"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+            />
+          </>
+        ) : (
+          <div className="md md-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+        )}
+
+        {!fixedDate && (
+          <label className="field">
+            <span className="field-label">Дата</span>
+            <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+        )}
+
+        <div className="modal-foot modal-foot-split">
+          {onDelete ? (
+            <button className="btn cl-danger" onClick={onDelete}>
+              Удалить
+            </button>
+          ) : (
+            <span />
+          )}
+          <button
+            className="btn btn-primary"
+            onClick={() => onSave({ title: title.trim() || 'Без названия', body, date: date || null })}
+          >
+            Сохранить
+          </button>
+        </div>
       </div>
     </div>
   );
