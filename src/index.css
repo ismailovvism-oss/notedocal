@@ -1464,3 +1464,93 @@ button {
 .rel-name { flex: 1; min-width: 0; word-break: break-word; }
 .rel-del { font-size: 12px; padding: 2px 4px; }
 .rel-add { font-size: 13px; padding: 6px 8px; }
+
+/* ---------- Навигатор заметок (DAG) ---------- */
+.ne-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.ne-body { display: flex; flex-direction: column; gap: 14px; }
+.ne-tree { display: none; }
+@media (min-width: 760px) {
+  .ne-body { flex-direction: row; align-items: flex-start; gap: 18px; }
+  .ne-tree {
+    display: block;
+    width: 260px;
+    flex: none;
+    border-right: 1px solid var(--border);
+    padding-right: 12px;
+    max-height: 72vh;
+    overflow: auto;
+  }
+  .ne-main { flex: 1; min-width: 0; }
+}
+.ne-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 10px; }
+.ne-crumb { border: none; background: none; color: var(--accent); padding: 2px 4px; font-size: 13px; }
+.ne-sep { color: var(--muted); }
+.ne-cur { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ne-cur-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; word-break: break-word; }
+.ne-list { display: flex; flex-direction: column; gap: 6px; }
+.ne-empty { padding: 8px 2px; margin: 0; }
+.ne-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.ne-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 14px;
+}
+.ne-title { flex: 1; min-width: 0; word-break: break-word; }
+.ne-multi { flex: none; font-size: 11px; color: var(--note); }
+.ne-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.ne-chev { flex: none; color: var(--muted); font-size: 16px; }
+.ne-add { display: flex; gap: 8px; margin-top: 14px; }
+
+.tree-row { display: flex; align-items: center; gap: 2px; }
+.tree-toggle { border: none; background: none; color: var(--muted); width: 20px; font-size: 11px; padding: 2px; }
+.tree-spacer { width: 20px; flex: none; }
+.tree-label {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.tree-label.active { background: var(--accent-soft); color: var(--accent); }
+.tree-node .tree-node { padding-left: 16px; }
+
+.ne-tags { display: flex; flex-direction: column; gap: 14px; }
+.ne-tag-head {
+  border: none;
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.ne-link { border: none; background: none; color: var(--accent); text-align: left; cursor: pointer; padding: 0; }
