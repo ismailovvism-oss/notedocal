@@ -7,6 +7,7 @@ import {
   getBacklinks,
   getChildren,
   getLinks,
+  getParents,
   getTags,
   wouldCreateCycle,
 } from '../lib/relations';
@@ -332,6 +333,7 @@ function RelationsSection({
   const exists = (id: string) => byId.has(id);
   const titleOf = (id: string) => byId.get(id)?.title || '(без названия)';
 
+  const parents = getParents(note.id, relations).filter(exists);
   const children = getChildren(note.id, relations).filter(exists);
   const tags = getTags(note.id, relations).filter(exists);
   const links = getLinks(note.id, relations).filter(exists);
@@ -364,6 +366,19 @@ function RelationsSection({
     if (r) remove(r.id);
   }
 
+  // Назначить родителя: создаётся связь parent --child--> эта заметка.
+  function addParent(parentId: string) {
+    setError('');
+    if (!parentId || parentId === note.id) return;
+    if (findRel(parentId, note.id, 'child')) return;
+    if (wouldCreateCycle(parentId, note.id, relations)) {
+      setError('Нельзя: получится цикл в иерархии.');
+      return;
+    }
+    const now = Date.now();
+    add({ id: uid(), from: parentId, to: note.id, type: 'child', position: 0, createdAt: now, updatedAt: now });
+  }
+
   const candidates = allNotes.filter((n) => n.id !== note.id);
 
   return (
@@ -371,6 +386,14 @@ function RelationsSection({
       <div className="field-label rel-title">Связи</div>
       {error && <p className="rel-error small">{error}</p>}
 
+      <RelGroup
+        label="Родители (папки)"
+        ids={parents}
+        titleOf={titleOf}
+        candidates={candidates}
+        onAdd={addParent}
+        onRemove={(pid) => removeRel(pid, note.id, 'child')}
+      />
       <RelGroup
         label="Подзаметки"
         ids={children}
