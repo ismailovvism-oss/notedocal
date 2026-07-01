@@ -13,6 +13,7 @@ export function NotesView({ notes, setNotes, fixedDate }: Props) {
   const { add, update, remove } = useListActions(setNotes);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [date, setDate] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
 
   const list = useMemo(() => {
@@ -30,12 +31,13 @@ export function NotesView({ notes, setNotes, fixedDate }: Props) {
       id: uid(),
       title: t || 'Без названия',
       body: b,
-      date: fixedDate ?? null,
+      date: fixedDate ?? (date || null),
       createdAt: now,
       updatedAt: now,
     });
     setTitle('');
     setBody('');
+    setDate('');
   }
 
   return (
@@ -61,6 +63,17 @@ export function NotesView({ notes, setNotes, fixedDate }: Props) {
           value={body}
           onChange={(e) => setBody(e.target.value)}
         />
+        {!fixedDate && (
+          <label className="field">
+            <span className="field-label">Дата (необязательно)</span>
+            <input
+              className="input"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </label>
+        )}
         <button className="btn btn-primary" type="submit">
           Сохранить заметку
         </button>
@@ -117,6 +130,7 @@ function NoteEditor({
 }) {
   const [title, setTitle] = useState(note.title);
   const [body, setBody] = useState(note.body);
+  const [date, setDate] = useState(note.date ?? '');
   return (
     <div className="note-editor">
       <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -126,8 +140,17 @@ function NoteEditor({
         value={body}
         onChange={(e) => setBody(e.target.value)}
       />
+      <label className="field">
+        <span className="field-label">Дата</span>
+        <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
       <div className="note-actions">
-        <button className="btn btn-primary" onClick={() => onSave({ title: title.trim() || 'Без названия', body: body.trim() })}>
+        <button
+          className="btn btn-primary"
+          onClick={() =>
+            onSave({ title: title.trim() || 'Без названия', body: body.trim(), date: date || null })
+          }
+        >
           Сохранить
         </button>
         <button className="btn" onClick={onCancel}>

@@ -1220,3 +1220,88 @@ button {
   display: flex;
   gap: 8px;
 }
+
+/* ---------- Дашборд «Обзор» ---------- */
+.db-range {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.db-presets {
+  display: flex;
+  gap: 6px;
+}
+.db-dates {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.db-dates .input {
+  flex: 1;
+}
+.db-days {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.db-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.db-day-date {
+  font-weight: 600;
+  text-transform: capitalize;
+  font-size: 14px;
+}
+.db-day-hijri {
+  font-size: 12px;
+  color: var(--accent);
+}
+.db-day-hijri.approx {
+  opacity: 0.7;
+  font-style: italic;
+}
+.db-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 14px;
+}
+.db-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.db-time {
+  flex: none;
+  min-width: 44px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--normal);
+}
+.db-list {
+  flex: none;
+}
+.db-task.done .db-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.db-task.done .cl-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.db-note .db-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--note);
+  flex: none;
+  margin: 0 8px;
+}
