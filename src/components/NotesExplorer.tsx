@@ -12,21 +12,34 @@ interface Props {
   setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
 }
 
-/** Навигатор заметок как DAG: заметка может входить в несколько мест. */
+// Текущий вид центра: корень структуры, узел-папка (по трейлу) или тег.
+type View = { kind: 'root' } | { kind: 'node'; trail: string[] } | { kind: 'tag'; id: string };
+
+const isNarrow = () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 759px)').matches;
+
 export function NotesExplorer({ notes, setNotes, relations, setRelations }: Props) {
   const notesActions = useListActions(setNotes);
   const relActions = useListActions(setRelations);
 
-  const [path, setPath] = useState<string[]>([]); // трейл захода (id)
+  const [view, setView] = useState<View>({ kind: 'root' });
   const [editing, setEditing] = useState<Note | null>(null);
-  const [tab, setTab] = useState<'notes' | 'tags'>('notes');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [leftClosed, setLeftClosed] = useState(isNarrow);
+  const [rightClosed, setRightClosed] = useState(true);
+  // Прятать теги / папки из центрального списка, чтобы он не загромождался.
+  const [hideTags, setHideTags] = useState(false);
+  const [hideFolders, setHideFolders] = useState(false);
 
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
-  const typeOf = (n: Note): NoteType => n.type ?? 'note';
+  const typeOf = (n?: Note): NoteType => (n?.type ?? 'note');
 
-  const currentId = path.length ? path[path.length - 1] : null;
-  const currentNote = currentId ? byId.get(currentId) : undefined;
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const cmp = (a: Note, b: Note) => {
     const af = typeOf(a) === 'folder' ? 0 : 1;
@@ -35,33 +48,62 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
     return (a.title || '').localeCompare(b.title || '');
   };
 
-  const roots = useMemo(
+  const resolve = (ids: string[]) => ids.map((id) => byId.get(id)).filter((n): n is Note => !!n);
+
+  const folderChildrenOf = (id: string) =>
+    getChildren(id, relations).filter((cid) => typeOf(byId.get(cid)) !== 'tag');
+  const tagChildrenOf = (id: string) =>
+    getChildren(id, relations).filter((cid) => typeOf(byId.get(cid)) === 'tag');
+
+  const folderRoots = useMemo(
     () =>
       notes
         .filter((n) => typeOf(n) !== 'tag' && getParents(n.id, relations).length === 0)
         .sort(cmp),
     [notes, relations],
   );
+  const tagRoots = useMemo(
+    () =>
+      notes
+        .filter(
+          (n) =>
+            typeOf(n) === 'tag' &&
+            getParents(n.id, relations).filter((p) => typeOf(byId.get(p)) === 'tag').length === 0,
+        )
+        .sort(cmp),
+    [notes, relations, byId],
+  );
 
-  const childNotes = (id: string): Note[] =>
-    getChildren(id, relations)
-      .map((cid) => byId.get(cid))
-      .filter((n): n is Note => !!n);
+  // --- Что показывает центр ---
+  const trail = view.kind === 'node' ? view.trail : [];
+  const curId = view.kind === 'node' ? trail[trail.length - 1] : null;
+  const curNote = curId ? byId.get(curId) : undefined;
 
-  const currentChildren = currentId ? childNotes(currentId) : roots;
+  let items: Note[];
+  if (view.kind === 'tag') {
+    items = resolve(getTaggedNotes(view.id, relations)).sort(cmp);
+  } else if (curId) {
+    items = resolve(getChildren(curId, relations)).sort(cmp);
+  } else {
+    items = folderRoots;
+  }
+  const visibleItems = items.filter(
+    (n) =>
+      !(hideTags && typeOf(n) === 'tag') && !(hideFolders && typeOf(n) === 'folder'),
+  );
 
   function createChild(type: NoteType) {
     const now = Date.now();
     const id = uid();
     const note: Note = { id, title: '', body: '', type, date: null, createdAt: now, updatedAt: now };
     notesActions.add(note);
-    if (currentId) {
+    if (curId) {
       relActions.add({
         id: uid(),
-        from: currentId,
+        from: curId,
         to: id,
         type: 'child',
-        position: currentChildren.length,
+        position: items.length,
         createdAt: now,
         updatedAt: now,
       });
@@ -75,94 +117,115 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
     setEditing(null);
   }
 
-  const tags = useMemo(() => notes.filter((n) => typeOf(n) === 'tag').sort(cmp), [notes]);
+  const activeFolder = view.kind === 'node' ? curId : null;
+  const activeTag = view.kind === 'tag' ? view.id : null;
 
   return (
     <section className="view ne">
       <div className="view-head">
         <h2>Заметки</h2>
-        <div className="ne-tabs">
-          <button className={`md-tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => setTab('notes')}>
-            Структура
-          </button>
-          <button className={`md-tab ${tab === 'tags' ? 'active' : ''}`} onClick={() => setTab('tags')}>
-            Теги
-          </button>
-        </div>
       </div>
 
-      {tab === 'notes' ? (
-        <div className="ne-body">
-          <aside className="ne-tree">
-            {roots.length === 0 && <span className="muted small">пусто</span>}
-            {roots.map((r) => (
-              <TreeNode
-                key={r.id}
-                id={r.id}
-                trail={[]}
-                byId={byId}
-                relations={relations}
-                currentId={currentId}
-                expanded={expanded}
-                onToggle={(id) =>
-                  setExpanded((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    return next;
-                  })
-                }
-                onNavigate={setPath}
-              />
-            ))}
-          </aside>
+      {/* Фильтры центрального списка + задел под фасеты/MOC */}
+      <div className="ne-facets">
+        <button
+          className={`ne-chip ${hideFolders ? 'on' : ''}`}
+          onClick={() => setHideFolders((v) => !v)}
+          title="Не показывать папки в центральном списке"
+        >
+          {hideFolders ? 'Папки скрыты' : 'Скрыть папки'}
+        </button>
+        <button
+          className={`ne-chip ${hideTags ? 'on' : ''}`}
+          onClick={() => setHideTags((v) => !v)}
+          title="Не показывать теги в центральном списке"
+        >
+          {hideTags ? 'Теги скрыты' : 'Скрыть теги'}
+        </button>
+        <span className="ne-facets-spacer" />
+        <span className="muted small">Фасеты · MOC — скоро</span>
+      </div>
 
-          <div className="ne-main">
-            <div className="ne-crumbs">
-              <button className="ne-crumb" onClick={() => setPath([])}>
-                Все
-              </button>
-              {path.map((id, i) => (
+      <div className="ne-3">
+        <TreePanel
+          title="Папки"
+          roots={folderRoots}
+          childrenOf={folderChildrenOf}
+          byId={byId}
+          relations={relations}
+          activeId={activeFolder}
+          collapsed={leftClosed}
+          onToggleCollapse={() => setLeftClosed((v) => !v)}
+          expanded={expanded}
+          onToggleExpand={toggleExpand}
+          onSelect={(t) => setView({ kind: 'node', trail: t })}
+        />
+
+        <div className="ne-main">
+          <div className="ne-crumbs">
+            <button className="ne-crumb" onClick={() => setView({ kind: 'root' })}>
+              Все
+            </button>
+            {view.kind === 'tag' && (
+              <>
+                <span className="ne-sep">/</span>
+                <span className="ne-crumb ne-crumb-cur"># {byId.get(view.id)?.title || '…'}</span>
+              </>
+            )}
+            {view.kind === 'node' &&
+              trail.map((id, i) => (
                 <span key={id}>
                   <span className="ne-sep">/</span>
-                  <button className="ne-crumb" onClick={() => setPath(path.slice(0, i + 1))}>
+                  <button
+                    className="ne-crumb"
+                    onClick={() => setView({ kind: 'node', trail: trail.slice(0, i + 1) })}
+                  >
                     {byId.get(id)?.title || '…'}
                   </button>
                 </span>
               ))}
-            </div>
+          </div>
 
-            {currentNote && (
-              <div className="ne-cur">
-                {typeOf(currentNote) !== 'note' && (
-                  <span className={`type-badge type-${typeOf(currentNote)}`}>
-                    {TYPE_BADGE[typeOf(currentNote)]}
-                  </span>
-                )}
-                <span className="ne-cur-title">{currentNote.title || 'Без названия'}</span>
-                <button className="icon-btn" onClick={() => setEditing(currentNote)} aria-label="Открыть">
-                  ✎
-                </button>
-              </div>
-            )}
-
-            <div className="ne-list">
-              {currentChildren.length === 0 ? (
-                <p className="muted small ne-empty">Пусто. Добавьте заметку или папку.</p>
-              ) : (
-                currentChildren.map((n) => (
-                  <Row
-                    key={n.id}
-                    note={n}
-                    typeOf={typeOf}
-                    relations={relations}
-                    onOpen={() => setEditing(n)}
-                    onEnter={() => setPath([...path, n.id])}
-                  />
-                ))
+          {curNote && (
+            <div className="ne-cur">
+              {typeOf(curNote) !== 'note' && (
+                <span className={`type-badge type-${typeOf(curNote)}`}>{TYPE_BADGE[typeOf(curNote)]}</span>
               )}
+              <span className="ne-cur-title">{curNote.title || 'Без названия'}</span>
+              <button className="icon-btn" onClick={() => setEditing(curNote)} aria-label="Открыть">
+                ✎
+              </button>
             </div>
+          )}
 
+          <div className="ne-list">
+            {visibleItems.length === 0 ? (
+              <p className="muted small ne-empty">
+                {view.kind === 'tag'
+                  ? 'Ничего не помечено этим тегом.'
+                  : items.length > 0
+                    ? 'Всё скрыто фильтрами.'
+                    : 'Пусто.'}
+              </p>
+            ) : (
+              visibleItems.map((n) => (
+                <Row
+                  key={n.id}
+                  note={n}
+                  typeOf={typeOf}
+                  relations={relations}
+                  onOpen={() => setEditing(n)}
+                  onEnter={
+                    view.kind === 'tag'
+                      ? undefined
+                      : () => setView({ kind: 'node', trail: [...trail, n.id] })
+                  }
+                />
+              ))
+            )}
+          </div>
+
+          {view.kind !== 'tag' && (
             <div className="ne-add">
               <button className="btn btn-small" onClick={() => createChild('note')}>
                 ＋ Заметка
@@ -171,37 +234,23 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
                 ＋ Папка
               </button>
             </div>
-          </div>
+          )}
         </div>
-      ) : (
-        <div className="ne-tags">
-          {tags.length === 0 && <p className="muted small">Тегов пока нет. Создайте заметку с типом «Тег».</p>}
-          {tags.map((tag) => {
-            const tagged = getTaggedNotes(tag.id, relations)
-              .map((id) => byId.get(id))
-              .filter((n): n is Note => !!n);
-            return (
-              <div key={tag.id} className="ne-tag">
-                <button className="ne-tag-head" onClick={() => setEditing(tag)}>
-                  # {tag.title || 'Без названия'}
-                  <span className="ne-count">{tagged.length}</span>
-                </button>
-                {tagged.length > 0 && (
-                  <ul className="rel-list">
-                    {tagged.map((n) => (
-                      <li key={n.id} className="rel-item">
-                        <button className="rel-name ne-link" onClick={() => setEditing(n)}>
-                          {n.title || 'Без названия'}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+
+        <TreePanel
+          title="Теги"
+          roots={tagRoots}
+          childrenOf={tagChildrenOf}
+          byId={byId}
+          relations={relations}
+          activeId={activeTag}
+          collapsed={rightClosed}
+          onToggleCollapse={() => setRightClosed((v) => !v)}
+          expanded={expanded}
+          onToggleExpand={toggleExpand}
+          onSelect={(t) => setView({ kind: 'tag', id: t[t.length - 1] })}
+        />
+      </div>
 
       {editing && (
         <NoteModal
@@ -229,14 +278,14 @@ function Row({
   onEnter,
 }: {
   note: Note;
-  typeOf: (n: Note) => NoteType;
+  typeOf: (n?: Note) => NoteType;
   relations: Relation[];
   onOpen: () => void;
-  onEnter: () => void;
+  onEnter?: () => void;
 }) {
   const kids = getChildren(note.id, relations).length;
   const parents = getParents(note.id, relations).length;
-  const container = typeOf(note) === 'folder' || kids > 0;
+  const container = !!onEnter && (typeOf(note) === 'folder' || kids > 0);
   const t = typeOf(note);
   return (
     <div className="ne-row">
@@ -258,63 +307,122 @@ function Row({
   );
 }
 
+function TreePanel({
+  title,
+  roots,
+  childrenOf,
+  byId,
+  relations,
+  activeId,
+  collapsed,
+  onToggleCollapse,
+  expanded,
+  onToggleExpand,
+  onSelect,
+}: {
+  title: string;
+  roots: Note[];
+  childrenOf: (id: string) => string[];
+  byId: Map<string, Note>;
+  relations: Relation[];
+  activeId: string | null;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  expanded: Set<string>;
+  onToggleExpand: (id: string) => void;
+  onSelect: (trail: string[]) => void;
+}) {
+  return (
+    <aside className={`ne-panel ${collapsed ? 'collapsed' : ''}`}>
+      <button className="ne-panel-head" onClick={onToggleCollapse}>
+        <span className="ne-panel-chev">{collapsed ? '▸' : '▾'}</span> {title}
+      </button>
+      {!collapsed && (
+        <div className="ne-panel-body">
+          {roots.length === 0 ? (
+            <span className="muted small">пусто</span>
+          ) : (
+            roots.map((r) => (
+              <TreeNode
+                key={r.id}
+                id={r.id}
+                trail={[]}
+                childrenOf={childrenOf}
+                byId={byId}
+                relations={relations}
+                activeId={activeId}
+                expanded={expanded}
+                onToggleExpand={onToggleExpand}
+                onSelect={onSelect}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </aside>
+  );
+}
+
 function TreeNode({
   id,
   trail,
+  childrenOf,
   byId,
   relations,
-  currentId,
+  activeId,
   expanded,
-  onToggle,
-  onNavigate,
+  onToggleExpand,
+  onSelect,
 }: {
   id: string;
   trail: string[];
+  childrenOf: (id: string) => string[];
   byId: Map<string, Note>;
   relations: Relation[];
-  currentId: string | null;
+  activeId: string | null;
   expanded: Set<string>;
-  onToggle: (id: string) => void;
-  onNavigate: (path: string[]) => void;
+  onToggleExpand: (id: string) => void;
+  onSelect: (trail: string[]) => void;
 }) {
   const note = byId.get(id);
   if (!note) return null;
-  const cyclic = trail.includes(id); // защита: узел уже выше по этой ветке
-  const kids = getChildren(id, relations);
+  const cyclic = trail.includes(id);
+  const kids = cyclic ? [] : childrenOf(id);
   const isOpen = expanded.has(id);
   const parents = getParents(id, relations).length;
 
   return (
     <div className="tree-node">
       <div className="tree-row">
-        {kids.length > 0 && !cyclic ? (
-          <button className="tree-toggle" onClick={() => onToggle(id)}>
+        {kids.length > 0 ? (
+          <button className="tree-toggle" onClick={() => onToggleExpand(id)}>
             {isOpen ? '▾' : '▸'}
           </button>
         ) : (
           <span className="tree-spacer" />
         )}
         <button
-          className={`tree-label ${currentId === id ? 'active' : ''}`}
-          onClick={() => onNavigate([...trail, id])}
+          className={`tree-label ${activeId === id ? 'active' : ''}`}
+          onClick={() => onSelect([...trail, id])}
         >
           {note.title || 'Без названия'}
           {parents > 1 && <span className="ne-multi"> ⧉</span>}
           {cyclic && <span className="muted"> ↻</span>}
         </button>
       </div>
-      {isOpen && !cyclic &&
+      {isOpen &&
         kids.map((cid) => (
           <TreeNode
             key={cid}
             id={cid}
             trail={[...trail, id]}
+            childrenOf={childrenOf}
             byId={byId}
             relations={relations}
-            currentId={currentId}
+            activeId={activeId}
             expanded={expanded}
-            onToggle={onToggle}
-            onNavigate={onNavigate}
+            onToggleExpand={onToggleExpand}
+            onSelect={onSelect}
           />
         ))}
     </div>

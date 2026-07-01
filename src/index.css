@@ -1466,24 +1466,55 @@ button {
 .rel-add { font-size: 13px; padding: 6px 8px; }
 
 /* ---------- Навигатор заметок (DAG) ---------- */
-.ne-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.ne-body { display: flex; flex-direction: column; gap: 14px; }
-.ne-tree { display: none; }
+/* Фасет-панель: чипы «скрыть папки/теги» + задел под MOC/фасеты. */
+.ne-facets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.ne-facets-spacer { flex: 1; }
+.ne-chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ne-chip.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+/* Три колонки: папки | центр | теги. На телефоне складываются в стопку. */
+.ne-3 { display: flex; flex-direction: column; gap: 14px; }
+.ne-panel { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.ne-panel-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.ne-panel-chev { color: var(--muted); font-size: 11px; width: 12px; }
+.ne-panel-body { padding: 0 12px 12px; }
+.ne-main { flex: 1; min-width: 0; }
 @media (min-width: 760px) {
-  .ne-body { flex-direction: row; align-items: flex-start; gap: 18px; }
-  .ne-tree {
-    display: block;
-    width: 260px;
-    flex: none;
-    border-right: 1px solid var(--border);
-    padding-right: 12px;
-    max-height: 72vh;
-    overflow: auto;
-  }
-  .ne-main { flex: 1; min-width: 0; }
+  .ne-3 { flex-direction: row; align-items: flex-start; gap: 16px; }
+  .ne-panel { width: 230px; flex: none; }
+  .ne-panel.collapsed { width: auto; }
+  .ne-panel-body { max-height: 70vh; overflow: auto; }
 }
 .ne-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 10px; }
 .ne-crumb { border: none; background: none; color: var(--accent); padding: 2px 4px; font-size: 13px; }
+.ne-crumb-cur { color: var(--text); font-weight: 600; }
 .ne-sep { color: var(--muted); }
 .ne-cur { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .ne-cur-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; word-break: break-word; }
@@ -1540,17 +1571,3 @@ button {
 }
 .tree-label.active { background: var(--accent-soft); color: var(--accent); }
 .tree-node .tree-node { padding-left: 16px; }
-
-.ne-tags { display: flex; flex-direction: column; gap: 14px; }
-.ne-tag-head {
-  border: none;
-  background: none;
-  color: var(--text);
-  font-weight: 600;
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0;
-}
-.ne-link { border: none; background: none; color: var(--accent); text-align: left; cursor: pointer; padding: 0; }
