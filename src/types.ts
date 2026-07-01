@@ -71,6 +71,10 @@ export interface ChecklistItem {
   id: string;
   text: string;
   done: boolean;
+  /** Подзадачи (один уровень вложенности). */
+  subitems?: ChecklistItem[];
+  /** Прицеплённая заметка (id из коллекции заметок). */
+  noteId?: string | null;
 }
 
 /** Список задач (чек-лист), привязанный к дню. */

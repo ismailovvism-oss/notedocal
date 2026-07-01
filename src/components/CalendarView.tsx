@@ -137,7 +137,12 @@ export function CalendarView({
 
         <div className="day-section">
           <h3 className="day-section-title">Списки задач</h3>
-          <ChecklistBoard date={selected} checklists={checklists} setChecklists={setChecklists} />
+          <ChecklistBoard
+            date={selected}
+            checklists={checklists}
+            setChecklists={setChecklists}
+            notes={notes}
+          />
         </div>
 
         <div className="day-section">

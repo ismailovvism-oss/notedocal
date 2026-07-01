@@ -4,7 +4,7 @@ import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
-import { TasksView } from './components/TasksView';
+import { ChecklistBoard } from './components/ChecklistBoard';
 import { NotesView } from './components/NotesView';
 import { MonthsView } from './components/MonthsView';
 
@@ -60,7 +60,6 @@ export default function App() {
   const isAdmin = sync.isAdmin;
 
   // В интерфейс отдаём данные без надгробий (мягко удалённых записей).
-  const visibleTasks = useMemo(() => visible(tasks), [tasks]);
   const visibleNotes = useMemo(() => visible(notes), [notes]);
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
   const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
@@ -127,7 +126,20 @@ export default function App() {
             setChecklists={setChecklists}
           />
         )}
-        {tab === 'tasks' && <TasksView tasks={visibleTasks} setTasks={setTasks} />}
+        {tab === 'tasks' && (
+          <section className="view view-narrow">
+            <div className="view-head">
+              <h2>Задачи</h2>
+              <span className="muted">списки</span>
+            </div>
+            <ChecklistBoard
+              date={null}
+              checklists={visibleChecklists}
+              setChecklists={setChecklists}
+              notes={visibleNotes}
+            />
+          </section>
+        )}
         {tab === 'notes' && <NotesView notes={visibleNotes} setNotes={setNotes} />}
         {tab === 'months' && (
           <MonthsView
