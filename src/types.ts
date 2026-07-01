@@ -114,4 +114,4 @@ export interface CalEvent {
   deleted?: boolean;
 }
 
-export type Tab = 'calendar' | 'tasks' | 'notes' | 'months';
+export type Tab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'months';

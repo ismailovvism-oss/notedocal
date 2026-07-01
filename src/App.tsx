@@ -8,8 +8,10 @@ import { CalendarView } from './components/CalendarView';
 import { ChecklistBoard } from './components/ChecklistBoard';
 import { NotesView } from './components/NotesView';
 import { MonthsView } from './components/MonthsView';
+import { DashboardView } from './components/DashboardView';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'dashboard', label: 'Обзор', icon: '📊' },
   { id: 'calendar', label: 'Календарь', icon: '📅' },
   { id: 'tasks', label: 'Задачи', icon: '✓' },
   { id: 'notes', label: 'Заметки', icon: '📝' },
@@ -122,6 +124,17 @@ export default function App() {
       </header>
 
       <main className="content">
+        {tab === 'dashboard' && (
+          <DashboardView
+            events={visibleEvents}
+            checklists={visibleChecklists}
+            notes={visibleNotes}
+            ownSightings={visibleSightings}
+            adminSightings={visibleAdmin}
+            useAdmin={effectiveUseAdmin}
+            setChecklists={setChecklists}
+          />
+        )}
         {tab === 'calendar' && (
           <CalendarView
             notes={visibleNotes}
