@@ -11,6 +11,7 @@ import {
   getTags,
   wouldCreateCycle,
 } from '../lib/relations';
+import { TYPE_BADGE, TYPE_LABELS } from '../lib/noteTypes';
 
 interface Props {
   notes: Note[];
@@ -20,23 +21,6 @@ interface Props {
   relations?: Relation[];
   setRelations?: React.Dispatch<React.SetStateAction<Relation[]>>;
 }
-
-const TYPE_LABELS: Record<NoteType, string> = {
-  note: 'Обычная',
-  folder: 'Папка',
-  tag: 'Тег',
-  moc: 'MOC',
-  concept: 'Понятие',
-  source: 'Источник',
-};
-const TYPE_BADGE: Record<NoteType, string> = {
-  note: 'заметка',
-  folder: 'папка',
-  tag: 'тег',
-  moc: 'MOC',
-  concept: 'понятие',
-  source: 'источник',
-};
 
 export function NotesView({ notes, setNotes, fixedDate, relations, setRelations }: Props) {
   const { add, update, remove } = useListActions(setNotes);
@@ -138,7 +122,7 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
   );
 }
 
-function NoteModal({
+export function NoteModal({
   note,
   fixedDate,
   allNotes,
@@ -387,7 +371,7 @@ function RelationsSection({
       {error && <p className="rel-error small">{error}</p>}
 
       <RelGroup
-        label="Родители (папки)"
+        label="Родители"
         ids={parents}
         titleOf={titleOf}
         candidates={candidates}

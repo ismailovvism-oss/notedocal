@@ -6,7 +6,7 @@ import { useReminders } from './lib/reminders';
 import { formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
 import { ChecklistBoard } from './components/ChecklistBoard';
-import { NotesView } from './components/NotesView';
+import { NotesExplorer } from './components/NotesExplorer';
 import { MonthsView } from './components/MonthsView';
 import { DashboardView } from './components/DashboardView';
 
@@ -167,7 +167,7 @@ export default function App() {
           </section>
         )}
         {tab === 'notes' && (
-          <NotesView
+          <NotesExplorer
             notes={visibleNotes}
             setNotes={setNotes}
             relations={visibleRelations}
