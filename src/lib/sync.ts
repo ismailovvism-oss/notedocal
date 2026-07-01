@@ -117,6 +117,7 @@ function cleanChecklist(c: Checklist): Checklist {
       id: it.id,
       text: it.text ?? '',
       done: !!it.done,
+      desc: it.desc ?? '',
       noteId: it.noteId ?? null,
       subitems: (it.subitems ?? []).map((s) => ({
         id: s.id,

@@ -79,6 +79,7 @@ function ChecklistCard({
   const [subDraft, setSubDraft] = useState('');
   const [attachFor, setAttachFor] = useState<string | null>(null);
   const [openNote, setOpenNote] = useState<string | null>(null);
+  const [descFor, setDescFor] = useState<string | null>(null);
 
   const noteById = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
 
@@ -91,6 +92,7 @@ function ChecklistCard({
   const removeItem = (id: string) => setItems(list.items.filter((it) => it.id !== id));
   const attachNote = (id: string, noteId: string) => mapItem(id, (it) => ({ ...it, noteId }));
   const detachNote = (id: string) => mapItem(id, (it) => ({ ...it, noteId: null }));
+  const editDesc = (id: string, desc: string) => mapItem(id, (it) => ({ ...it, desc }));
 
   const toggleSub = (id: string, sid: string) =>
     mapItem(id, (it) => ({
@@ -173,6 +175,14 @@ function ChecklistCard({
                 </button>
                 <button
                   className="icon-btn cl-act"
+                  onClick={() => setDescFor(descFor === it.id ? null : it.id)}
+                  title="Описание"
+                  aria-label="Описание"
+                >
+                  ≡
+                </button>
+                <button
+                  className="icon-btn cl-act"
                   onClick={() => setAttachFor(attachFor === it.id ? null : it.id)}
                   title="Прицепить заметку"
                   aria-label="Прицепить заметку"
@@ -183,6 +193,23 @@ function ChecklistCard({
                   ✕
                 </button>
               </div>
+
+              {descFor === it.id ? (
+                <textarea
+                  className="input cl-desc-edit"
+                  placeholder="Описание…"
+                  value={it.desc ?? ''}
+                  onChange={(e) => editDesc(it.id, e.target.value)}
+                  rows={2}
+                  autoFocus
+                />
+              ) : (
+                it.desc && (
+                  <p className="cl-desc" onClick={() => setDescFor(it.id)}>
+                    {it.desc}
+                  </p>
+                )
+              )}
 
               {attachFor === it.id && (
                 <select
