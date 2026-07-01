@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { CalEvent, Checklist, MoonSighting, Note, Relation, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
@@ -34,7 +34,7 @@ const initialTheme: Theme =
     : 'light';
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('calendar');
+  const [tab, setTab] = useLocalStorage<Tab>('ndc.tab', 'calendar');
   const [theme, setTheme] = useLocalStorage<Theme>('ndc.theme', initialTheme);
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);

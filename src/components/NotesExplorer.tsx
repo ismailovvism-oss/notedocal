@@ -126,40 +126,44 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
         <h2>Заметки</h2>
       </div>
 
-      {/* Панель управления: показ деревьев + фильтры центра + задел под фасеты/MOC */}
+      {/* Панель управления: боковые деревья + фильтры центра + задел под фасеты/MOC */}
       <div className="ne-facets">
-        <span className="ne-facets-group">
-          <span className="ne-facets-label">Деревья</span>
+        <span className="ne-facets-group" title="Боковые деревья">
+          <span className="ne-facets-ic" aria-hidden>🌳</span>
           <button
-            className={`ne-chip ${!leftClosed ? 'on' : ''}`}
+            className={`ne-chip ne-ic ${!leftClosed ? 'on' : ''}`}
             onClick={() => setLeftClosed((v) => !v)}
-            title="Показать/скрыть дерево папок"
+            title="Дерево папок"
+            aria-label="Дерево папок"
           >
-            🗂 Папки
+            🗂
           </button>
           <button
-            className={`ne-chip ${!rightClosed ? 'on' : ''}`}
+            className={`ne-chip ne-ic ${!rightClosed ? 'on' : ''}`}
             onClick={() => setRightClosed((v) => !v)}
-            title="Показать/скрыть дерево тегов"
+            title="Дерево тегов"
+            aria-label="Дерево тегов"
           >
-            🏷 Теги
+            🏷
           </button>
         </span>
-        <span className="ne-facets-group">
-          <span className="ne-facets-label">В списке</span>
+        <span className="ne-facets-group" title="Скрыть из центрального списка">
+          <span className="ne-facets-ic" aria-hidden>📋</span>
           <button
-            className={`ne-chip ${hideFolders ? 'on' : ''}`}
+            className={`ne-chip ne-ic ne-hide ${hideFolders ? 'off' : ''}`}
             onClick={() => setHideFolders((v) => !v)}
-            title="Не показывать папки в центральном списке"
+            title="Скрыть папки из списка"
+            aria-label="Скрыть папки из списка"
           >
-            {hideFolders ? 'Папки скрыты' : 'Скрыть папки'}
+            🗂
           </button>
           <button
-            className={`ne-chip ${hideTags ? 'on' : ''}`}
+            className={`ne-chip ne-ic ne-hide ${hideTags ? 'off' : ''}`}
             onClick={() => setHideTags((v) => !v)}
-            title="Не показывать теги в центральном списке"
+            title="Скрыть теги из списка"
+            aria-label="Скрыть теги из списка"
           >
-            {hideTags ? 'Теги скрыты' : 'Скрыть теги'}
+            🏷
           </button>
         </span>
         <span className="ne-facets-spacer" />
