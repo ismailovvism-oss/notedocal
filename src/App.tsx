@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CalEvent, Checklist, MoonSighting, Note, Tab, Task } from './types';
+import type { CalEvent, Checklist, MoonSighting, Note, Relation, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { useReminders } from './lib/reminders';
@@ -41,6 +41,7 @@ export default function App() {
   const [sightings, setSightings] = useLocalStorage<MoonSighting[]>('ndc.sightings', []);
   const [checklists, setChecklists] = useLocalStorage<Checklist[]>('ndc.checklists', []);
   const [events, setEvents] = useLocalStorage<CalEvent[]>('ndc.events', []);
+  const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
   // Официальный календарь админа (общий документ) и предпочтение его использовать.
   const [adminSightings, setAdminSightings] = useLocalStorage<MoonSighting[]>('ndc.admin', []);
   const [useAdmin, setUseAdmin] = useLocalStorage<boolean>('ndc.useAdmin', true);
@@ -62,6 +63,8 @@ export default function App() {
     setChecklists,
     events,
     setEvents,
+    relations,
+    setRelations,
     adminSightings,
     setAdminSightings,
   });
@@ -72,6 +75,7 @@ export default function App() {
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
   const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
   const visibleEvents = useMemo(() => visible(events), [events]);
+  const visibleRelations = useMemo(() => visible(relations), [relations]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
 
   // Админ показывает официальный календарь всегда; остальные — по переключателю.
@@ -162,7 +166,14 @@ export default function App() {
             />
           </section>
         )}
-        {tab === 'notes' && <NotesView notes={visibleNotes} setNotes={setNotes} />}
+        {tab === 'notes' && (
+          <NotesView
+            notes={visibleNotes}
+            setNotes={setNotes}
+            relations={visibleRelations}
+            setRelations={setRelations}
+          />
+        )}
         {tab === 'months' && (
           <MonthsView
             editSightings={isAdmin ? visibleAdmin : visibleSightings}
