@@ -71,6 +71,8 @@ export interface ChecklistItem {
   id: string;
   text: string;
   done: boolean;
+  /** Описание/детали пункта (многострочное), помимо заголовка. */
+  desc?: string;
   /** Подзадачи (один уровень вложенности). */
   subitems?: ChecklistItem[];
   /** Прицеплённая заметка (id из коллекции заметок). */
