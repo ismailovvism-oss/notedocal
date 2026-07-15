@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { CalEvent, Checklist, MoonSighting, Note } from '../types';
+import type { CalEvent, Checklist, MoonSighting, Note, Relation } from '../types';
 import {
   WEEKDAYS,
   dayKey,
@@ -11,15 +11,19 @@ import {
   monthGrid,
   todayKey,
 } from '../lib/dates';
+import { useLocalStorage } from '../lib/storage';
 import { eventsOnDay } from '../lib/recurrence';
+import { HEALTH_META, healthCounts, healthOnDay } from '../lib/health';
 import { ChecklistBoard } from './ChecklistBoard';
 import { EventsBoard } from './EventsBoard';
+import { HealthBoard } from './HealthBoard';
 import { NotesView } from './NotesView';
 
 interface Props {
   notes: Note[];
   checklists: Checklist[];
   events: CalEvent[];
+  relations: Relation[];
   ownSightings: MoonSighting[];
   adminSightings: MoonSighting[];
   /** Учитывать ли календарь Tawhiid (уже с учётом роли админа). */
@@ -27,21 +31,26 @@ interface Props {
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
   setEvents: React.Dispatch<React.SetStateAction<CalEvent[]>>;
+  setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
 }
 
 export function CalendarView({
   notes,
   checklists,
   events,
+  relations,
   ownSightings,
   adminSightings,
   useAdmin,
   setNotes,
   setChecklists,
   setEvents,
+  setRelations,
 }: Props) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string>(todayKey());
+  // Слой «Здоровье» можно снять/наложить; состояние запоминается.
+  const [showHealth, setShowHealth] = useLocalStorage<boolean>('ndc.showHealth', true);
 
   const grid = useMemo(
     () => monthGrid(cursor.getFullYear(), cursor.getMonth()),
@@ -51,14 +60,19 @@ export function CalendarView({
   // Данные для каждой ячейки: события (с учётом повторов), списки задач и
   // число заметок — чтобы показывать прямо на календаре, без нажатия.
   const dayData = useMemo(() => {
-    const m = new Map<string, { events: CalEvent[]; lists: Checklist[]; notes: number }>();
+    const m = new Map<
+      string,
+      { events: CalEvent[]; lists: Checklist[]; notes: number; health: Note[] }
+    >();
     for (const d of grid) {
       const key = dayKey(d);
       const dayEvents = eventsOnDay(events, key);
       const lists = checklists.filter((c) => !c.deleted && (c.date ?? null) === key);
-      const noteCount = notes.filter((n) => !n.deleted && n.date === key).length;
-      if (dayEvents.length || lists.length || noteCount) {
-        m.set(key, { events: dayEvents, lists, notes: noteCount });
+      const health = healthOnDay(notes, key);
+      // «Обычные» заметки дня (без записей здоровья) — для точки.
+      const noteCount = notes.filter((n) => !n.deleted && !n.health && n.date === key).length;
+      if (dayEvents.length || lists.length || noteCount || health.length) {
+        m.set(key, { events: dayEvents, lists, notes: noteCount, health });
       }
     }
     return m;
@@ -85,6 +99,16 @@ export function CalendarView({
           </button>
           <button className="icon-btn" onClick={() => shift(1)} aria-label="Следующий месяц">
             ›
+          </button>
+        </div>
+
+        <div className="cal-layers">
+          <button
+            className={`ne-chip ${showHealth ? 'on' : ''}`}
+            onClick={() => setShowHealth((v) => !v)}
+            title="Показать/скрыть дневник здоровья"
+          >
+            🩺 Здоровье
           </button>
         </div>
 
@@ -126,6 +150,20 @@ export function CalendarView({
                 </span>
                 {data && (
                   <span className="cell-items">
+                    {showHealth && data.health.length > 0 && (
+                      <span className="ci ci-health" title="Дневник здоровья">
+                        {(() => {
+                          const c = healthCounts(data.health);
+                          return (
+                            <>
+                              {c.meal > 0 && <span>{HEALTH_META.meal.icon}{c.meal}</span>}
+                              {c.med > 0 && <span>{HEALTH_META.med.icon}{c.med}</span>}
+                              {c.other > 0 && <span>{HEALTH_META.other.icon}{c.other}</span>}
+                            </>
+                          );
+                        })()}
+                      </span>
+                    )}
                     {shownEvents.map((ev) => (
                       <span key={ev.id} className="ci ci-event" title={ev.title}>
                         {ev.start ? <b>{ev.start}</b> : null} {ev.title}
@@ -165,6 +203,19 @@ export function CalendarView({
             </p>
           </div>
         </div>
+
+        {showHealth && (
+          <div className="day-section">
+            <h3 className="day-section-title">🩺 Здоровье</h3>
+            <HealthBoard
+              date={selected}
+              notes={notes}
+              setNotes={setNotes}
+              relations={relations}
+              setRelations={setRelations}
+            />
+          </div>
+        )}
 
         <div className="day-section">
           <h3 className="day-section-title">События</h3>

@@ -10,6 +10,7 @@ import {
   todayKey,
 } from '../lib/dates';
 import { eventsOnDay } from '../lib/recurrence';
+import { HEALTH_META, healthOnDay } from '../lib/health';
 
 interface Props {
   events: CalEvent[];
@@ -82,11 +83,20 @@ export function DashboardView({
   const notesByDay = useMemo(() => {
     const m = new Map<string, Note[]>();
     for (const n of notes) {
-      if (!n.date) continue;
+      if (!n.date || n.health) continue; // записи здоровья — в своей группе
       (m.get(n.date) ?? m.set(n.date, []).get(n.date)!).push(n);
     }
     return m;
   }, [notes]);
+
+  const healthByDay = useMemo(() => {
+    const m = new Map<string, Note[]>();
+    for (const d of days) {
+      const h = healthOnDay(notes, d);
+      if (h.length) m.set(d, h);
+    }
+    return m;
+  }, [days, notes]);
 
   const tasksByDay = useMemo(() => {
     const m = new Map<string, TaskRef[]>();
@@ -113,7 +123,7 @@ export function DashboardView({
   }
 
   const activeDays = days.filter(
-    (d) => eventsByDay.has(d) || notesByDay.has(d) || tasksByDay.has(d),
+    (d) => eventsByDay.has(d) || notesByDay.has(d) || tasksByDay.has(d) || healthByDay.has(d),
   );
 
   return (
@@ -151,6 +161,7 @@ export function DashboardView({
             const evs = eventsByDay.get(d) ?? [];
             const tks = tasksByDay.get(d) ?? [];
             const nts = notesByDay.get(d) ?? [];
+            const hls = healthByDay.get(d) ?? [];
             return (
               <div key={d} className="db-day">
                 <div className="db-day-head">
@@ -161,6 +172,16 @@ export function DashboardView({
                     {formatHijri(hijri)}
                   </span>
                 </div>
+
+                {hls.map((n) => (
+                  <div key={n.id} className="db-row db-health">
+                    <span className="db-time">{n.time || HEALTH_META[n.health ?? 'other'].icon}</span>
+                    <span className="db-text">
+                      {HEALTH_META[n.health ?? 'other'].icon} {n.title}
+                      {n.body && <span className="muted small db-list"> · {n.body}</span>}
+                    </span>
+                  </div>
+                ))}
 
                 {evs.map((e) => (
                   <div key={e.id} className="db-row db-ev">

@@ -29,7 +29,10 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
   const [editing, setEditing] = useState<Note | 'new' | null>(null);
 
   const list = useMemo(() => {
-    const base = fixedDate ? notes.filter((n) => n.date === fixedDate) : notes;
+    // Записи дневника здоровья показываются в своей секции, не здесь.
+    const base = fixedDate
+      ? notes.filter((n) => n.date === fixedDate && !n.health)
+      : notes.filter((n) => !n.health);
     return [...base].sort((a, b) => b.updatedAt - a.updatedAt);
   }, [notes, fixedDate]);
 

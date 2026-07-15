@@ -144,12 +144,14 @@ export default function App() {
             notes={visibleNotes}
             checklists={visibleChecklists}
             events={visibleEvents}
+            relations={visibleRelations}
             ownSightings={visibleSightings}
             adminSightings={visibleAdmin}
             useAdmin={effectiveUseAdmin}
             setNotes={setNotes}
             setChecklists={setChecklists}
             setEvents={setEvents}
+            setRelations={setRelations}
           />
         )}
         {tab === 'tasks' && (
