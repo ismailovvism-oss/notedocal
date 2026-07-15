@@ -139,6 +139,7 @@ export default function App() {
             ownSightings={visibleSightings}
             adminSightings={visibleAdmin}
             useAdmin={effectiveUseAdmin}
+            mealGap={mealGap}
             setChecklists={setChecklists}
           />
         )}
