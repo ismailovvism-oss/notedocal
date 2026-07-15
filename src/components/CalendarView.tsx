@@ -11,6 +11,7 @@ import {
   monthGrid,
   todayKey,
 } from '../lib/dates';
+import { eventsOnDay } from '../lib/recurrence';
 import { ChecklistBoard } from './ChecklistBoard';
 import { EventsBoard } from './EventsBoard';
 import { NotesView } from './NotesView';
@@ -47,31 +48,23 @@ export function CalendarView({
     [cursor],
   );
 
-  // Точки на ячейках: списки задач, события и заметки этого дня.
-  const counts = useMemo(() => {
-    const m = new Map<string, { tasks: number; notes: number; events: number }>();
-    const at = (key: string) => {
-      let e = m.get(key);
-      if (!e) {
-        e = { tasks: 0, notes: 0, events: 0 };
-        m.set(key, e);
+  // Данные для каждой ячейки: события (с учётом повторов), списки задач и
+  // число заметок — чтобы показывать прямо на календаре, без нажатия.
+  const dayData = useMemo(() => {
+    const m = new Map<string, { events: CalEvent[]; lists: Checklist[]; notes: number }>();
+    for (const d of grid) {
+      const key = dayKey(d);
+      const dayEvents = eventsOnDay(events, key);
+      const lists = checklists.filter((c) => !c.deleted && (c.date ?? null) === key);
+      const noteCount = notes.filter((n) => !n.deleted && n.date === key).length;
+      if (dayEvents.length || lists.length || noteCount) {
+        m.set(key, { events: dayEvents, lists, notes: noteCount });
       }
-      return e;
-    };
-    for (const c of checklists) {
-      if (!c.date || c.deleted || c.items.length === 0) continue;
-      at(c.date).tasks += 1;
-    }
-    for (const ev of events) {
-      if (!ev.date || ev.deleted) continue;
-      at(ev.date).events += 1;
-    }
-    for (const n of notes) {
-      if (!n.date) continue;
-      at(n.date).notes += 1;
     }
     return m;
-  }, [checklists, events, notes]);
+  }, [grid, checklists, events, notes]);
+
+  const MAX_CHIPS = 3;
 
   const month = cursor.getMonth();
   const shift = (delta: number) =>
@@ -109,8 +102,13 @@ export function CalendarView({
             const inMonth = d.getMonth() === month;
             const isToday = key === todayKey();
             const isSel = key === selected;
-            const c = counts.get(key);
+            const data = dayData.get(key);
             const h = hijriFor(d, ownSightings, adminSightings, useAdmin);
+            const shownEvents = data ? data.events.slice(0, MAX_CHIPS) : [];
+            const restForTasks = MAX_CHIPS - shownEvents.length;
+            const shownLists = data ? data.lists.slice(0, Math.max(0, restForTasks)) : [];
+            const total = (data?.events.length ?? 0) + (data?.lists.length ?? 0);
+            const more = total - shownEvents.length - shownLists.length;
             return (
               <button
                 key={key}
@@ -122,13 +120,32 @@ export function CalendarView({
                 ].join(' ')}
                 onClick={() => setSelected(key)}
               >
-                <span className="greg">{d.getDate()}</span>
-                <span className={`hijri ${h.certain ? '' : 'approx'}`}>{h.day}</span>
-                {c && (
-                  <span className="dots">
-                    {c.tasks > 0 && <i className="dot dot-task" />}
-                    {c.events > 0 && <i className="dot dot-event" />}
-                    {c.notes > 0 && <i className="dot dot-note" />}
+                <span className="cal-cell-head">
+                  <span className="greg">{d.getDate()}</span>
+                  <span className={`hijri ${h.certain ? '' : 'approx'}`}>{h.day}</span>
+                </span>
+                {data && (
+                  <span className="cell-items">
+                    {shownEvents.map((ev) => (
+                      <span key={ev.id} className="ci ci-event" title={ev.title}>
+                        {ev.start ? <b>{ev.start}</b> : null} {ev.title}
+                      </span>
+                    ))}
+                    {shownLists.map((c) => {
+                      const done = c.items.filter((it) => it.done).length;
+                      return (
+                        <span key={c.id} className="ci ci-task" title={c.title || 'Задачи'}>
+                          {c.title || 'Задачи'}
+                          {c.items.length > 0 && (
+                            <span className="ci-num">
+                              {done}/{c.items.length}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                    {more > 0 && <span className="ci-more">+{more}</span>}
+                    {data.notes > 0 && <i className="dot dot-note" title="Заметки" />}
                   </span>
                 )}
               </button>

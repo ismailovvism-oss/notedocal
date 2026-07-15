@@ -13,6 +13,7 @@ import {
   persistentMultipleTabManager,
   type Firestore,
 } from 'firebase/firestore';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 import { firebaseConfig as config } from './firebaseConfig';
 
 /** Настроен ли Firebase (есть ли ключи конфига). */
@@ -21,6 +22,7 @@ export const firebaseEnabled = Boolean(config.apiKey && config.projectId);
 let app: FirebaseApp | undefined;
 let authInstance: Auth | undefined;
 let dbInstance: Firestore | undefined;
+let storageInstance: FirebaseStorage | undefined;
 
 if (firebaseEnabled) {
   app = initializeApp(config);
@@ -35,10 +37,13 @@ if (firebaseEnabled) {
     // в офлайне на кэше. Force надёжнее авто-определения в таких сетях.
     experimentalForceLongPolling: true,
   });
+  // Хранилище файлов (вложения заметок и задач).
+  storageInstance = getStorage(app);
 }
 
 export const auth = authInstance;
 export const db = dbInstance;
+export const storage = storageInstance;
 export const googleProvider = new GoogleAuthProvider();
 
 /**

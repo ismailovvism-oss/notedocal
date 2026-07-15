@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
-import type { CalEvent } from '../types';
+import type { CalEvent, Repeat } from '../types';
 import { uid, useListActions } from '../lib/storage';
+import { eventsOnDay, repeatLabel } from '../lib/recurrence';
 
 interface Props {
   date: string;
   events: CalEvent[];
   setEvents: React.Dispatch<React.SetStateAction<CalEvent[]>>;
 }
+
+const REPEAT_OPTIONS: Repeat[] = ['none', 'daily', 'weekly', 'monthly', 'yearly'];
 
 export function EventsBoard({ date, events, setEvents }: Props) {
   const { add, update, remove } = useListActions(setEvents);
@@ -17,20 +20,19 @@ export function EventsBoard({ date, events, setEvents }: Props) {
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [desc, setDesc] = useState('');
+  const [repeat, setRepeat] = useState<Repeat>('none');
+  const [repeatUntil, setRepeatUntil] = useState('');
 
-  const list = useMemo(
-    () =>
-      events
-        .filter((e) => e.date === date)
-        .sort((a, b) => ((a.start || '99:99') < (b.start || '99:99') ? -1 : 1)),
-    [events, date],
-  );
+  // Вхождения повторов на выбранный день (не только точные совпадения date).
+  const list = useMemo(() => eventsOnDay(events, date), [events, date]);
 
   function reset() {
     setTitle('');
     setStart('');
     setEnd('');
     setDesc('');
+    setRepeat('none');
+    setRepeatUntil('');
   }
   function startAdd() {
     setEditId(null);
@@ -43,10 +45,19 @@ export function EventsBoard({ date, events, setEvents }: Props) {
     setStart(e.start ?? '');
     setEnd(e.end ?? '');
     setDesc(e.desc ?? '');
+    setRepeat(e.repeat ?? 'none');
+    setRepeatUntil(e.repeatUntil ?? '');
     setOpen(true);
   }
   function save() {
-    const patch = { title: title.trim() || 'Событие', start, end, desc: desc.trim() };
+    const patch = {
+      title: title.trim() || 'Событие',
+      start,
+      end,
+      desc: desc.trim(),
+      repeat,
+      repeatUntil: repeat === 'none' ? null : repeatUntil || null,
+    };
     if (editId) {
       update(editId, patch);
     } else {
@@ -67,7 +78,14 @@ export function EventsBoard({ date, events, setEvents }: Props) {
                 {e.end ? `–${e.end}` : ''}
               </div>
               <div className="ev-body">
-                <span className="ev-title">{e.title}</span>
+                <span className="ev-title">
+                  {e.title}
+                  {e.repeat && e.repeat !== 'none' && (
+                    <span className="ev-repeat" title={repeatLabel(e.repeat)}>
+                      ↻
+                    </span>
+                  )}
+                </span>
                 {e.desc && <span className="muted small ev-desc">{e.desc}</span>}
               </div>
               <button className="icon-btn" onClick={() => startEdit(e)} aria-label="Изменить">
@@ -98,6 +116,33 @@ export function EventsBoard({ date, events, setEvents }: Props) {
               <span className="field-label">Конец</span>
               <input className="input" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
             </label>
+          </div>
+          <div className="ev-form-row">
+            <label className="field">
+              <span className="field-label">Повтор</span>
+              <select
+                className="input"
+                value={repeat}
+                onChange={(e) => setRepeat(e.target.value as Repeat)}
+              >
+                {REPEAT_OPTIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {repeatLabel(r)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {repeat !== 'none' && (
+              <label className="field">
+                <span className="field-label">До (необязательно)</span>
+                <input
+                  className="input"
+                  type="date"
+                  value={repeatUntil}
+                  onChange={(e) => setRepeatUntil(e.target.value)}
+                />
+              </label>
+            )}
           </div>
           <textarea
             className="input"

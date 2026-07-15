@@ -9,6 +9,7 @@ import {
   hijriFor,
   todayKey,
 } from '../lib/dates';
+import { eventsOnDay } from '../lib/recurrence';
 
 interface Props {
   events: CalEvent[];
@@ -68,17 +69,15 @@ export function DashboardView({
     return arr;
   }, [from, to]);
 
-  // Группировка по дню.
+  // Группировка по дню (с учётом повторов — по каждому дню диапазона).
   const eventsByDay = useMemo(() => {
     const m = new Map<string, CalEvent[]>();
-    for (const e of events) {
-      if (!e.date) continue;
-      (m.get(e.date) ?? m.set(e.date, []).get(e.date)!).push(e);
+    for (const d of days) {
+      const evs = eventsOnDay(events, d);
+      if (evs.length) m.set(d, evs);
     }
-    for (const arr of m.values())
-      arr.sort((a, b) => ((a.start || '99:99') < (b.start || '99:99') ? -1 : 1));
     return m;
-  }, [events]);
+  }, [days, events]);
 
   const notesByDay = useMemo(() => {
     const m = new Map<string, Note[]>();

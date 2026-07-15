@@ -111,7 +111,7 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
     setEditing(note);
   }
 
-  function saveNote(patch: Pick<Note, 'title' | 'body' | 'date' | 'type'>) {
+  function saveNote(patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments'>) {
     if (!editing) return;
     // Сохраняем, но окно не закрываем — модалка сама переходит в отображение.
     notesActions.update(editing.id, { ...patch, updatedAt: Date.now() });

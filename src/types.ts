@@ -1,5 +1,22 @@
 // Доменные типы приложения notedocal (заметки + задачи + календарь)
 
+/** Вложение (файл), загруженное в Firebase Storage. В записи храним только
+ *  метаданные и ссылку; сами байты лежат в облачном хранилище. */
+export interface Attachment {
+  id: string;
+  /** Имя файла для показа. */
+  name: string;
+  /** Размер в байтах. */
+  size: number;
+  /** MIME-тип (image/png, application/pdf …). */
+  type: string;
+  /** Публичная ссылка на скачивание (getDownloadURL). */
+  url: string;
+  /** Путь в Storage — нужен для удаления. */
+  path: string;
+  createdAt: number;
+}
+
 /** Задача из списка дел. */
 export interface Task {
   id: string;
@@ -28,6 +45,8 @@ export interface Note {
   type?: NoteType;
   /** Необязательная привязка к дню (YYYY-MM-DD). */
   date: string | null;
+  /** Прикреплённые файлы (Firebase Storage). */
+  attachments?: Attachment[];
   createdAt: number;
   updatedAt: number;
   /** Мягкое удаление (надгробие) — чтобы удаление доезжало до других устройств. */
@@ -109,6 +128,8 @@ export interface ChecklistItem {
   remindAt?: number | null;
   /** Прицеплённая заметка (id из коллекции заметок). */
   noteId?: string | null;
+  /** Прикреплённые файлы (Firebase Storage). */
+  attachments?: Attachment[];
   /** Подзадачи (рекурсивно — той же сути, что и задача). */
   subitems?: ChecklistItem[];
 }
@@ -126,17 +147,24 @@ export interface Checklist {
   deleted?: boolean;
 }
 
+/** Как часто повторяется событие. 'none' — одноразовое. */
+export type Repeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
 /** Событие календаря (со временем), в отличие от задачи — без «выполнено». */
 export interface CalEvent {
   id: string;
   title: string;
-  /** День (YYYY-MM-DD). */
+  /** День первого (или единственного) повтора (YYYY-MM-DD) — «якорь». */
   date: string;
   /** Время начала HH:mm (необязательно). */
   start?: string;
   /** Время конца HH:mm (необязательно). */
   end?: string;
   desc?: string;
+  /** Повтор события (по умолчанию 'none'). */
+  repeat?: Repeat;
+  /** Повторять до этой даты включительно (YYYY-MM-DD) либо без ограничения. */
+  repeatUntil?: string | null;
   createdAt: number;
   updatedAt: number;
   deleted?: boolean;
