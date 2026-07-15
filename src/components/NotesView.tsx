@@ -34,8 +34,10 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
   function save(patch: Pick<Note, 'title' | 'body' | 'date' | 'type'>) {
     const now = Date.now();
     if (editing && editing !== 'new') {
+      // Существующую обновляем и оставляем окно открытым (модалка сама уйдёт в отображение).
       update(editing.id, { ...patch, updatedAt: now });
     } else {
+      // Новую создаём; окно закроет сама модалка (onClose).
       add({
         id: uid(),
         title: patch.title || 'Без названия',
@@ -46,7 +48,6 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
         updatedAt: now,
       });
     }
-    setEditing(null);
   }
 
   return (
@@ -145,9 +146,24 @@ export function NoteModal({
   const [body, setBody] = useState(note?.body ?? '');
   const [date, setDate] = useState(note?.date ?? '');
   const [type, setType] = useState<NoteType>(note?.type ?? 'note');
-  // Одно поле, переключатель: правка сырого Markdown ↔ отрендеренный вид.
-  const [preview, setPreview] = useState(false);
+  // Существующая заметка открывается отрендеренной; новая — сразу в правке.
+  const [mode, setMode] = useState<'view' | 'edit'>(note ? 'view' : 'edit');
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  function handleSave() {
+    onSave({ title: title.trim() || 'Без названия', body, date: date || null, type });
+    // Существующую оставляем открытой в режиме отображения; новую закрываем.
+    if (note) setMode('view');
+    else onClose();
+  }
+  // «Назад» из правки: откатываем несохранённое и возвращаемся к отображению.
+  function cancelEdit() {
+    setTitle(note?.title ?? '');
+    setBody(note?.body ?? '');
+    setDate(note?.date ?? '');
+    setType(note?.type ?? 'note');
+    setMode('view');
+  }
 
   function surround(before: string, after = before) {
     const ta = taRef.current;
@@ -185,18 +201,66 @@ export function NoteModal({
     requestAnimationFrame(() => ta.focus());
   }
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-note" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div className="md-tabs">
-            <button className={`md-tab ${!preview ? 'active' : ''}`} onClick={() => setPreview(false)}>
-              ✎ Текст
-            </button>
-            <button className={`md-tab ${preview ? 'active' : ''}`} onClick={() => setPreview(true)}>
-              👁 Вид
+  // В режиме отображения клик по фону закрывает; в правке — нет (чтобы не терять текст).
+  const overlayClose = mode === 'view' ? onClose : undefined;
+
+  // --- Отображение: отрендеренная заметка, клик по тексту → правка ---
+  if (mode === 'view' && note) {
+    return (
+      <div className="modal-overlay" onClick={overlayClose}>
+        <div className="modal modal-note" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head">
+            <div className="note-read-meta">
+              {type !== 'note' && (
+                <span className={`type-badge type-${type}`}>{TYPE_BADGE[type]}</span>
+              )}
+              {date && <span className="chip">{fromKey(date).toLocaleDateString('ru-RU')}</span>}
+            </div>
+            <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
+              ✕
             </button>
           </div>
+
+          <h2 className="note-read-title">{title || 'Без названия'}</h2>
+
+          <div
+            className="md note-read-body note-read-tap"
+            onClick={() => setMode('edit')}
+            title="Нажмите, чтобы редактировать"
+            dangerouslySetInnerHTML={{
+              __html: renderMarkdown(body.trim() || '_Пусто. Нажмите, чтобы добавить текст…_'),
+            }}
+          />
+
+          <div className="modal-foot modal-foot-split">
+            {onDelete ? (
+              <button className="btn cl-danger" onClick={onDelete}>
+                Удалить
+              </button>
+            ) : (
+              <span />
+            )}
+            <button className="btn btn-primary" onClick={() => setMode('edit')}>
+              ✎ Редактировать
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Правка ---
+  return (
+    <div className="modal-overlay" onClick={overlayClose}>
+      <div className="modal modal-note" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          {note ? (
+            <button className="md-tab" onClick={cancelEdit} title="Назад без сохранения">
+              ‹ Назад
+            </button>
+          ) : (
+            <span className="field-label">Новая заметка</span>
+          )}
           <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
             ✕
           </button>
@@ -220,56 +284,43 @@ export function NoteModal({
           </select>
         </label>
 
-        {!preview ? (
-          <>
-            <div className="md-toolbar">
-              <button className="md-btn" title="Жирный" onClick={() => surround('**')}>
-                <b>Ж</b>
-              </button>
-              <button className="md-btn" title="Курсив" onClick={() => surround('*')}>
-                <i>К</i>
-              </button>
-              <button className="md-btn" title="Подчёркнутый" onClick={() => surround('<u>', '</u>')}>
-                <u>Ч</u>
-              </button>
-              <button className="md-btn" title="Зачёркнутый" onClick={() => surround('~~')}>
-                <s>З</s>
-              </button>
-              <span className="md-sep" />
-              <button className="md-btn" title="Заголовок" onClick={() => linePrefix('## ')}>
-                H
-              </button>
-              <button className="md-btn" title="Список" onClick={() => linePrefix('- ')}>
-                •
-              </button>
-              <button className="md-btn" title="Цитата" onClick={() => linePrefix('> ')}>
-                ❝
-              </button>
-              <button className="md-btn" title="Коллаут" onClick={insertCallout}>
-                💡
-              </button>
-              <button className="md-btn" title="Код" onClick={() => surround('`')}>
-                {'</>'}
-              </button>
-            </div>
-            <textarea
-              ref={taRef}
-              className="input md-editor"
-              placeholder="Текст заметки (Markdown)…"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-            />
-          </>
-        ) : (
-          <div
-            className="md md-preview"
-            onClick={() => setPreview(false)}
-            title="Нажмите, чтобы редактировать"
-            dangerouslySetInnerHTML={{
-              __html: renderMarkdown(body || '_Пусто. Переключитесь на «Текст» и начните печатать…_'),
-            }}
-          />
-        )}
+        <div className="md-toolbar">
+          <button className="md-btn" title="Жирный" onClick={() => surround('**')}>
+            <b>Ж</b>
+          </button>
+          <button className="md-btn" title="Курсив" onClick={() => surround('*')}>
+            <i>К</i>
+          </button>
+          <button className="md-btn" title="Подчёркнутый" onClick={() => surround('<u>', '</u>')}>
+            <u>Ч</u>
+          </button>
+          <button className="md-btn" title="Зачёркнутый" onClick={() => surround('~~')}>
+            <s>З</s>
+          </button>
+          <span className="md-sep" />
+          <button className="md-btn" title="Заголовок" onClick={() => linePrefix('## ')}>
+            H
+          </button>
+          <button className="md-btn" title="Список" onClick={() => linePrefix('- ')}>
+            •
+          </button>
+          <button className="md-btn" title="Цитата" onClick={() => linePrefix('> ')}>
+            ❝
+          </button>
+          <button className="md-btn" title="Коллаут" onClick={insertCallout}>
+            💡
+          </button>
+          <button className="md-btn" title="Код" onClick={() => surround('`')}>
+            {'</>'}
+          </button>
+        </div>
+        <textarea
+          ref={taRef}
+          className="input md-editor"
+          placeholder="Текст заметки (Markdown)…"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+        />
 
         {!fixedDate && (
           <label className="field">
@@ -295,10 +346,7 @@ export function NoteModal({
           ) : (
             <span />
           )}
-          <button
-            className="btn btn-primary"
-            onClick={() => onSave({ title: title.trim() || 'Без названия', body, date: date || null, type })}
-          >
+          <button className="btn btn-primary" onClick={handleSave}>
             Сохранить
           </button>
         </div>

@@ -113,8 +113,8 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
 
   function saveNote(patch: Pick<Note, 'title' | 'body' | 'date' | 'type'>) {
     if (!editing) return;
+    // Сохраняем, но окно не закрываем — модалка сама переходит в отображение.
     notesActions.update(editing.id, { ...patch, updatedAt: Date.now() });
-    setEditing(null);
   }
 
   const activeFolder = view.kind === 'node' ? curId : null;
