@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { Checklist, ChecklistItem, Note } from '../types';
+import type { Attachment, Checklist, ChecklistItem, Note } from '../types';
 import { uid, useListActions, useLocalStorage } from '../lib/storage';
+import { deleteAttachment } from '../lib/attachments';
+import { AttachmentAdder, AttachmentList } from './Attachments';
 
 interface Props {
   /** День (YYYY-MM-DD) или null для общих (недатированных) списков. */
@@ -212,6 +214,7 @@ function ItemRow({
         <span className="cl-badges" onClick={() => onOpen(item.id)}>
           {item.desc ? <span title="Описание">≡</span> : null}
           {item.noteId ? <span title="Заметка">📄</span> : null}
+          {item.attachments && item.attachments.length > 0 ? <span title="Файлы">📎</span> : null}
           {item.remindAt ? <span title="Напоминание">🔔</span> : null}
           {sub.length > 0 ? <span className="cl-subcount">{sub.length}</span> : null}
         </span>
@@ -345,6 +348,24 @@ function TaskModal({
           </select>
           {note && note.body && <p className="cl-note-body">{note.body}</p>}
         </label>
+
+        <div className="field">
+          <span className="field-label">Файлы</span>
+          <AttachmentList
+            items={item.attachments}
+            onRemove={(a) => {
+              deleteAttachment(a);
+              ops.setField(item.id, {
+                attachments: (item.attachments ?? []).filter((x) => x.id !== a.id),
+              });
+            }}
+          />
+          <AttachmentAdder
+            onAdd={(added: Attachment[]) =>
+              ops.setField(item.id, { attachments: [...(item.attachments ?? []), ...added] })
+            }
+          />
+        </div>
 
         <div className="field">
           <span className="field-label">Подзадачи</span>

@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import type { Note, NoteType, Relation } from '../types';
+import type { Attachment, Note, NoteType, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { fromKey } from '../lib/dates';
 import { renderMarkdown } from '../lib/markdown';
+import { deleteAttachment } from '../lib/attachments';
+import { AttachmentAdder, AttachmentList } from './Attachments';
 import {
   getBacklinks,
   getChildren,
@@ -31,7 +33,7 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
     return [...base].sort((a, b) => b.updatedAt - a.updatedAt);
   }, [notes, fixedDate]);
 
-  function save(patch: Pick<Note, 'title' | 'body' | 'date' | 'type'>) {
+  function save(patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments'>) {
     const now = Date.now();
     if (editing && editing !== 'new') {
       // Существующую обновляем и оставляем окно открытым (модалка сама уйдёт в отображение).
@@ -44,6 +46,7 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
         body: patch.body,
         type: patch.type ?? 'note',
         date: fixedDate ?? patch.date ?? null,
+        attachments: patch.attachments ?? [],
         createdAt: now,
         updatedAt: now,
       });
@@ -138,7 +141,7 @@ export function NoteModal({
   allNotes: Note[];
   relations?: Relation[];
   setRelations?: React.Dispatch<React.SetStateAction<Relation[]>>;
-  onSave: (patch: Pick<Note, 'title' | 'body' | 'date' | 'type'>) => void;
+  onSave: (patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments'>) => void;
   onDelete?: () => void;
   onClose: () => void;
 }) {
@@ -146,17 +149,34 @@ export function NoteModal({
   const [body, setBody] = useState(note?.body ?? '');
   const [date, setDate] = useState(note?.date ?? '');
   const [type, setType] = useState<NoteType>(note?.type ?? 'note');
+  const [attachments, setAttachments] = useState<Attachment[]>(note?.attachments ?? []);
   // Существующая заметка открывается отрендеренной; новая — сразу в правке.
   const [mode, setMode] = useState<'view' | 'edit'>(note ? 'view' : 'edit');
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  function patchOf(over?: Partial<Pick<Note, 'attachments'>>) {
+    return { title: title.trim() || 'Без названия', body, date: date || null, type, attachments, ...over };
+  }
   function handleSave() {
-    onSave({ title: title.trim() || 'Без названия', body, date: date || null, type });
+    onSave(patchOf());
     // Существующую оставляем открытой в режиме отображения; новую закрываем.
     if (note) setMode('view');
     else onClose();
   }
-  // «Назад» из правки: откатываем несохранённое и возвращаемся к отображению.
+  // Файлы сохраняем сразу (у существующей заметки), не дожидаясь «Сохранить».
+  function onAttach(added: Attachment[]) {
+    const next = [...attachments, ...added];
+    setAttachments(next);
+    if (note) onSave(patchOf({ attachments: next }));
+  }
+  function onDetach(a: Attachment) {
+    const next = attachments.filter((x) => x.id !== a.id);
+    setAttachments(next);
+    deleteAttachment(a);
+    if (note) onSave(patchOf({ attachments: next }));
+  }
+  // «Назад» из правки: откатываем несохранённые текстовые правки и возвращаемся
+  // к отображению. Вложения не откатываем — они сохраняются сразу при загрузке.
   function cancelEdit() {
     setTitle(note?.title ?? '');
     setBody(note?.body ?? '');
@@ -231,6 +251,8 @@ export function NoteModal({
               __html: renderMarkdown(body.trim() || '_Пусто. Нажмите, чтобы добавить текст…_'),
             }}
           />
+
+          <AttachmentList items={attachments} />
 
           <div className="modal-foot modal-foot-split">
             {onDelete ? (
@@ -328,6 +350,12 @@ export function NoteModal({
             <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </label>
         )}
+
+        <div className="field">
+          <span className="field-label">Файлы</span>
+          <AttachmentList items={attachments} onRemove={onDetach} />
+          <AttachmentAdder onAdd={onAttach} />
+        </div>
 
         {note && relations && setRelations && (
           <RelationsSection

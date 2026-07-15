@@ -22,6 +22,7 @@ import { collection, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firest
 import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
 import type {
+  Attachment,
   CalEvent,
   Checklist,
   ChecklistItem,
@@ -95,6 +96,18 @@ function cleanTask(t: Task): Task {
   };
 }
 
+function cleanAttachment(a: Attachment): Attachment {
+  return {
+    id: a.id,
+    name: a.name ?? '',
+    size: a.size ?? 0,
+    type: a.type ?? 'application/octet-stream',
+    url: a.url ?? '',
+    path: a.path ?? '',
+    createdAt: a.createdAt ?? 0,
+  };
+}
+
 function cleanNote(n: Note): Note {
   return {
     id: n.id,
@@ -102,6 +115,7 @@ function cleanNote(n: Note): Note {
     body: n.body,
     type: n.type ?? 'note',
     date: n.date ?? null,
+    attachments: (n.attachments ?? []).map(cleanAttachment),
     createdAt: n.createdAt,
     updatedAt: n.updatedAt ?? n.createdAt ?? 0,
     deleted: n.deleted ?? false,
@@ -144,6 +158,7 @@ function cleanItem(it: ChecklistItem): ChecklistItem {
     date: it.date ?? null,
     remindAt: it.remindAt ?? null,
     noteId: it.noteId ?? null,
+    attachments: (it.attachments ?? []).map(cleanAttachment),
     subitems: (it.subitems ?? []).map(cleanItem),
   };
 }
@@ -156,6 +171,8 @@ function cleanEvent(e: CalEvent): CalEvent {
     start: e.start ?? '',
     end: e.end ?? '',
     desc: e.desc ?? '',
+    repeat: e.repeat ?? 'none',
+    repeatUntil: e.repeatUntil ?? null,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt ?? e.createdAt ?? 0,
     deleted: e.deleted ?? false,
