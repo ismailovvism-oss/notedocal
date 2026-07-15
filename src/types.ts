@@ -45,6 +45,10 @@ export interface Note {
   type?: NoteType;
   /** Необязательная привязка к дню (YYYY-MM-DD). */
   date: string | null;
+  /** Время HH:mm (для записей дневника здоровья и др.). */
+  time?: string;
+  /** Если задано — заметка является записью дневника здоровья (её вид). */
+  health?: HealthKind;
   /** Прикреплённые файлы (Firebase Storage). */
   attachments?: Attachment[];
   createdAt: number;
@@ -169,5 +173,8 @@ export interface CalEvent {
   updatedAt: number;
   deleted?: boolean;
 }
+
+/** Вид записи дневника здоровья (когда заметка — запись здоровья). */
+export type HealthKind = 'meal' | 'med' | 'other';
 
 export type Tab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'months';
