@@ -7,9 +7,12 @@ import {
   HEALTH_KINDS,
   HEALTH_META,
   MEAL_GOAL,
+  eatingWindow,
   healthOnDay,
   mealPlan,
   mealScore,
+  mealStreaks,
+  minToHHMM,
 } from '../lib/health';
 import { NoteModal } from './NotesView';
 
@@ -41,6 +44,13 @@ function hhmm(ms: number): string {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function parseMin(t: string): number | null {
+  if (!t) return null;
+  const [h, m] = t.split(':').map(Number);
+  if (Number.isNaN(h)) return null;
+  return h * 60 + (m || 0);
 }
 
 export function HealthBoard({
@@ -98,6 +108,31 @@ export function HealthBoard({
           : { cls: 'good', text: `🍽 Пора на второй приём (уже ${fmtDur(-left)} назад)` };
     } else {
       banner = { cls: 'ok', text: '🟡 Пока 1 приём — цель 2' };
+    }
+  }
+
+  // Серия «зелёных» дней (глобально) и окно питания выбранного дня.
+  const streak = useMemo(() => mealStreaks(notes, dayKey(new Date()), gapHours), [notes, gapHours]);
+  const win = eatingWindow(list);
+
+  // Мягкое предупреждение: приём пищи слишком рано после предыдущего.
+  let soonWarn = '';
+  if (open && kind === 'meal') {
+    const formMin = parseMin(time);
+    const priorMins = list
+      .filter((e) => e.health === 'meal' && e.id !== editId)
+      .map((e) => parseMin(e.time ?? ''))
+      .filter((x): x is number => x != null);
+    if (formMin != null && priorMins.length) {
+      const nearest = Math.max(...priorMins.filter((m) => m <= formMin));
+      if (Number.isFinite(nearest)) {
+        const gapMin = formMin - nearest;
+        if (gapMin >= 0 && gapMin < gapHours * 60) {
+          const h = Math.floor(gapMin / 60);
+          const m = gapMin % 60;
+          soonWarn = `С прошлого приёма всего ${h > 0 ? `${h}ч ` : ''}${m}м — рекомендуется ≥ ${gapHours} ч`;
+        }
+      }
     }
   }
 
@@ -176,6 +211,23 @@ export function HealthBoard({
     <div className="hl-board">
       {banner && <div className={`hl-banner hl-banner-${banner.cls}`}>{banner.text}</div>}
 
+      {(streak.current > 0 || (win && win.windowMin > 0)) && (
+        <div className="hl-stats">
+          {streak.current > 0 && (
+            <span className="hl-stat" title="Дней подряд с правильным питанием">
+              🔥 Серия {streak.current}
+              {streak.best > streak.current ? ` · рекорд ${streak.best}` : ''}
+            </span>
+          )}
+          {win && win.windowMin > 0 && (
+            <span className="hl-stat" title="Окно питания и голодание">
+              🕰 Окно {minToHHMM(win.first)}–{minToHHMM(win.last)} ({(win.windowMin / 60).toFixed(1)}ч) ·
+              голодание ~{Math.round(win.fastingMin / 60)}ч
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="hl-goal muted small">
         Цель: {MEAL_GOAL} приёма в день · промежуток
         <input
@@ -240,6 +292,7 @@ export function HealthBoard({
               </button>
             ))}
           </div>
+          {soonWarn && <p className="hl-warn small">⚠ {soonWarn}</p>}
           <div className="ev-form-row">
             <input
               className="input"

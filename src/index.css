@@ -1378,6 +1378,51 @@ button {
   color: var(--text);
   font-size: 13px;
 }
+.hl-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hl-stat {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.hl-warn {
+  margin: 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+}
+/* Сводка питания в дашборде. */
+.db-health-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.dbh-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.dbh-stat {
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.dbh-streak {
+  background: color-mix(in srgb, var(--note) 20%, transparent);
+}
 .hl-board {
   display: flex;
   flex-direction: column;

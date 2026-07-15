@@ -10,7 +10,7 @@ import {
   todayKey,
 } from '../lib/dates';
 import { eventsOnDay } from '../lib/recurrence';
-import { HEALTH_META, healthOnDay } from '../lib/health';
+import { HEALTH_META, healthOnDay, mealPeriodSummary, mealStreaks } from '../lib/health';
 
 interface Props {
   events: CalEvent[];
@@ -19,6 +19,7 @@ interface Props {
   ownSightings: MoonSighting[];
   adminSightings: MoonSighting[];
   useAdmin: boolean;
+  mealGap: number;
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
 }
 
@@ -50,6 +51,7 @@ export function DashboardView({
   ownSightings,
   adminSightings,
   useAdmin,
+  mealGap,
   setChecklists,
 }: Props) {
   const { update } = useListActions(setChecklists);
@@ -126,6 +128,9 @@ export function DashboardView({
     (d) => eventsByDay.has(d) || notesByDay.has(d) || tasksByDay.has(d) || healthByDay.has(d),
   );
 
+  const healthSummary = useMemo(() => mealPeriodSummary(notes, days, mealGap), [notes, days, mealGap]);
+  const streak = useMemo(() => mealStreaks(notes, todayKey(), mealGap), [notes, mealGap]);
+
   return (
     <section className="view view-narrow">
       <div className="view-head">
@@ -150,6 +155,17 @@ export function DashboardView({
           <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
+
+      {healthSummary.mealDays > 0 && (
+        <div className="db-health-card">
+          <span className="dbh-title">🩺 Питание</span>
+          <span className="dbh-stat dbh-good">🟢 {healthSummary.good}</span>
+          <span className="dbh-stat dbh-ok">🟡 {healthSummary.ok}</span>
+          {healthSummary.over > 0 && <span className="dbh-stat dbh-over">🔴 {healthSummary.over}</span>}
+          <span className="muted small">~{healthSummary.avg.toFixed(1)} приёма/день</span>
+          {streak.current > 0 && <span className="dbh-stat dbh-streak">🔥 серия {streak.current}</span>}
+        </div>
+      )}
 
       {activeDays.length === 0 ? (
         <p className="empty">За этот период ничего нет</p>

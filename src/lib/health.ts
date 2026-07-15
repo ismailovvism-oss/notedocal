@@ -6,6 +6,7 @@
 // служебную папку «Здоровье» (заметка-папка с фиксированным id).
 
 import type { HealthKind, Note } from '../types';
+import { addDaysKey } from './dates';
 
 /** Фиксированный id папки-заметки «Здоровье» (одинаков на всех устройствах). */
 export const HEALTH_FOLDER_ID = 'health-folder';
@@ -90,4 +91,101 @@ export function mealPlan(entries: Note[], dateKey: string, gapHours: number): Me
   const nextMs =
     last && meals.length < MEAL_GOAL ? toMs(dateKey, last.time as string) + gapHours * 3600000 : null;
   return { count: meals.length, lastTime: last?.time ?? null, nextMs };
+}
+
+/** «HH:MM» из минут суток. */
+export function minToHHMM(min: number): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(Math.floor(min / 60))}:${p(min % 60)}`;
+}
+
+/** Приёмы пищи, сгруппированные по дню. */
+function groupMeals(notes: Note[]): Map<string, Note[]> {
+  const m = new Map<string, Note[]>();
+  for (const n of notes) {
+    if (n.deleted || n.health !== 'meal' || !n.date) continue;
+    const a = m.get(n.date);
+    if (a) a.push(n);
+    else m.set(n.date, [n]);
+  }
+  return m;
+}
+
+/** Серия «зелёных» дней: текущая (по сегодня) и рекорд. */
+export function mealStreaks(
+  notes: Note[],
+  todayKey: string,
+  gapHours: number,
+): { current: number; best: number } {
+  const byDay = groupMeals(notes);
+  const scoreOf = (k: string): MealScore => {
+    const e = byDay.get(k);
+    return e ? mealScore(e, gapHours) : 'none';
+  };
+
+  // Текущая серия: если сегодня ещё не «зелёный» (день в процессе) — считаем
+  // серию, оканчивающуюся вчера, чтобы незавершённый день её не обнулял.
+  let current = 0;
+  let d = scoreOf(todayKey) === 'good' ? todayKey : addDaysKey(todayKey, -1);
+  while (scoreOf(d) === 'good') {
+    current++;
+    d = addDaysKey(d, -1);
+  }
+
+  // Рекорд: самый длинный прогон «зелёных» дней в известной истории.
+  const keys = [...byDay.keys()].filter((k) => k <= todayKey).sort();
+  let best = current;
+  let run = 0;
+  if (keys.length) {
+    for (let day = keys[0]; day <= todayKey; day = addDaysKey(day, 1)) {
+      if (scoreOf(day) === 'good') {
+        run++;
+        if (run > best) best = run;
+      } else {
+        run = 0;
+      }
+    }
+  }
+  return { current, best };
+}
+
+/** Сводка по режиму питания за набор дней. */
+export function mealPeriodSummary(
+  notes: Note[],
+  dayKeys: string[],
+  gapHours: number,
+): { good: number; ok: number; over: number; mealDays: number; avg: number } {
+  const byDay = groupMeals(notes);
+  let good = 0;
+  let ok = 0;
+  let over = 0;
+  let mealDays = 0;
+  let meals = 0;
+  for (const k of dayKeys) {
+    const e = byDay.get(k);
+    if (!e || e.length === 0) continue;
+    const s = mealScore(e, gapHours);
+    if (s === 'good') good++;
+    else if (s === 'over') over++;
+    else ok++;
+    mealDays++;
+    meals += e.length;
+  }
+  return { good, ok, over, mealDays, avg: mealDays ? meals / mealDays : 0 };
+}
+
+/** Окно питания дня: от первого до последнего приёма + «голодание». */
+export function eatingWindow(
+  entries: Note[],
+): { first: number; last: number; windowMin: number; fastingMin: number } | null {
+  const times = entries
+    .filter((e) => e.health === 'meal')
+    .map((e) => mealMinutes(e.time))
+    .filter((x): x is number => x != null)
+    .sort((a, b) => a - b);
+  if (times.length === 0) return null;
+  const first = times[0];
+  const last = times[times.length - 1];
+  const windowMin = last - first;
+  return { first, last, windowMin, fastingMin: 24 * 60 - windowMin };
 }
