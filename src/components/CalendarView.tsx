@@ -13,7 +13,7 @@ import {
 } from '../lib/dates';
 import { useLocalStorage } from '../lib/storage';
 import { eventsOnDay } from '../lib/recurrence';
-import { HEALTH_META, healthCounts, healthOnDay } from '../lib/health';
+import { HEALTH_META, healthCounts, healthOnDay, mealScore } from '../lib/health';
 import { ChecklistBoard } from './ChecklistBoard';
 import { EventsBoard } from './EventsBoard';
 import { HealthBoard } from './HealthBoard';
@@ -32,6 +32,8 @@ interface Props {
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
   setEvents: React.Dispatch<React.SetStateAction<CalEvent[]>>;
   setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
+  mealGap: number;
+  setMealGap: React.Dispatch<React.SetStateAction<number>>;
 }
 
 export function CalendarView({
@@ -46,6 +48,8 @@ export function CalendarView({
   setChecklists,
   setEvents,
   setRelations,
+  mealGap,
+  setMealGap,
 }: Props) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string>(todayKey());
@@ -133,6 +137,8 @@ export function CalendarView({
             const shownLists = data ? data.lists.slice(0, Math.max(0, restForTasks)) : [];
             const total = (data?.events.length ?? 0) + (data?.lists.length ?? 0);
             const more = total - shownEvents.length - shownLists.length;
+            // Цвет дня по режиму питания (когда слой здоровья включён).
+            const score = showHealth && data ? mealScore(data.health, mealGap) : 'none';
             return (
               <button
                 key={key}
@@ -141,6 +147,7 @@ export function CalendarView({
                   inMonth ? '' : 'out',
                   isToday ? 'today' : '',
                   isSel ? 'sel' : '',
+                  score !== 'none' ? `score-${score}` : '',
                 ].join(' ')}
                 onClick={() => setSelected(key)}
               >
@@ -213,6 +220,8 @@ export function CalendarView({
               setNotes={setNotes}
               relations={relations}
               setRelations={setRelations}
+              gapHours={mealGap}
+              setGapHours={setMealGap}
             />
           </div>
         )}
