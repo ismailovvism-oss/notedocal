@@ -53,6 +53,7 @@ export interface ItemOps {
 export function ChecklistBoard({ date, checklists, setChecklists, notes }: Props) {
   const { add, update, remove } = useListActions(setChecklists);
   const [cols, setCols] = useLocalStorage<number>('ndc.cols', 1);
+  const [quick, setQuick] = useState('');
 
   const lists = useMemo(
     () =>
@@ -67,8 +68,33 @@ export function ChecklistBoard({ date, checklists, setChecklists, notes }: Props
     add({ id: uid(), title: '', date, items: [], createdAt: now, updatedAt: now });
   }
 
+  // Быстрая одиночная задача: без создания списка вручную — попадает в общий
+  // список без названия (создаётся при необходимости).
+  function addQuickTask(e: React.FormEvent) {
+    e.preventDefault();
+    const t = quick.trim();
+    if (!t) return;
+    const target = lists.find((l) => !l.title.trim());
+    if (target) {
+      update(target.id, { items: [...target.items, newItem(t)] });
+    } else {
+      const now = Date.now();
+      add({ id: uid(), title: '', date, items: [newItem(t)], createdAt: now, updatedAt: now });
+    }
+    setQuick('');
+  }
+
   return (
     <div className="cl-board">
+      <form className="cl-quick" onSubmit={addQuickTask}>
+        <input
+          className="input cl-quick-input"
+          placeholder="＋ Задача — быстро, без списка"
+          value={quick}
+          onChange={(e) => setQuick(e.target.value)}
+        />
+      </form>
+
       <div className="cl-board-head">
         <button className="btn btn-small" onClick={addList}>
           ＋ Список
@@ -89,7 +115,9 @@ export function ChecklistBoard({ date, checklists, setChecklists, notes }: Props
       </div>
 
       {lists.length === 0 ? (
-        <p className="cl-empty muted small">Списков пока нет — добавьте первый.</p>
+        <p className="cl-empty muted small">
+          Пусто — добавьте задачу в строке выше или создайте список.
+        </p>
       ) : (
         <div className="cl-grid" style={{ ['--cols' as string]: cols }}>
           {lists.map((c) => (
