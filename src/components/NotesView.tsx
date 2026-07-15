@@ -253,19 +253,6 @@ export function NoteModal({
           />
 
           <AttachmentList items={attachments} />
-
-          <div className="modal-foot modal-foot-split">
-            {onDelete ? (
-              <button className="btn cl-danger" onClick={onDelete}>
-                Удалить
-              </button>
-            ) : (
-              <span />
-            )}
-            <button className="btn btn-primary" onClick={() => setMode('edit')}>
-              ✎ Редактировать
-            </button>
-          </div>
         </div>
       </div>
     );
@@ -274,39 +261,50 @@ export function NoteModal({
   // --- Правка ---
   return (
     <div className="modal-overlay" onClick={overlayClose}>
-      <div className="modal modal-note" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
+      <div className="modal modal-note modal-note-edit" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head note-edit-head">
           {note ? (
-            <button className="md-tab" onClick={cancelEdit} title="Назад без сохранения">
+            <button className="ne-backbtn" onClick={cancelEdit} title="Назад без сохранения">
               ‹ Назад
             </button>
           ) : (
             <span className="field-label">Новая заметка</span>
           )}
-          <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
-            ✕
-          </button>
+          <div className="ne-head-actions">
+            {onDelete && (
+              <button className="ne-trash" onClick={onDelete} title="Удалить" aria-label="Удалить">
+                🗑
+              </button>
+            )}
+            <button className="ne-save" onClick={handleSave}>
+              Сохранить
+            </button>
+            <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
+              ✕
+            </button>
+          </div>
         </div>
 
-        <input
-          className="input modal-title"
-          placeholder="Заголовок"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
+        <div className="note-edit-body">
+          <input
+            className="input modal-title"
+            placeholder="Заголовок"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
 
-        <label className="field">
-          <span className="field-label">Тип</span>
-          <select className="input" value={type} onChange={(e) => setType(e.target.value as NoteType)}>
-            {(Object.keys(TYPE_LABELS) as NoteType[]).map((t) => (
-              <option key={t} value={t}>
-                {TYPE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="field">
+            <span className="field-label">Тип</span>
+            <select className="input" value={type} onChange={(e) => setType(e.target.value as NoteType)}>
+              {(Object.keys(TYPE_LABELS) as NoteType[]).map((t) => (
+                <option key={t} value={t}>
+                  {TYPE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <div className="md-toolbar">
+          <div className="md-toolbar">
           <button className="md-btn" title="Жирный" onClick={() => surround('**')}>
             <b>Ж</b>
           </button>
@@ -357,26 +355,14 @@ export function NoteModal({
           <AttachmentAdder onAdd={onAttach} />
         </div>
 
-        {note && relations && setRelations && (
-          <RelationsSection
-            note={note}
-            allNotes={allNotes}
-            relations={relations}
-            setRelations={setRelations}
-          />
-        )}
-
-        <div className="modal-foot modal-foot-split">
-          {onDelete ? (
-            <button className="btn cl-danger" onClick={onDelete}>
-              Удалить
-            </button>
-          ) : (
-            <span />
+          {note && relations && setRelations && (
+            <RelationsSection
+              note={note}
+              allNotes={allNotes}
+              relations={relations}
+              setRelations={setRelations}
+            />
           )}
-          <button className="btn btn-primary" onClick={handleSave}>
-            Сохранить
-          </button>
         </div>
       </div>
     </div>
