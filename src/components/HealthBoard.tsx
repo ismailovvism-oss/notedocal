@@ -1,7 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { HealthKind, Note, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
-import { HEALTH_FOLDER_ID, HEALTH_KINDS, HEALTH_META, healthOnDay } from '../lib/health';
+import { dayKey } from '../lib/dates';
+import {
+  HEALTH_FOLDER_ID,
+  HEALTH_KINDS,
+  HEALTH_META,
+  MEAL_GOAL,
+  healthOnDay,
+  mealPlan,
+  mealScore,
+} from '../lib/health';
 import { NoteModal } from './NotesView';
 
 interface Props {
@@ -10,6 +19,8 @@ interface Props {
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   relations: Relation[];
   setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
+  gapHours: number;
+  setGapHours: React.Dispatch<React.SetStateAction<number>>;
 }
 
 function nowTime(): string {
@@ -18,7 +29,29 @@ function nowTime(): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function HealthBoard({ date, notes, setNotes, relations, setRelations }: Props) {
+/** «3ч 20м» из миллисекунд. */
+function fmtDur(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h > 0 ? `${h}ч ${m}м` : `${m}м`;
+}
+
+function hhmm(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function HealthBoard({
+  date,
+  notes,
+  setNotes,
+  relations,
+  setRelations,
+  gapHours,
+  setGapHours,
+}: Props) {
   const notesActions = useListActions(setNotes);
   const relActions = useListActions(setRelations);
 
@@ -31,8 +64,42 @@ export function HealthBoard({ date, notes, setNotes, relations, setRelations }: 
   // Открытая заметка-запись в полном окне (фото, подробное описание).
   const [modalId, setModalId] = useState<string | null>(null);
 
+  // Тик раз в минуту — чтобы обратный отсчёт до следующего приёма обновлялся.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((v) => v + 1), 60000);
+    return () => clearInterval(t);
+  }, []);
+
   const list = useMemo(() => healthOnDay(notes, date), [notes, date]);
   const modalNote = modalId ? notes.find((n) => n.id === modalId) ?? null : null;
+
+  // Мотивация: оценка дня + подсказка о следующем приёме.
+  const isToday = date === dayKey(new Date());
+  const mealsCount = list.filter((e) => e.health === 'meal').length;
+  const score = mealScore(list, gapHours);
+  const plan = mealPlan(list, date, gapHours);
+
+  let banner: { cls: string; text: string } | null = null;
+  if (score === 'good') {
+    banner = { cls: 'good', text: `🟢 Отличный день: ${MEAL_GOAL} приёма с хорошим промежутком` };
+  } else if (score === 'over') {
+    banner = { cls: 'over', text: `🔴 Перебор: ${mealsCount} приёмов пищи (цель — ${MEAL_GOAL})` };
+  } else if (mealsCount === 3) {
+    banner = { cls: 'ok', text: '🟡 3 приёма — приемлемо, но цель — 2' };
+  } else if (mealsCount === MEAL_GOAL) {
+    banner = { cls: 'ok', text: '🟡 2 приёма, но промежуток маловат' };
+  } else if (mealsCount === 1) {
+    if (isToday && plan.nextMs) {
+      const left = plan.nextMs - Date.now();
+      banner =
+        left > 0
+          ? { cls: 'ok', text: `⏳ До второго приёма ~${fmtDur(left)} — в ${hhmm(plan.nextMs)}` }
+          : { cls: 'good', text: `🍽 Пора на второй приём (уже ${fmtDur(-left)} назад)` };
+    } else {
+      banner = { cls: 'ok', text: '🟡 Пока 1 приём — цель 2' };
+    }
+  }
 
   // Гарантируем существование папки «Здоровье».
   function ensureFolder() {
@@ -88,6 +155,15 @@ export function HealthBoard({ date, notes, setNotes, relations, setRelations }: 
         createdAt: now,
         updatedAt: now,
       });
+      // При первом приёме пищи спросим разрешение на уведомление о втором.
+      if (
+        kind === 'meal' &&
+        mealsCount === 0 &&
+        typeof Notification !== 'undefined' &&
+        Notification.permission === 'default'
+      ) {
+        Notification.requestPermission().catch(() => {});
+      }
     }
     setOpen(false);
   }
@@ -98,6 +174,21 @@ export function HealthBoard({ date, notes, setNotes, relations, setRelations }: 
 
   return (
     <div className="hl-board">
+      {banner && <div className={`hl-banner hl-banner-${banner.cls}`}>{banner.text}</div>}
+
+      <div className="hl-goal muted small">
+        Цель: {MEAL_GOAL} приёма в день · промежуток
+        <input
+          className="hl-gap-input"
+          type="number"
+          min={1}
+          max={12}
+          value={gapHours}
+          onChange={(e) => setGapHours(Math.min(12, Math.max(1, Number(e.target.value) || 1)))}
+        />
+        ч
+      </div>
+
       {list.length > 0 && (
         <ul className="hl-list">
           {list.map((n) => {

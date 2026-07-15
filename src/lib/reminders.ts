@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
-import type { Checklist, ChecklistItem } from '../types';
+import type { Checklist, ChecklistItem, Note } from '../types';
+import { dayKey } from './dates';
+import { healthOnDay, mealPlan } from './health';
 
 function flatten(items: ChecklistItem[], acc: ChecklistItem[] = []): ChecklistItem[] {
   for (const it of items) {
@@ -48,4 +50,39 @@ export function useReminders(checklists: Checklist[]): void {
     }
     return () => timers.forEach(clearTimeout);
   }, [checklists]);
+}
+
+/**
+ * Напоминание о следующем приёме пищи. После первого приёма за сегодня
+ * ставит таймер на «время первого + промежуток» и показывает уведомление,
+ * что пора на второй приём (цель — 2 приёма в день).
+ */
+export function useMealReminder(notes: Note[], gapHours: number): void {
+  const fired = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const today = dayKey(new Date());
+    const plan = mealPlan(healthOnDay(notes, today), today, gapHours);
+    if (!plan.nextMs) return;
+
+    const delay = plan.nextMs - Date.now();
+    const key = `meal:${today}:${plan.lastTime}`;
+    if (fired.current.has(key)) return;
+    if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return;
+
+    const timer = setTimeout(() => {
+      fired.current.add(key);
+      if (Notification.permission === 'granted') {
+        try {
+          new Notification('Пора на второй приём пищи 🍽', {
+            body: 'Ты планировал 2 приёма в день — время следующего.',
+          });
+        } catch {
+          /* игнорируем */
+        }
+      }
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [notes, gapHours]);
 }

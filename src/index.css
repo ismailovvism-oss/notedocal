@@ -14,6 +14,7 @@
   --normal: #3b82a0;
   --low: #9aa3ad;
   --health: #b0568f;
+  --warn: #d9a441;
   --radius: 14px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -32,6 +33,7 @@
   --task: #4fb39b;
   --note: #e0a85c;
   --health: #d17fb4;
+  --warn: #e0b04f;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
@@ -1330,6 +1332,51 @@ button {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
+}
+/* Цвет дня по режиму питания: зелёный — отлично, жёлтый — средне, красный — перебор. */
+.cal-cell.score-good:not(.sel) {
+  background: color-mix(in srgb, var(--task) 16%, var(--surface));
+}
+.cal-cell.score-ok:not(.sel) {
+  background: color-mix(in srgb, var(--warn) 20%, var(--surface));
+}
+.cal-cell.score-over:not(.sel) {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+}
+
+/* Мотивационный баннер и настройка режима питания. */
+.hl-banner {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+}
+.hl-banner-good {
+  background: color-mix(in srgb, var(--task) 16%, transparent);
+  border-color: color-mix(in srgb, var(--task) 45%, transparent);
+}
+.hl-banner-ok {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.hl-banner-over {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.hl-goal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.hl-gap-input {
+  width: 52px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
 }
 .hl-board {
   display: flex;

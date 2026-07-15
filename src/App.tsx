@@ -2,7 +2,8 @@ import { useEffect, useMemo } from 'react';
 import type { CalEvent, Checklist, MoonSighting, Note, Relation, Tab, Task } from './types';
 import { useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
-import { useReminders } from './lib/reminders';
+import { useMealReminder, useReminders } from './lib/reminders';
+import { DEFAULT_MEAL_GAP_H } from './lib/health';
 import { formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
 import { ChecklistBoard } from './components/ChecklistBoard';
@@ -42,6 +43,7 @@ export default function App() {
   const [checklists, setChecklists] = useLocalStorage<Checklist[]>('ndc.checklists', []);
   const [events, setEvents] = useLocalStorage<CalEvent[]>('ndc.events', []);
   const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
+  const [mealGap, setMealGap] = useLocalStorage<number>('ndc.mealGapH', DEFAULT_MEAL_GAP_H);
   // Официальный календарь админа (общий документ) и предпочтение его использовать.
   const [adminSightings, setAdminSightings] = useLocalStorage<MoonSighting[]>('ndc.admin', []);
   const [useAdmin, setUseAdmin] = useLocalStorage<boolean>('ndc.useAdmin', true);
@@ -72,6 +74,7 @@ export default function App() {
 
   // В интерфейс отдаём данные без надгробий (мягко удалённых записей).
   const visibleNotes = useMemo(() => visible(notes), [notes]);
+  useMealReminder(visibleNotes, mealGap);
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
   const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
   const visibleEvents = useMemo(() => visible(events), [events]);
@@ -152,6 +155,8 @@ export default function App() {
             setChecklists={setChecklists}
             setEvents={setEvents}
             setRelations={setRelations}
+            mealGap={mealGap}
+            setMealGap={setMealGap}
           />
         )}
         {tab === 'tasks' && (
