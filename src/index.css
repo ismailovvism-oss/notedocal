@@ -913,6 +913,13 @@ button {
   justify-content: space-between;
   gap: 8px;
 }
+.cl-quick {
+  display: flex;
+}
+.cl-quick-input {
+  width: 100%;
+  font-size: 14px;
+}
 .cl-cols {
   display: inline-flex;
   border: 1px solid var(--border);
