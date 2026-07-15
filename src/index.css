@@ -1554,6 +1554,73 @@ button {
 .note-read-tap { cursor: text; border-radius: 10px; padding: 4px; margin: -4px; }
 .note-read-tap:hover { background: var(--surface-2); }
 
+/* ---------- Правка заметки: липкая шапка с действиями, прокрутка тела ---------- */
+.modal-note-edit {
+  max-height: calc(100dvh - 48px);
+  overflow: hidden;
+}
+.note-edit-head {
+  flex: none;
+  gap: 8px;
+}
+.ne-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.note-edit-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ne-backbtn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ne-backbtn:hover {
+  background: var(--surface-2);
+}
+/* Изящная основная кнопка «Сохранить». */
+.ne-save {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: filter 0.12s;
+}
+.ne-save:hover {
+  filter: brightness(1.06);
+}
+/* Ненавязчивая «корзина», краснеет при наведении. */
+.ne-trash {
+  border: none;
+  background: none;
+  font-size: 15px;
+  line-height: 1;
+  padding: 7px 9px;
+  border-radius: 8px;
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 0.12s, background 0.12s;
+}
+.ne-trash:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
 /* ---------- Тип заметки и связи ---------- */
 .type-badge {
   display: inline-block;
