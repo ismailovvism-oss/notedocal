@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   Checklist,
   ChecklistItem,
@@ -81,7 +82,10 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
         )}
       </button>
 
-      {open && (
+      {/* Портал: топбар с backdrop-filter стал бы контейнером для fixed,
+          и модалка ушла бы под контент — рендерим её в body. */}
+      {open &&
+        createPortal(
         <div className="modal-overlay" onClick={() => setOpen(false)}>
           <div className="modal pomo-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
@@ -212,7 +216,8 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
               {todayMin > 0 && <span className="muted small">{todayMin} мин</span>}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
