@@ -2014,3 +2014,85 @@ button {
 }
 .tree-label.active { background: var(--accent-soft); color: var(--accent); }
 .tree-node .tree-node { padding-left: 16px; }
+
+/* ---------- Помидоро ---------- */
+.pomo-widget {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  padding: 0 8px;
+}
+.pomo-widget.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.pomo-widget.paused { opacity: 0.6; }
+.pomo-widget-time {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pomo-modal { max-width: 420px; }
+.pomo-head-btns { display: flex; gap: 6px; }
+
+.pomo-timer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2, var(--bg));
+}
+.pomo-timer.phase-work { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.pomo-time {
+  font-size: 44px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.pomo-phase { font-size: 13px; }
+.pomo-task {
+  font-size: 13px;
+  color: var(--accent);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pomo-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.pomo-settings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pomo-settings .field span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pomo-today {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pomo-today-count { font-size: 14px; letter-spacing: 2px; }
+
+.dbh-pomo-task {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

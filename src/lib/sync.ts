@@ -28,6 +28,7 @@ import type {
   ChecklistItem,
   MoonSighting,
   Note,
+  PomodoroSession,
   Relation,
   Task,
 } from '../types';
@@ -48,6 +49,9 @@ interface Params {
   /** Связи между заметками (подколлекция users/{uid}/relations). */
   relations: Relation[];
   setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
+  /** Журнал помидорок (подколлекция users/{uid}/pomodoros). */
+  pomodoros: PomodoroSession[];
+  setPomodoros: React.Dispatch<React.SetStateAction<PomodoroSession[]>>;
   /** Официальный календарь наблюдений (общий документ). */
   adminSightings: MoonSighting[];
   setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
@@ -134,6 +138,20 @@ function cleanRelation(r: Relation): Relation {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt ?? r.createdAt ?? 0,
     deleted: r.deleted ?? false,
+  };
+}
+
+function cleanPomodoro(p: PomodoroSession): PomodoroSession {
+  return {
+    id: p.id,
+    date: p.date,
+    start: p.start ?? '',
+    durationMin: p.durationMin ?? 0,
+    itemId: p.itemId ?? null,
+    itemText: p.itemText ?? '',
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt ?? p.createdAt ?? 0,
+    deleted: p.deleted ?? false,
   };
 }
 
@@ -277,6 +295,8 @@ export function useCloudSync({
   setEvents,
   relations,
   setRelations,
+  pomodoros,
+  setPomodoros,
   adminSightings,
   setAdminSightings,
 }: Params): Result {
@@ -287,9 +307,10 @@ export function useCloudSync({
 
   const isAdmin = !!user?.email && user.email === ADMIN_EMAIL;
 
-  // Заметки и связи — в подколлекциях users/{uid}/{notes,relations}.
+  // Заметки, связи и помидорки — в подколлекциях users/{uid}/{notes,relations,pomodoros}.
   useCollectionSync(user, 'notes', notes, setNotes, cleanNote);
   useCollectionSync(user, 'relations', relations, setRelations, cleanRelation);
+  useCollectionSync(user, 'pomodoros', pomodoros, setPomodoros, cleanPomodoro);
 
   // Свежие значения для использования внутри колбэков подписки без переподписки.
   const tasksRef = useRef(tasks);

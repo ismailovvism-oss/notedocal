@@ -1,15 +1,27 @@
-import { useEffect, useMemo } from 'react';
-import type { CalEvent, Checklist, MoonSighting, Note, Relation, Tab, Task } from './types';
-import { useLocalStorage, visible } from './lib/storage';
+import { useCallback, useEffect, useMemo } from 'react';
+import type {
+  CalEvent,
+  Checklist,
+  MoonSighting,
+  Note,
+  PomodoroSession,
+  PomodoroSettings,
+  Relation,
+  Tab,
+  Task,
+} from './types';
+import { uid, useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
-import { formatHijri, hijriFor } from './lib/dates';
+import { DEFAULT_POMODORO, usePomodoro } from './lib/pomodoro';
+import { dayKey, formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
 import { ChecklistBoard } from './components/ChecklistBoard';
 import { NotesExplorer } from './components/NotesExplorer';
 import { MonthsView } from './components/MonthsView';
 import { DashboardView } from './components/DashboardView';
+import { PomodoroWidget } from './components/PomodoroWidget';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Обзор', icon: '📊' },
@@ -44,6 +56,11 @@ export default function App() {
   const [events, setEvents] = useLocalStorage<CalEvent[]>('ndc.events', []);
   const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
   const [mealGap, setMealGap] = useLocalStorage<number>('ndc.mealGapH', DEFAULT_MEAL_GAP_H);
+  const [pomodoros, setPomodoros] = useLocalStorage<PomodoroSession[]>('ndc.pomodoros', []);
+  const [pomodoroSettings, setPomodoroSettings] = useLocalStorage<PomodoroSettings>(
+    'ndc.pomodoroSettings',
+    DEFAULT_POMODORO,
+  );
   // Официальный календарь админа (общий документ) и предпочтение его использовать.
   const [adminSightings, setAdminSightings] = useLocalStorage<MoonSighting[]>('ndc.admin', []);
   const [useAdmin, setUseAdmin] = useLocalStorage<boolean>('ndc.useAdmin', true);
@@ -53,6 +70,29 @@ export default function App() {
   }, [theme]);
 
   useReminders(checklists);
+
+  // Завершённая рабочая помидорка → запись в журнал (синхронизируемый).
+  const logPomodoro = useCallback(
+    (startedAt: number, durationMin: number, itemId: string | null, itemText: string) => {
+      const d = new Date(startedAt);
+      const now = Date.now();
+      setPomodoros((l) => [
+        {
+          id: uid(),
+          date: dayKey(d),
+          start: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+          durationMin,
+          itemId,
+          itemText,
+          createdAt: now,
+          updatedAt: now,
+        },
+        ...l,
+      ]);
+    },
+    [setPomodoros],
+  );
+  const pomodoro = usePomodoro(pomodoroSettings, logPomodoro);
 
   const sync = useCloudSync({
     tasks,
@@ -67,6 +107,8 @@ export default function App() {
     setEvents,
     relations,
     setRelations,
+    pomodoros,
+    setPomodoros,
     adminSightings,
     setAdminSightings,
   });
@@ -80,6 +122,7 @@ export default function App() {
   const visibleEvents = useMemo(() => visible(events), [events]);
   const visibleRelations = useMemo(() => visible(relations), [relations]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
+  const visiblePomodoros = useMemo(() => visible(pomodoros), [pomodoros]);
 
   // Админ показывает официальный календарь всегда; остальные — по переключателю.
   const effectiveUseAdmin = isAdmin || useAdmin;
@@ -100,6 +143,13 @@ export default function App() {
         </div>
 
         <div className="account">
+          <PomodoroWidget
+            pomodoro={pomodoro}
+            sessions={visiblePomodoros}
+            settings={pomodoroSettings}
+            setSettings={setPomodoroSettings}
+            checklists={visibleChecklists}
+          />
           <button
             className="icon-btn theme-toggle"
             onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
@@ -136,6 +186,7 @@ export default function App() {
             events={visibleEvents}
             checklists={visibleChecklists}
             notes={visibleNotes}
+            pomodoros={visiblePomodoros}
             ownSightings={visibleSightings}
             adminSightings={visibleAdmin}
             useAdmin={effectiveUseAdmin}
