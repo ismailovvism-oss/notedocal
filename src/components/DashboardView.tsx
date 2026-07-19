@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { CalEvent, Checklist, ChecklistItem, MoonSighting, Note } from '../types';
+import type {
+  CalEvent,
+  Checklist,
+  ChecklistItem,
+  MoonSighting,
+  Note,
+  PomodoroSession,
+} from '../types';
 import { useListActions } from '../lib/storage';
 import {
   addDaysKey,
@@ -16,6 +23,7 @@ interface Props {
   events: CalEvent[];
   checklists: Checklist[];
   notes: Note[];
+  pomodoros: PomodoroSession[];
   ownSightings: MoonSighting[];
   adminSightings: MoonSighting[];
   useAdmin: boolean;
@@ -48,6 +56,7 @@ export function DashboardView({
   events,
   checklists,
   notes,
+  pomodoros,
   ownSightings,
   adminSightings,
   useAdmin,
@@ -131,6 +140,21 @@ export function DashboardView({
   const healthSummary = useMemo(() => mealPeriodSummary(notes, days, mealGap), [notes, days, mealGap]);
   const streak = useMemo(() => mealStreaks(notes, todayKey(), mealGap), [notes, mealGap]);
 
+  // Помидорки за период: всего, минут и топ задач по числу сессий.
+  const pomoSummary = useMemo(() => {
+    const daySet = new Set(days);
+    const inRange = pomodoros.filter((p) => daySet.has(p.date));
+    const byTask = new Map<string, number>();
+    let minutes = 0;
+    for (const p of inRange) {
+      minutes += p.durationMin;
+      const key = p.itemText || 'Без задачи';
+      byTask.set(key, (byTask.get(key) ?? 0) + 1);
+    }
+    const top = [...byTask.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    return { count: inRange.length, minutes, top };
+  }, [pomodoros, days]);
+
   return (
     <section className="view view-narrow">
       <div className="view-head">
@@ -155,6 +179,19 @@ export function DashboardView({
           <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
+
+      {pomoSummary.count > 0 && (
+        <div className="db-health-card">
+          <span className="dbh-title">🍅 Помидоро</span>
+          <span className="dbh-stat">×{pomoSummary.count}</span>
+          <span className="muted small">{pomoSummary.minutes} мин</span>
+          {pomoSummary.top.map(([text, n]) => (
+            <span key={text} className="dbh-stat dbh-pomo-task">
+              {text} ×{n}
+            </span>
+          ))}
+        </div>
+      )}
 
       {healthSummary.mealDays > 0 && (
         <div className="db-health-card">

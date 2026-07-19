@@ -177,4 +177,35 @@ export interface CalEvent {
 /** Вид записи дневника здоровья (когда заметка — запись здоровья). */
 export type HealthKind = 'meal' | 'med' | 'other';
 
+/** Фаза помидоро-таймера: работа, короткий или длинный перерыв. */
+export type PomodoroPhase = 'work' | 'short' | 'long';
+
+/** Настройки помидоро-таймера (длительности в минутах). */
+export interface PomodoroSettings {
+  workMin: number;
+  shortMin: number;
+  longMin: number;
+  /** Сколько рабочих циклов до длинного перерыва. */
+  cyclesToLong: number;
+}
+
+/** Завершённая рабочая помидорка — запись журнала (синхронизируется). */
+export interface PomodoroSession {
+  id: string;
+  /** День (YYYY-MM-DD). */
+  date: string;
+  /** Время начала HH:mm. */
+  start: string;
+  /** Продолжительность работы в минутах. */
+  durationMin: number;
+  /** Пункт чек-листа, над которым работал (id), либо null. */
+  itemId?: string | null;
+  /** Название задачи на момент сессии — чтобы история читалась и после её удаления. */
+  itemText?: string;
+  createdAt: number;
+  updatedAt: number;
+  /** Мягкое удаление (надгробие) — для синхронизации. */
+  deleted?: boolean;
+}
+
 export type Tab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'months';
