@@ -26,6 +26,7 @@ import type {
   CalEvent,
   Checklist,
   ChecklistItem,
+  FinanceEntry,
   MoonSighting,
   Note,
   PomodoroSession,
@@ -52,6 +53,9 @@ interface Params {
   /** Журнал помидорок (подколлекция users/{uid}/pomodoros). */
   pomodoros: PomodoroSession[];
   setPomodoros: React.Dispatch<React.SetStateAction<PomodoroSession[]>>;
+  /** Домашняя бухгалтерия (подколлекция users/{uid}/finance). */
+  finance: FinanceEntry[];
+  setFinance: React.Dispatch<React.SetStateAction<FinanceEntry[]>>;
   /** Официальный календарь наблюдений (общий документ). */
   adminSightings: MoonSighting[];
   setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
@@ -125,6 +129,21 @@ function cleanNote(n: Note): Note {
     createdAt: n.createdAt,
     updatedAt: n.updatedAt ?? n.createdAt ?? 0,
     deleted: n.deleted ?? false,
+  };
+}
+
+function cleanFinance(f: FinanceEntry): FinanceEntry {
+  return {
+    id: f.id,
+    kind: f.kind,
+    amount: f.amount ?? 0,
+    date: f.date,
+    person: f.person ?? '',
+    category: f.category ?? '',
+    note: f.note ?? '',
+    createdAt: f.createdAt,
+    updatedAt: f.updatedAt ?? f.createdAt ?? 0,
+    deleted: f.deleted ?? false,
   };
 }
 
@@ -297,6 +316,8 @@ export function useCloudSync({
   setRelations,
   pomodoros,
   setPomodoros,
+  finance,
+  setFinance,
   adminSightings,
   setAdminSightings,
 }: Params): Result {
@@ -311,6 +332,7 @@ export function useCloudSync({
   useCollectionSync(user, 'notes', notes, setNotes, cleanNote);
   useCollectionSync(user, 'relations', relations, setRelations, cleanRelation);
   useCollectionSync(user, 'pomodoros', pomodoros, setPomodoros, cleanPomodoro);
+  useCollectionSync(user, 'finance', finance, setFinance, cleanFinance);
 
   // Свежие значения для использования внутри колбэков подписки без переподписки.
   const tasksRef = useRef(tasks);

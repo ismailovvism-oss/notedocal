@@ -208,4 +208,28 @@ export interface PomodoroSession {
   deleted?: boolean;
 }
 
-export type Tab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'months';
+/** Вид финансовой записи:
+ *  расход/доход — обычные траты и поступления;
+ *  lent — я дал в долг (мне должны), borrowed — я взял в долг (я должен);
+ *  return_in — мне вернули долг, return_out — я вернул долг. */
+export type FinanceKind = 'expense' | 'income' | 'lent' | 'borrowed' | 'return_in' | 'return_out';
+
+/** Запись домашней бухгалтерии. */
+export interface FinanceEntry {
+  id: string;
+  kind: FinanceKind;
+  /** Сумма (положительная); знак задаётся видом записи. */
+  amount: number;
+  /** Дата (YYYY-MM-DD). */
+  date: string;
+  /** Контрагент (для долгов). */
+  person?: string;
+  /** Категория (для расходов/доходов), напр. «Коммуналка». */
+  category?: string;
+  note?: string;
+  createdAt: number;
+  updatedAt: number;
+  deleted?: boolean;
+}
+
+export type Tab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'months' | 'finance';

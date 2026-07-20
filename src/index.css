@@ -1333,6 +1333,216 @@ button {
   margin: 4px 0;
 }
 
+/* ---------- Финансы ---------- */
+.fin-cur {
+  width: 84px;
+  flex: none;
+  text-align: center;
+}
+.fin-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.fin-tab {
+  border: none;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 8px 18px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.fin-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+.fin-summary {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.fin-sum-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.fin-sum-card b {
+  font-size: 20px;
+}
+.fin-sum-card.pos b {
+  color: var(--task);
+}
+.fin-sum-card.neg b {
+  color: var(--danger);
+}
+.fin-people {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fin-person {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.fin-person:hover {
+  background: var(--surface-2);
+}
+.fin-person-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  word-break: break-word;
+}
+.fin-net {
+  font-weight: 600;
+  font-size: 14px;
+}
+.fin-net.pos {
+  color: var(--task);
+}
+.fin-net.neg {
+  color: var(--danger);
+}
+.fin-chev {
+  color: var(--muted);
+  font-size: 18px;
+}
+.fin-back {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  padding: 4px 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.fin-person-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.fin-person-head h3 {
+  margin: 0;
+  font-size: 19px;
+  word-break: break-word;
+}
+.fin-ledger,
+.fin-exp-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fin-led-item,
+.fin-exp-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.fin-led-date {
+  color: var(--muted);
+  font-size: 12px;
+  width: 74px;
+  flex: none;
+}
+.fin-led-kind,
+.fin-exp-cat {
+  flex: 1;
+  min-width: 90px;
+}
+.fin-led-amt {
+  font-weight: 600;
+}
+.fin-led-amt.pos {
+  color: var(--task);
+}
+.fin-led-amt.neg {
+  color: var(--danger);
+}
+.fin-led-run {
+  flex: none;
+}
+.fin-led-note {
+  width: 100%;
+}
+.fin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.fin-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fin-dates {
+  margin-bottom: 12px;
+}
+.fin-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.fin-cat-chip {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.fin-cat-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fin-cat-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.fin-cat-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ---------- Слой «Здоровье» на календаре ---------- */
 .cal-layers {
   display: flex;
