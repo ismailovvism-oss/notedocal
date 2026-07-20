@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import type {
   CalEvent,
   Checklist,
+  FinanceEntry,
   MoonSighting,
   Note,
   PomodoroSession,
@@ -21,6 +22,7 @@ import { ChecklistBoard } from './components/ChecklistBoard';
 import { NotesExplorer } from './components/NotesExplorer';
 import { MonthsView } from './components/MonthsView';
 import { DashboardView } from './components/DashboardView';
+import { FinanceView } from './components/FinanceView';
 import { PomodoroWidget } from './components/PomodoroWidget';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
@@ -28,6 +30,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'calendar', label: 'Календарь', icon: '📅' },
   { id: 'tasks', label: 'Задачи', icon: '✓' },
   { id: 'notes', label: 'Заметки', icon: '📝' },
+  { id: 'finance', label: 'Финансы', icon: '💰' },
   { id: 'months', label: 'Месяцы', icon: '🌙' },
 ];
 
@@ -55,6 +58,8 @@ export default function App() {
   const [checklists, setChecklists] = useLocalStorage<Checklist[]>('ndc.checklists', []);
   const [events, setEvents] = useLocalStorage<CalEvent[]>('ndc.events', []);
   const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
+  const [finance, setFinance] = useLocalStorage<FinanceEntry[]>('ndc.finance', []);
+  const [currency, setCurrency] = useLocalStorage<string>('ndc.currency', '');
   const [mealGap, setMealGap] = useLocalStorage<number>('ndc.mealGapH', DEFAULT_MEAL_GAP_H);
   const [pomodoros, setPomodoros] = useLocalStorage<PomodoroSession[]>('ndc.pomodoros', []);
   const [pomodoroSettings, setPomodoroSettings] = useLocalStorage<PomodoroSettings>(
@@ -107,6 +112,8 @@ export default function App() {
     setEvents,
     relations,
     setRelations,
+    finance,
+    setFinance,
     pomodoros,
     setPomodoros,
     adminSightings,
@@ -121,6 +128,7 @@ export default function App() {
   const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
   const visibleEvents = useMemo(() => visible(events), [events]);
   const visibleRelations = useMemo(() => visible(relations), [relations]);
+  const visibleFinance = useMemo(() => visible(finance), [finance]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
   const visiblePomodoros = useMemo(() => visible(pomodoros), [pomodoros]);
 
@@ -231,6 +239,14 @@ export default function App() {
             setNotes={setNotes}
             relations={visibleRelations}
             setRelations={setRelations}
+          />
+        )}
+        {tab === 'finance' && (
+          <FinanceView
+            finance={visibleFinance}
+            setFinance={setFinance}
+            currency={currency}
+            setCurrency={setCurrency}
           />
         )}
         {tab === 'months' && (
