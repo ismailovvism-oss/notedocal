@@ -51,6 +51,7 @@ export function ContactCard({
   const [docEditId, setDocEditId] = useState<string | null>(null);
   const [credEditId, setCredEditId] = useState<string | null>(null);
   const [pw, setPw] = useState('');
+  const [pwHint, setPwHint] = useState('');
   const [pwErr, setPwErr] = useState('');
   const [revealed, setRevealed] = useState<Record<string, string>>({});
 
@@ -102,9 +103,13 @@ export function ContactCard({
   }
   async function submitPw() {
     setPwErr('');
-    const ok = vault.status === 'unset' ? (await vault.setup(pw), true) : await vault.unlock(pw);
+    if (!pw) return;
+    const ok = vault.status === 'unset' ? (await vault.setup(pw, pwHint), true) : await vault.unlock(pw);
     if (!ok) setPwErr('Неверный мастер-пароль');
-    else setPw('');
+    else {
+      setPw('');
+      setPwHint('');
+    }
   }
 
   const docEditNote = docEditId ? notes.find((n) => n.id === docEditId) ?? null : null;
@@ -335,6 +340,9 @@ export function ContactCard({
                     ? 'Задайте мастер-пароль — им шифруются пароли (в облаке только шифртекст). Забудете — восстановить нельзя.'
                     : 'Введите мастер-пароль, чтобы показать пароли.'}
                 </p>
+                {vault.status === 'locked' && vault.hint && (
+                  <p className="muted small">Подсказка: {vault.hint}</p>
+                )}
                 <div className="cred-secret">
                   <input
                     className="input"
@@ -348,6 +356,14 @@ export function ContactCard({
                     {vault.status === 'unset' ? 'Задать' : 'Открыть'}
                   </button>
                 </div>
+                {vault.status === 'unset' && (
+                  <input
+                    className="input"
+                    placeholder="Подсказка (необязательно, не секретная)"
+                    value={pwHint}
+                    onChange={(e) => setPwHint(e.target.value)}
+                  />
+                )}
                 {pwErr && <p className="rel-error small">{pwErr}</p>}
               </div>
             ) : creds.length === 0 ? (
