@@ -1594,6 +1594,11 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.dir-loc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .cc-section {
   margin-top: 14px;
   padding-top: 12px;
