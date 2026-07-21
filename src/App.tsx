@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   CalEvent,
   Checklist,
@@ -75,6 +75,14 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  // Держим активную вкладку в поле зрения (прокручиваемая навигация).
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    navRef.current
+      ?.querySelector('.tab.active')
+      ?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [tab]);
 
   useReminders(checklists);
 
@@ -283,7 +291,7 @@ export default function App() {
         )}
       </main>
 
-      <nav className="tabbar">
+      <nav className="tabbar" ref={navRef}>
         {TABS.map((t) => (
           <button
             key={t.id}
