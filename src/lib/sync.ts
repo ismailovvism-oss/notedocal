@@ -26,6 +26,7 @@ import type {
   CalEvent,
   Checklist,
   ChecklistItem,
+  ClipItem,
   FinanceEntry,
   MoonSighting,
   Note,
@@ -56,6 +57,9 @@ interface Params {
   /** Домашняя бухгалтерия (подколлекция users/{uid}/finance). */
   finance: FinanceEntry[];
   setFinance: React.Dispatch<React.SetStateAction<FinanceEntry[]>>;
+  /** Общий буфер обмена (подколлекция users/{uid}/clipboard). */
+  clipboard: ClipItem[];
+  setClipboard: React.Dispatch<React.SetStateAction<ClipItem[]>>;
   /** Официальный календарь наблюдений (общий документ). */
   adminSightings: MoonSighting[];
   setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
@@ -142,6 +146,18 @@ function cleanNote(n: Note): Note {
     createdAt: n.createdAt,
     updatedAt: n.updatedAt ?? n.createdAt ?? 0,
     deleted: n.deleted ?? false,
+  };
+}
+
+function cleanClip(c: ClipItem): ClipItem {
+  return {
+    id: c.id,
+    kind: c.kind,
+    text: c.text ?? '',
+    ...(c.attachment ? { attachment: cleanAttachment(c.attachment) } : {}),
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt ?? c.createdAt ?? 0,
+    deleted: c.deleted ?? false,
   };
 }
 
@@ -332,6 +348,8 @@ export function useCloudSync({
   setPomodoros,
   finance,
   setFinance,
+  clipboard,
+  setClipboard,
   adminSightings,
   setAdminSightings,
 }: Params): Result {
@@ -347,6 +365,7 @@ export function useCloudSync({
   useCollectionSync(user, 'relations', relations, setRelations, cleanRelation);
   useCollectionSync(user, 'pomodoros', pomodoros, setPomodoros, cleanPomodoro);
   useCollectionSync(user, 'finance', finance, setFinance, cleanFinance);
+  useCollectionSync(user, 'clipboard', clipboard, setClipboard, cleanClip);
 
   // Свежие значения для использования внутри колбэков подписки без переподписки.
   const tasksRef = useRef(tasks);

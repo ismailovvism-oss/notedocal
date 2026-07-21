@@ -272,6 +272,19 @@ export interface FinanceEntry {
   deleted?: boolean;
 }
 
+/** Элемент общего буфера обмена (синхронизируется между устройствами). */
+export interface ClipItem {
+  id: string;
+  kind: 'text' | 'file';
+  /** Текст (для kind='text'). */
+  text?: string;
+  /** Файл (для kind='file') в Firebase Storage. */
+  attachment?: Attachment;
+  createdAt: number;
+  updatedAt: number;
+  deleted?: boolean;
+}
+
 export type Tab =
   | 'dashboard'
   | 'calendar'
@@ -279,4 +292,5 @@ export type Tab =
   | 'notes'
   | 'finance'
   | 'directory'
+  | 'clipboard'
   | 'months';

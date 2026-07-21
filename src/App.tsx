@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   CalEvent,
   Checklist,
+  ClipItem,
   FinanceEntry,
   MoonSighting,
   Note,
@@ -13,7 +14,7 @@ import type {
 } from './types';
 import { uid, useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
-import { useMealReminder, useReminders } from './lib/reminders';
+import { useDocReminder, useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
 import { VAULT_META_ID, useVault } from './lib/vault';
 import { DEFAULT_POMODORO, usePomodoro } from './lib/pomodoro';
@@ -25,6 +26,7 @@ import { MonthsView } from './components/MonthsView';
 import { DashboardView } from './components/DashboardView';
 import { FinanceView } from './components/FinanceView';
 import { DirectoryView } from './components/DirectoryView';
+import { ClipboardView } from './components/ClipboardView';
 import { PomodoroWidget } from './components/PomodoroWidget';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
@@ -34,6 +36,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'notes', label: 'Заметки', icon: '📝' },
   { id: 'finance', label: 'Финансы', icon: '💰' },
   { id: 'directory', label: 'Справочник', icon: '📇' },
+  { id: 'clipboard', label: 'Буфер', icon: '📋' },
   { id: 'months', label: 'Месяцы', icon: '🌙' },
 ];
 
@@ -62,6 +65,7 @@ export default function App() {
   const [events, setEvents] = useLocalStorage<CalEvent[]>('ndc.events', []);
   const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
   const [finance, setFinance] = useLocalStorage<FinanceEntry[]>('ndc.finance', []);
+  const [clipboard, setClipboard] = useLocalStorage<ClipItem[]>('ndc.clipboard', []);
   const [currency, setCurrency] = useLocalStorage<string>('ndc.currency', '');
   const [mealGap, setMealGap] = useLocalStorage<number>('ndc.mealGapH', DEFAULT_MEAL_GAP_H);
   const [pomodoros, setPomodoros] = useLocalStorage<PomodoroSession[]>('ndc.pomodoros', []);
@@ -125,6 +129,8 @@ export default function App() {
     setRelations,
     finance,
     setFinance,
+    clipboard,
+    setClipboard,
     pomodoros,
     setPomodoros,
     adminSightings,
@@ -141,11 +147,13 @@ export default function App() {
     [notes],
   );
   useMealReminder(visibleNotes, mealGap);
+  useDocReminder(visibleNotes);
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
   const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
   const visibleEvents = useMemo(() => visible(events), [events]);
   const visibleRelations = useMemo(() => visible(relations), [relations]);
   const visibleFinance = useMemo(() => visible(finance), [finance]);
+  const visibleClipboard = useMemo(() => visible(clipboard), [clipboard]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
   const visiblePomodoros = useMemo(() => visible(pomodoros), [pomodoros]);
 
@@ -286,6 +294,13 @@ export default function App() {
             events={visibleEvents}
             vault={vault}
             currency={currency}
+          />
+        )}
+        {tab === 'clipboard' && (
+          <ClipboardView
+            clipboard={visibleClipboard}
+            setClipboard={setClipboard}
+            signedIn={!!sync.user}
           />
         )}
         {tab === 'months' && (

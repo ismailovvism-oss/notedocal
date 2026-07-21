@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Checklist, ChecklistItem, Note } from '../types';
-import { dayKey } from './dates';
+import { addDaysKey, dayKey } from './dates';
 import { healthOnDay, mealPlan } from './health';
 
 function flatten(items: ChecklistItem[], acc: ChecklistItem[] = []): ChecklistItem[] {
@@ -85,4 +85,35 @@ export function useMealReminder(notes: Note[], gapHours: number): void {
     }, delay);
     return () => clearTimeout(timer);
   }, [notes, gapHours]);
+}
+
+/**
+ * Уведомления о сроках документов. При открытии приложения проверяет
+ * документы, истекающие в ближайшие 30 дней (или уже просроченные), и
+ * показывает уведомление (по разу за сессию на документ).
+ */
+export function useDocReminder(notes: Note[]): void {
+  const fired = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    const today = dayKey(new Date());
+    const soon = addDaysKey(today, 30);
+    for (const n of notes) {
+      if (n.deleted || n.type !== 'document' || !n.expires) continue;
+      if (n.expires > soon) continue;
+      const key = `doc:${n.id}:${n.expires}`;
+      if (fired.current.has(key)) continue;
+      fired.current.add(key);
+      const expired = n.expires < today;
+      try {
+        new Notification(expired ? 'Документ просрочен' : 'Документ скоро истекает', {
+          body: `${n.category || n.title || 'Документ'} — до ${n.expires}`,
+        });
+      } catch {
+        /* игнорируем */
+      }
+    }
+  }, [notes]);
 }

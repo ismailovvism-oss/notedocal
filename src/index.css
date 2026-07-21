@@ -1665,6 +1665,60 @@ button {
 .cc-lock {
   margin-top: 8px;
 }
+
+/* ---------- Буфер обмена ---------- */
+.cb-hint {
+  margin: 0 0 12px;
+}
+.cb-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.cb-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cb-file {
+  cursor: pointer;
+}
+.cb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cb-item {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 10px 12px;
+}
+.cb-text {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 14px;
+  max-height: 220px;
+  overflow: auto;
+}
+.cb-item-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cb-item-foot .muted {
+  margin-right: auto;
+}
+.cb-file-link {
+  flex: 1;
+  margin-right: auto;
+}
 .ev-loc {
   display: block;
 }

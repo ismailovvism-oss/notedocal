@@ -60,8 +60,10 @@ export type VaultStatus = 'unset' | 'locked' | 'unlocked';
 export interface Vault {
   status: VaultStatus;
   key: CryptoKey | null;
-  /** Задать мастер-пароль впервые. */
-  setup: (password: string) => Promise<void>;
+  /** Подсказка к мастер-паролю (не секрет). */
+  hint: string;
+  /** Задать мастер-пароль впервые (с необязательной подсказкой). */
+  setup: (password: string, hint?: string) => Promise<void>;
   /** Разблокировать существующее хранилище. Возвращает успех. */
   unlock: (password: string) => Promise<boolean>;
   lock: () => void;
@@ -76,19 +78,20 @@ export function useVault(notes: Note[], setNotes: React.Dispatch<React.SetStateA
     const n = notes.find((x) => x.id === VAULT_META_ID && !x.deleted);
     if (!n?.body) return null;
     try {
-      return JSON.parse(n.body) as { salt: string; verifier: string };
+      return JSON.parse(n.body) as { salt: string; verifier: string; hint?: string };
     } catch {
       return null;
     }
   }, [notes]);
 
   const status: VaultStatus = !meta ? 'unset' : key ? 'unlocked' : 'locked';
+  const hint = meta?.hint ?? '';
 
-  async function setup(password: string) {
+  async function setup(password: string, hintText = '') {
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const k = await deriveKey(password, salt);
     const verifier = await encryptStr(k, CHECK);
-    const body = JSON.stringify({ salt: toB64(salt.buffer), verifier });
+    const body = JSON.stringify({ salt: toB64(salt.buffer), verifier, hint: hintText.trim() });
     const now = Date.now();
     if (notes.some((n) => n.id === VAULT_META_ID)) {
       update(VAULT_META_ID, { body, updatedAt: now });
@@ -116,5 +119,5 @@ export function useVault(notes: Note[], setNotes: React.Dispatch<React.SetStateA
     setKey(null);
   }
 
-  return { status, key, setup, unlock, lock };
+  return { status, key, hint, setup, unlock, lock };
 }
