@@ -2061,6 +2061,26 @@ button {
 a.note-contact-row:hover {
   color: var(--accent);
 }
+/* Редактор списка контактов персоны. */
+.ct-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.ct-type {
+  width: 140px;
+  flex: none;
+}
+.ct-value {
+  flex: 1;
+  min-width: 140px;
+}
+.ct-label {
+  width: 92px;
+  flex: none;
+}
 .fin-person-contact {
   display: flex;
   flex-wrap: wrap;

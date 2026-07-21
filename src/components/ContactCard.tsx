@@ -7,8 +7,10 @@ import { getBacklinks, getLinks } from '../lib/relations';
 import { debtSign, formatMoney, personBalances, personLedger } from '../lib/finance';
 import type { LinkedTask } from '../lib/checklistLinks';
 import { tasksLinkedToNote, toggleItemInList } from '../lib/checklistLinks';
+import { effectiveContacts } from '../lib/persons';
 import { mapLink } from '../lib/locations';
 import { AttachmentList } from './Attachments';
+import { ContactLinks } from './ContactLinks';
 import { NoteModal } from './NotesView';
 
 interface Props {
@@ -84,6 +86,7 @@ export function ContactCard({
         allNotes={notes}
         relations={relations}
         setRelations={setRelations}
+        initialMode="edit"
         onSave={(patch) => noteActions.update(note.id, { ...patch, updatedAt: Date.now() })}
         onDelete={() => {
           noteActions.remove(note.id);
@@ -111,18 +114,20 @@ export function ContactCard({
 
         <h2 className="note-read-title">{note.title || 'Без названия'}</h2>
 
-        <div className="note-contact">
-          {note.phone && (
-            <a className="note-contact-row" href={`tel:${note.phone}`}>
-              <span aria-hidden>📞</span> {note.phone}
-            </a>
-          )}
-          {note.address && (
-            <a className="note-contact-row" href={mapLink(note.address)} target="_blank" rel="noreferrer">
-              <span aria-hidden>📍</span> {note.address}
-            </a>
-          )}
-        </div>
+        <ContactLinks contacts={effectiveContacts(note)} />
+        {(() => {
+          const loc = note.locationId ? byId.get(note.locationId) : undefined;
+          const addr = loc?.address || loc?.title || note.address;
+          if (!addr) return null;
+          return (
+            <div className="note-contact">
+              <a className="note-contact-row" href={mapLink(addr)} target="_blank" rel="noreferrer">
+                <span aria-hidden>📍</span> {loc ? loc.title : note.address}
+                {loc?.address ? <span className="muted small"> · {loc.address}</span> : null}
+              </a>
+            </div>
+          );
+        })()}
 
         {note.body.trim() && (
           <div className="md note-read-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(note.body) }} />
