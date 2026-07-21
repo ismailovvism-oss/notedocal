@@ -112,7 +112,18 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
   }
 
   function saveNote(
-    patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments' | 'phone' | 'address'>,
+    patch: Pick<
+      Note,
+      | 'title'
+      | 'body'
+      | 'date'
+      | 'type'
+      | 'attachments'
+      | 'phone'
+      | 'contacts'
+      | 'address'
+      | 'locationId'
+    >,
   ) {
     if (!editing) return;
     // Сохраняем, но окно не закрываем — модалка сама переходит в отображение.

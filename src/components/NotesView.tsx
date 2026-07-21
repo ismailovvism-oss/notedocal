@@ -1,10 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
-import type { Attachment, Note, NoteType, Relation } from '../types';
+import type { Attachment, ContactMethod, ContactType, Note, NoteType, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { fromKey } from '../lib/dates';
 import { renderMarkdown } from '../lib/markdown';
 import { deleteAttachment } from '../lib/attachments';
+import { CONTACT_META, CONTACT_TYPES, effectiveContacts } from '../lib/persons';
+import { listLocations, mapLink } from '../lib/locations';
 import { AttachmentAdder, AttachmentList } from './Attachments';
+import { ContactLinks } from './ContactLinks';
 import {
   getBacklinks,
   getChildren,
@@ -37,7 +40,18 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
   }, [notes, fixedDate]);
 
   function save(
-    patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments' | 'phone' | 'address'>,
+    patch: Pick<
+      Note,
+      | 'title'
+      | 'body'
+      | 'date'
+      | 'type'
+      | 'attachments'
+      | 'phone'
+      | 'contacts'
+      | 'address'
+      | 'locationId'
+    >,
   ) {
     const now = Date.now();
     if (editing && editing !== 'new') {
@@ -52,8 +66,10 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
         type: patch.type ?? 'note',
         date: fixedDate ?? patch.date ?? null,
         attachments: patch.attachments ?? [],
+        contacts: patch.contacts,
         phone: patch.phone,
         address: patch.address,
+        locationId: patch.locationId,
         createdAt: now,
         updatedAt: now,
       });
@@ -139,6 +155,7 @@ export function NoteModal({
   allNotes,
   relations,
   setRelations,
+  initialMode,
   onSave,
   onDelete,
   onClose,
@@ -148,8 +165,21 @@ export function NoteModal({
   allNotes: Note[];
   relations?: Relation[];
   setRelations?: React.Dispatch<React.SetStateAction<Relation[]>>;
+  /** С какого режима открыть (по умолчанию: существующая — чтение, новая — правка). */
+  initialMode?: 'view' | 'edit';
   onSave: (
-    patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments' | 'phone' | 'address'>,
+    patch: Pick<
+      Note,
+      | 'title'
+      | 'body'
+      | 'date'
+      | 'type'
+      | 'attachments'
+      | 'phone'
+      | 'contacts'
+      | 'address'
+      | 'locationId'
+    >,
   ) => void;
   onDelete?: () => void;
   onClose: () => void;
@@ -159,24 +189,35 @@ export function NoteModal({
   const [date, setDate] = useState(note?.date ?? '');
   const [type, setType] = useState<NoteType>(note?.type ?? 'note');
   const [attachments, setAttachments] = useState<Attachment[]>(note?.attachments ?? []);
-  const [phone, setPhone] = useState(note?.phone ?? '');
+  const [contacts, setContacts] = useState<ContactMethod[]>(note ? effectiveContacts(note) : []);
   const [address, setAddress] = useState(note?.address ?? '');
+  const [locationId, setLocationId] = useState(note?.locationId ?? '');
   // Существующая заметка открывается отрендеренной; новая — сразу в правке.
-  const [mode, setMode] = useState<'view' | 'edit'>(note ? 'view' : 'edit');
+  const [mode, setMode] = useState<'view' | 'edit'>(initialMode ?? (note ? 'view' : 'edit'));
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Карточка контакта/места: показываем поля телефона и адреса.
-  const isContact = type === 'person' || type === 'location';
+  const isPerson = type === 'person';
+  const isLocation = type === 'location';
+  const isContact = isPerson || isLocation;
+  const locationOptions = useMemo(() => listLocations(allNotes), [allNotes]);
+  const linkedLocation = locationId ? allNotes.find((n) => n.id === locationId) : undefined;
+
+  function setContactAt(i: number, patch: Partial<ContactMethod>) {
+    setContacts((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  }
 
   function patchOf(over?: Partial<Pick<Note, 'attachments'>>) {
+    const cleanContacts = contacts.filter((c) => c.value.trim());
     return {
       title: title.trim() || 'Без названия',
       body,
       date: date || null,
       type,
       attachments,
-      phone: phone.trim(),
+      contacts: cleanContacts,
+      phone: cleanContacts.find((c) => c.type === 'phone')?.value ?? '',
       address: address.trim(),
+      locationId: locationId || null,
       ...over,
     };
   }
@@ -205,8 +246,9 @@ export function NoteModal({
     setBody(note?.body ?? '');
     setDate(note?.date ?? '');
     setType(note?.type ?? 'note');
-    setPhone(note?.phone ?? '');
+    setContacts(note ? effectiveContacts(note) : []);
     setAddress(note?.address ?? '');
+    setLocationId(note?.locationId ?? '');
     setMode('view');
   }
 
@@ -268,19 +310,36 @@ export function NoteModal({
 
           <h2 className="note-read-title">{title || 'Без названия'}</h2>
 
-          {isContact && (phone || address) && (
-            <div className="note-contact">
-              {phone && (
-                <a className="note-contact-row" href={`tel:${phone}`}>
-                  <span aria-hidden>📞</span> {phone}
-                </a>
+          {isContact && (
+            <>
+              <ContactLinks contacts={contacts} />
+              {(linkedLocation || address) && (
+                <div className="note-contact">
+                  {linkedLocation ? (
+                    <a
+                      className="note-contact-row"
+                      href={mapLink(linkedLocation.address || linkedLocation.title)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span aria-hidden>📍</span> {linkedLocation.title}
+                      {linkedLocation.address ? (
+                        <span className="muted small"> · {linkedLocation.address}</span>
+                      ) : null}
+                    </a>
+                  ) : (
+                    <a
+                      className="note-contact-row"
+                      href={mapLink(address)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span aria-hidden>📍</span> {address}
+                    </a>
+                  )}
+                </div>
               )}
-              {address && (
-                <span className="note-contact-row">
-                  <span aria-hidden>📍</span> {address}
-                </span>
-              )}
-            </div>
+            </>
           )}
 
           <div
@@ -344,28 +403,78 @@ export function NoteModal({
             </select>
           </label>
 
+          {isPerson && (
+            <div className="field">
+              <span className="field-label">Контакты</span>
+              {contacts.map((c, i) => (
+                <div key={i} className="ct-row">
+                  <select
+                    className="input ct-type"
+                    value={c.type}
+                    onChange={(e) => setContactAt(i, { type: e.target.value as ContactType })}
+                  >
+                    {CONTACT_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {CONTACT_META[t].icon} {CONTACT_META[t].label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="input ct-value"
+                    placeholder={c.type === 'telegram' ? '@ник или номер' : 'номер / адрес'}
+                    value={c.value}
+                    onChange={(e) => setContactAt(i, { value: e.target.value })}
+                  />
+                  <input
+                    className="input ct-label"
+                    placeholder="подпись"
+                    value={c.label ?? ''}
+                    onChange={(e) => setContactAt(i, { label: e.target.value })}
+                  />
+                  <button
+                    className="icon-btn"
+                    onClick={() => setContacts((cs) => cs.filter((_, j) => j !== i))}
+                    aria-label="Убрать"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                className="btn btn-small"
+                onClick={() => setContacts((cs) => [...cs, { type: 'phone', value: '' }])}
+              >
+                ＋ Контакт
+              </button>
+            </div>
+          )}
+
           {isContact && (
-            <div className="task-form-row">
-              <label className="field">
-                <span className="field-label">Телефон</span>
-                <input
+            <label className="field">
+              <span className="field-label">{isLocation ? 'Адрес' : 'Адрес / место'}</span>
+              {isPerson && locationOptions.length > 0 && (
+                <select
                   className="input"
-                  type="tel"
-                  placeholder="+998…"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">Адрес</span>
+                  value={locationId ?? ''}
+                  onChange={(e) => setLocationId(e.target.value)}
+                >
+                  <option value="">— свой адрес —</option>
+                  {locationOptions.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      📍 {l.title || 'Без названия'}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {!(isPerson && locationId) && (
                 <input
                   className="input"
                   placeholder="Город, улица…"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                 />
-              </label>
-            </div>
+              )}
+            </label>
           )}
 
           <div className="md-toolbar">

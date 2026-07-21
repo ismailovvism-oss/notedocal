@@ -32,6 +32,16 @@ export interface Task {
   deleted?: boolean;
 }
 
+/** Способ связи в карточке персоны. */
+export type ContactType = 'phone' | 'whatsapp' | 'telegram' | 'email' | 'other';
+
+/** Один контакт: тип + значение (номер/ник/почта) + необязательная подпись. */
+export interface ContactMethod {
+  type: ContactType;
+  value: string;
+  label?: string;
+}
+
 /** Роль заметки в системе организации. Любая заметка — это Note; роль задаётся
  *  типом, а не отдельной сущностью. Person/location — карточки контактов и мест. */
 export type NoteType =
@@ -57,10 +67,14 @@ export interface Note {
   time?: string;
   /** Если задано — заметка является записью дневника здоровья (её вид). */
   health?: HealthKind;
-  /** Телефон (для карточки персоны). */
+  /** Телефон (устаревшее одиночное поле; заменено на contacts). */
   phone?: string;
-  /** Адрес (для персоны или локации). */
+  /** Список способов связи (телефоны, мессенджеры, почта) для персоны. */
+  contacts?: ContactMethod[];
+  /** Адрес свободным текстом (для персоны или локации). */
   address?: string;
+  /** Привязка адреса персоны к локации (id заметки типа location). */
+  locationId?: string | null;
   /** Категория (для локации): «Аптека», «Кафе»… */
   category?: string;
   /** Прикреплённые файлы (Firebase Storage). */
