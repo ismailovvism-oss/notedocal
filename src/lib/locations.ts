@@ -38,7 +38,10 @@ export function locationsByCategory(notes: Note[]): { category: string; items: N
     .sort((a, b) => a.category.localeCompare(b.category));
 }
 
-/** Ссылка на карту по адресу. */
+/** Ссылка на карту: если это уже ссылка (Google Maps и т.п.) — открываем как
+ *  есть; иначе ищем адрес/координаты/название в Google Картах. */
 export function mapLink(address: string): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+  const v = address.trim();
+  if (/^https?:\/\//i.test(v)) return v;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v)}`;
 }

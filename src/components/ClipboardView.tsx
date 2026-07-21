@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ClipItem } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { fromKey } from '../lib/dates';
@@ -38,6 +38,24 @@ export function ClipboardView({ clipboard, setClipboard, signedIn }: Props) {
     [clipboard],
   );
   const canFiles = attachmentsReady();
+  const canShare = typeof navigator !== 'undefined' && !!navigator.share;
+
+  // Автоочистка: элементы старше 7 дней удаляются (у файлов чистим и blob).
+  useEffect(() => {
+    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+    const old = clipboard.filter((c) => !c.deleted && c.createdAt < cutoff);
+    old.forEach((c) => {
+      if (c.attachment) deleteAttachment(c.attachment);
+      remove(c.id);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function share(c: ClipItem) {
+    if (!navigator.share) return;
+    const data = c.kind === 'text' ? { text: c.text } : { url: c.attachment?.url, title: c.attachment?.name };
+    navigator.share(data).catch(() => {});
+  }
 
   function sendText() {
     const t = text.trim();
@@ -88,7 +106,7 @@ export function ClipboardView({ clipboard, setClipboard, signedIn }: Props) {
     <section className="view view-narrow">
       <div className="view-head">
         <h2>Буфер</h2>
-        <span className="muted small">между устройствами</span>
+        <span className="muted small">между устройствами · хранится 7 дней</span>
       </div>
 
       {!signedIn && (
@@ -146,6 +164,11 @@ export function ClipboardView({ clipboard, setClipboard, signedIn }: Props) {
                     <button className="btn btn-small" onClick={() => copyItem(c)}>
                       {copied === c.id ? 'Скопировано' : 'Копировать'}
                     </button>
+                    {canShare && (
+                      <button className="btn btn-small" onClick={() => share(c)}>
+                        Поделиться
+                      </button>
+                    )}
                     <button className="icon-btn" onClick={() => removeItem(c)} aria-label="Удалить">
                       ✕
                     </button>
@@ -165,6 +188,11 @@ export function ClipboardView({ clipboard, setClipboard, signedIn }: Props) {
                     <span className="att-size muted small">{formatSize(c.attachment?.size ?? 0)}</span>
                   </a>
                   <span className="muted small">{relTime(c.createdAt)}</span>
+                  {canShare && (
+                    <button className="btn btn-small" onClick={() => share(c)}>
+                      Поделиться
+                    </button>
+                  )}
                   <button className="icon-btn" onClick={() => removeItem(c)} aria-label="Удалить">
                     ✕
                   </button>

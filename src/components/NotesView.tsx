@@ -560,7 +560,7 @@ export function NoteModal({
               {!(isPerson && locationId) && (
                 <input
                   className="input"
-                  placeholder="Город, улица…"
+                  placeholder="Адрес, координаты или ссылка Google Maps"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                 />
