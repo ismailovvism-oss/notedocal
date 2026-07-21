@@ -1611,6 +1611,60 @@ button {
   flex-wrap: wrap;
   gap: 6px;
 }
+/* Факты документа в карточке. */
+.doc-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 2px 0 10px;
+}
+.doc-fact {
+  font-size: 14px;
+}
+.doc-exp {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.doc-exp-soon {
+  background: color-mix(in srgb, var(--warn) 24%, transparent);
+}
+.doc-exp-expired {
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  color: var(--danger);
+}
+/* Пароли: мастер-пароль и секреты. */
+.cc-vault {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cred-secret {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.cred-secret .input {
+  flex: 1;
+}
+.cred-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cred-main {
+  flex: 1;
+}
+.cred-pw {
+  font-family: ui-monospace, monospace;
+  letter-spacing: 1px;
+  min-width: 70px;
+  text-align: right;
+}
+.cc-lock {
+  margin-top: 8px;
+}
 .ev-loc {
   display: block;
 }

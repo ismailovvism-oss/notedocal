@@ -16,6 +16,7 @@ import {
   persons,
 } from '../lib/finance';
 import { CONTACTS_FOLDER_ID, findPerson } from '../lib/persons';
+import type { Vault } from '../lib/vault';
 import { ContactCard } from './ContactCard';
 
 interface Props {
@@ -30,6 +31,7 @@ interface Props {
   checklists: Checklist[];
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
   events: CalEvent[];
+  vault: Vault;
 }
 
 function monthStart(): string {
@@ -49,6 +51,7 @@ export function FinanceView({
   checklists,
   setChecklists,
   events,
+  vault,
 }: Props) {
   const [mode, setMode] = useState<'debts' | 'expenses'>('debts');
 
@@ -89,6 +92,7 @@ export function FinanceView({
           checklists={checklists}
           setChecklists={setChecklists}
           events={events}
+          vault={vault}
         />
       ) : (
         <ExpensesPanel finance={finance} setFinance={setFinance} currency={currency} />
@@ -108,6 +112,7 @@ function DebtsPanel({
   checklists,
   setChecklists,
   events,
+  vault,
 }: {
   finance: FinanceEntry[];
   setFinance: React.Dispatch<React.SetStateAction<FinanceEntry[]>>;
@@ -119,6 +124,7 @@ function DebtsPanel({
   checklists: Checklist[];
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
   events: CalEvent[];
+  vault: Vault;
 }) {
   const { add, remove } = useListActions(setFinance);
   const noteActions = useListActions(setNotes);
@@ -275,6 +281,7 @@ function DebtsPanel({
       relations={relations}
       setRelations={setRelations}
       events={events}
+      vault={vault}
       currency={currency}
       onClose={() => setCardId(null)}
     />

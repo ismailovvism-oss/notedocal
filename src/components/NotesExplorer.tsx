@@ -123,6 +123,9 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
       | 'contacts'
       | 'address'
       | 'locationId'
+      | 'category'
+      | 'docNumber'
+      | 'expires'
     >,
   ) {
     if (!editing) return;

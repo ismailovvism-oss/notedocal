@@ -6,6 +6,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { deleteAttachment } from '../lib/attachments';
 import { CONTACT_META, CONTACT_TYPES, effectiveContacts } from '../lib/persons';
 import { listLocations, mapLink } from '../lib/locations';
+import { DOC_KINDS } from '../lib/docs';
 import { AttachmentAdder, AttachmentList } from './Attachments';
 import { ContactLinks } from './ContactLinks';
 import {
@@ -51,6 +52,9 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
       | 'contacts'
       | 'address'
       | 'locationId'
+      | 'category'
+      | 'docNumber'
+      | 'expires'
     >,
   ) {
     const now = Date.now();
@@ -179,6 +183,9 @@ export function NoteModal({
       | 'contacts'
       | 'address'
       | 'locationId'
+      | 'category'
+      | 'docNumber'
+      | 'expires'
     >,
   ) => void;
   onDelete?: () => void;
@@ -192,12 +199,16 @@ export function NoteModal({
   const [contacts, setContacts] = useState<ContactMethod[]>(note ? effectiveContacts(note) : []);
   const [address, setAddress] = useState(note?.address ?? '');
   const [locationId, setLocationId] = useState(note?.locationId ?? '');
+  const [category, setCategory] = useState(note?.category ?? '');
+  const [docNumber, setDocNumber] = useState(note?.docNumber ?? '');
+  const [expires, setExpires] = useState(note?.expires ?? '');
   // Существующая заметка открывается отрендеренной; новая — сразу в правке.
   const [mode, setMode] = useState<'view' | 'edit'>(initialMode ?? (note ? 'view' : 'edit'));
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const isPerson = type === 'person';
   const isLocation = type === 'location';
+  const isDocument = type === 'document';
   const isContact = isPerson || isLocation;
   const locationOptions = useMemo(() => listLocations(allNotes), [allNotes]);
   const linkedLocation = locationId ? allNotes.find((n) => n.id === locationId) : undefined;
@@ -218,6 +229,9 @@ export function NoteModal({
       phone: cleanContacts.find((c) => c.type === 'phone')?.value ?? '',
       address: address.trim(),
       locationId: locationId || null,
+      category: category.trim(),
+      docNumber: docNumber.trim(),
+      expires: expires || '',
       ...over,
     };
   }
@@ -249,6 +263,9 @@ export function NoteModal({
     setContacts(note ? effectiveContacts(note) : []);
     setAddress(note?.address ?? '');
     setLocationId(note?.locationId ?? '');
+    setCategory(note?.category ?? '');
+    setDocNumber(note?.docNumber ?? '');
+    setExpires(note?.expires ?? '');
     setMode('view');
   }
 
@@ -342,6 +359,31 @@ export function NoteModal({
             </>
           )}
 
+          {isDocument && (
+            <div className="doc-facts">
+              {category && (
+                <span className="doc-fact">
+                  <span className="muted small">Вид</span> {category}
+                </span>
+              )}
+              {docNumber && (
+                <span className="doc-fact">
+                  <span className="muted small">Номер</span> {docNumber}
+                </span>
+              )}
+              {date && (
+                <span className="doc-fact">
+                  <span className="muted small">Выдан</span> {fromKey(date).toLocaleDateString('ru-RU')}
+                </span>
+              )}
+              {expires && (
+                <span className="doc-fact">
+                  <span className="muted small">До</span> {fromKey(expires).toLocaleDateString('ru-RU')}
+                </span>
+              )}
+            </div>
+          )}
+
           <div
             className="md note-read-body note-read-tap"
             onClick={() => setMode('edit')}
@@ -402,6 +444,55 @@ export function NoteModal({
               ))}
             </select>
           </label>
+
+          {isDocument && (
+            <>
+              <label className="field">
+                <span className="field-label">Вид документа</span>
+                <input
+                  className="input"
+                  list="doc-kinds"
+                  placeholder="Паспорт, ВНЖ, ИНН…"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                />
+                <datalist id="doc-kinds">
+                  {DOC_KINDS.map((k) => (
+                    <option key={k} value={k} />
+                  ))}
+                </datalist>
+              </label>
+              <label className="field">
+                <span className="field-label">Номер</span>
+                <input
+                  className="input"
+                  placeholder="Номер / серия"
+                  value={docNumber}
+                  onChange={(e) => setDocNumber(e.target.value)}
+                />
+              </label>
+              <div className="task-form-row">
+                <label className="field">
+                  <span className="field-label">Выдан</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">Действует до</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={expires}
+                    onChange={(e) => setExpires(e.target.value)}
+                  />
+                </label>
+              </div>
+            </>
+          )}
 
           {isPerson && (
             <div className="field">
@@ -515,7 +606,7 @@ export function NoteModal({
           onChange={(e) => setBody(e.target.value)}
         />
 
-        {!fixedDate && (
+        {!fixedDate && !isDocument && (
           <label className="field">
             <span className="field-label">Дата</span>
             <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
