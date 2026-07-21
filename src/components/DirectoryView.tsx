@@ -4,6 +4,7 @@ import { uid, useListActions } from '../lib/storage';
 import { formatMoney, personBalances } from '../lib/finance';
 import { CONTACTS_FOLDER_ID, listPersons } from '../lib/persons';
 import { LOCATION_CATEGORIES, LOCATIONS_FOLDER_ID, locationsByCategory } from '../lib/locations';
+import type { Vault } from '../lib/vault';
 import { ContactCard } from './ContactCard';
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
   checklists: Checklist[];
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
   events: CalEvent[];
+  vault: Vault;
   currency: string;
 }
 
@@ -27,6 +29,7 @@ export function DirectoryView({
   checklists,
   setChecklists,
   events,
+  vault,
   currency,
 }: Props) {
   const noteActions = useListActions(setNotes);
@@ -116,6 +119,7 @@ export function DirectoryView({
       relations={relations}
       setRelations={setRelations}
       events={events}
+      vault={vault}
       currency={currency}
       onClose={() => setCardId(null)}
     />

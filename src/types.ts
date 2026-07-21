@@ -52,7 +52,9 @@ export type NoteType =
   | 'concept'
   | 'source'
   | 'person'
-  | 'location';
+  | 'location'
+  | 'document'
+  | 'credential';
 
 /** Текстовая заметка (универсальная единица знаний). */
 export interface Note {
@@ -75,8 +77,16 @@ export interface Note {
   address?: string;
   /** Привязка адреса персоны к локации (id заметки типа location). */
   locationId?: string | null;
-  /** Категория (для локации): «Аптека», «Кафе»… */
+  /** Категория (локация) или вид документа (Паспорт/ВНЖ/ИНН…). */
   category?: string;
+  /** Номер документа. */
+  docNumber?: string;
+  /** Срок действия документа (YYYY-MM-DD). */
+  expires?: string;
+  /** Логин (для типа credential — пароля). */
+  login?: string;
+  /** Секрет: для credential — ЗАШИФРОВАННЫЙ пароль (мастер-паролем, E2E). */
+  secret?: string;
   /** Прикреплённые файлы (Firebase Storage). */
   attachments?: Attachment[];
   createdAt: number;

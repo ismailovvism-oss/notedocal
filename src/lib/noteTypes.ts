@@ -10,6 +10,8 @@ export const TYPE_LABELS: Record<NoteType, string> = {
   source: 'Источник',
   person: 'Персона',
   location: 'Локация',
+  document: 'Документ',
+  credential: 'Пароль',
 };
 
 /** Короткие подписи для бейджа на карточке/строке. */
@@ -22,4 +24,6 @@ export const TYPE_BADGE: Record<NoteType, string> = {
   source: 'источник',
   person: 'персона',
   location: 'локация',
+  document: 'документ',
+  credential: 'пароль',
 };

@@ -15,6 +15,7 @@ import { uid, useLocalStorage, visible } from './lib/storage';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
+import { VAULT_META_ID, useVault } from './lib/vault';
 import { DEFAULT_POMODORO, usePomodoro } from './lib/pomodoro';
 import { dayKey, formatHijri, hijriFor } from './lib/dates';
 import { CalendarView } from './components/CalendarView';
@@ -131,8 +132,14 @@ export default function App() {
   });
   const isAdmin = sync.isAdmin;
 
-  // В интерфейс отдаём данные без надгробий (мягко удалённых записей).
-  const visibleNotes = useMemo(() => visible(notes), [notes]);
+  // Хранилище секретов (мастер-пароль). Работает поверх «сырых» заметок.
+  const vault = useVault(notes, setNotes);
+
+  // В интерфейс отдаём данные без надгробий и без служебной заметки хранилища.
+  const visibleNotes = useMemo(
+    () => visible(notes).filter((n) => n.id !== VAULT_META_ID),
+    [notes],
+  );
   useMealReminder(visibleNotes, mealGap);
   const visibleSightings = useMemo(() => visible(sightings), [sightings]);
   const visibleChecklists = useMemo(() => visible(checklists), [checklists]);
@@ -264,6 +271,7 @@ export default function App() {
             checklists={visibleChecklists}
             setChecklists={setChecklists}
             events={visibleEvents}
+            vault={vault}
           />
         )}
         {tab === 'directory' && (
@@ -276,6 +284,7 @@ export default function App() {
             checklists={visibleChecklists}
             setChecklists={setChecklists}
             events={visibleEvents}
+            vault={vault}
             currency={currency}
           />
         )}
