@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { FinanceEntry, FinanceKind } from '../types';
+import type { FinanceEntry, FinanceKind, Note, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { dayKey, fromKey, todayKey } from '../lib/dates';
 import {
@@ -15,12 +15,18 @@ import {
   personLedger,
   persons,
 } from '../lib/finance';
+import { CONTACTS_FOLDER_ID, findPerson } from '../lib/persons';
+import { NoteModal } from './NotesView';
 
 interface Props {
   finance: FinanceEntry[];
   setFinance: React.Dispatch<React.SetStateAction<FinanceEntry[]>>;
   currency: string;
   setCurrency: React.Dispatch<React.SetStateAction<string>>;
+  notes: Note[];
+  setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
+  relations: Relation[];
+  setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
 }
 
 function monthStart(): string {
@@ -28,7 +34,16 @@ function monthStart(): string {
   return dayKey(new Date(d.getFullYear(), d.getMonth(), 1));
 }
 
-export function FinanceView({ finance, setFinance, currency, setCurrency }: Props) {
+export function FinanceView({
+  finance,
+  setFinance,
+  currency,
+  setCurrency,
+  notes,
+  setNotes,
+  relations,
+  setRelations,
+}: Props) {
   const [mode, setMode] = useState<'debts' | 'expenses'>('debts');
 
   return (
@@ -57,7 +72,15 @@ export function FinanceView({ finance, setFinance, currency, setCurrency }: Prop
       </div>
 
       {mode === 'debts' ? (
-        <DebtsPanel finance={finance} setFinance={setFinance} currency={currency} />
+        <DebtsPanel
+          finance={finance}
+          setFinance={setFinance}
+          currency={currency}
+          notes={notes}
+          setNotes={setNotes}
+          relations={relations}
+          setRelations={setRelations}
+        />
       ) : (
         <ExpensesPanel finance={finance} setFinance={setFinance} currency={currency} />
       )}
@@ -69,13 +92,24 @@ function DebtsPanel({
   finance,
   setFinance,
   currency,
+  notes,
+  setNotes,
+  relations,
+  setRelations,
 }: {
   finance: FinanceEntry[];
   setFinance: React.Dispatch<React.SetStateAction<FinanceEntry[]>>;
   currency: string;
+  notes: Note[];
+  setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
+  relations: Relation[];
+  setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
 }) {
   const { add, remove } = useListActions(setFinance);
+  const noteActions = useListActions(setNotes);
+  const relActions = useListActions(setRelations);
   const [selected, setSelected] = useState<string | null>(null);
+  const [cardId, setCardId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [person, setPerson] = useState('');
   const [kind, setKind] = useState<FinanceKind>('lent');
@@ -86,6 +120,49 @@ function DebtsPanel({
   const balances = useMemo(() => personBalances(finance), [finance]);
   const totals = debtTotals(balances);
   const allPersons = useMemo(() => persons(finance), [finance]);
+  const cardNote = cardId ? notes.find((n) => n.id === cardId) ?? null : null;
+
+  // Найти карточку персоны по имени, создав её при необходимости (в папке «Контакты»).
+  function ensurePerson(name: string): string {
+    const existing = findPerson(notes, name);
+    if (existing) return existing.id;
+    const now = Date.now();
+    if (!notes.some((n) => n.id === CONTACTS_FOLDER_ID)) {
+      noteActions.add({
+        id: CONTACTS_FOLDER_ID,
+        title: 'Контакты',
+        body: '',
+        type: 'folder',
+        date: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    const id = uid();
+    noteActions.add({
+      id,
+      title: name,
+      body: '',
+      type: 'person',
+      date: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    relActions.add({
+      id: uid(),
+      from: CONTACTS_FOLDER_ID,
+      to: id,
+      type: 'child',
+      position: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return id;
+  }
+
+  function openCard(name: string) {
+    setCardId(ensurePerson(name));
+  }
 
   function save() {
     const amt = Math.abs(Number(amount));
@@ -102,6 +179,7 @@ function DebtsPanel({
       createdAt: now,
       updatedAt: now,
     });
+    ensurePerson(who); // завести карточку контакта, если ещё нет
     setAmount('');
     setNote('');
     setOpen(false);
@@ -171,9 +249,25 @@ function DebtsPanel({
     </button>
   );
 
+  const cardModal = cardNote ? (
+    <NoteModal
+      note={cardNote}
+      allNotes={notes}
+      relations={relations}
+      setRelations={setRelations}
+      onSave={(patch) => noteActions.update(cardNote.id, { ...patch, updatedAt: Date.now() })}
+      onDelete={() => {
+        noteActions.remove(cardNote.id);
+        setCardId(null);
+      }}
+      onClose={() => setCardId(null)}
+    />
+  ) : null;
+
   if (selected) {
     const ledger = personLedger(finance, selected);
     const net = balances.find((b) => b.person === selected)?.net ?? 0;
+    const personNote = findPerson(notes, selected);
     return (
       <div>
         <button className="fin-back" onClick={() => setSelected(null)}>
@@ -183,6 +277,19 @@ function DebtsPanel({
           <h3>{selected}</h3>
           <span className={`fin-net ${net > 0 ? 'pos' : net < 0 ? 'neg' : ''}`}>{netLabel(net)}</span>
         </div>
+
+        <div className="fin-person-contact">
+          {personNote?.phone && (
+            <a className="fin-contact-chip" href={`tel:${personNote.phone}`}>
+              📞 {personNote.phone}
+            </a>
+          )}
+          {personNote?.address && <span className="fin-contact-chip">📍 {personNote.address}</span>}
+          <button className="btn btn-small" onClick={() => openCard(selected)}>
+            📇 Карточка
+          </button>
+        </div>
+
         {ledger.length === 0 ? (
           <p className="empty">Записей нет</p>
         ) : (
@@ -205,6 +312,7 @@ function DebtsPanel({
           </ul>
         )}
         {formBlock}
+        {cardModal}
       </div>
     );
   }
@@ -245,6 +353,7 @@ function DebtsPanel({
       )}
 
       {formBlock}
+      {cardModal}
     </div>
   );
 }

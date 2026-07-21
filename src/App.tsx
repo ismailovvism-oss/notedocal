@@ -247,6 +247,10 @@ export default function App() {
             setFinance={setFinance}
             currency={currency}
             setCurrency={setCurrency}
+            notes={visibleNotes}
+            setNotes={setNotes}
+            relations={visibleRelations}
+            setRelations={setRelations}
           />
         )}
         {tab === 'months' && (
