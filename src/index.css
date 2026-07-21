@@ -1543,6 +1543,43 @@ button {
   color: var(--accent);
 }
 
+/* Справочник (контакты и места) + карточка. */
+.dir-cat {
+  margin-bottom: 14px;
+}
+.dir-cat-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.dir-addr {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.cc-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cc-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ev-loc {
+  display: block;
+}
+
 /* ---------- Слой «Здоровье» на календаре ---------- */
 .cal-layers {
   display: flex;

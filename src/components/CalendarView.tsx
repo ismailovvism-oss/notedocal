@@ -228,7 +228,7 @@ export function CalendarView({
 
         <div className="day-section">
           <h3 className="day-section-title">События</h3>
-          <EventsBoard date={selected} events={events} setEvents={setEvents} />
+          <EventsBoard date={selected} events={events} setEvents={setEvents} notes={notes} />
         </div>
 
         <div className="day-section">
