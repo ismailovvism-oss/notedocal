@@ -42,6 +42,9 @@ export function DirectoryView({
   const [locName, setLocName] = useState('');
   const [locCat, setLocCat] = useState('Магазин');
   const [locAddr, setLocAddr] = useState('');
+  // Массовый импорт локаций списком.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState('');
   // Форма добавления персоны.
   const [personName, setPersonName] = useState('');
 
@@ -106,6 +109,43 @@ export function DirectoryView({
     setLocAddr('');
     setAddLoc(false);
     setCardId(id);
+  }
+
+  // Импорт списком: строка = «Название | Категория | Адрес» (| или таб;
+  // категория и адрес необязательны).
+  function importLocations() {
+    const lines = importText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+    ensureFolder(LOCATIONS_FOLDER_ID, 'Места');
+    const now = Date.now();
+    lines.forEach((line, i) => {
+      const parts = line.split(/[|\t]/).map((s) => s.trim());
+      const title = parts[0];
+      if (!title) return;
+      const id = uid();
+      noteActions.add({
+        id,
+        title,
+        body: '',
+        type: 'location',
+        category: parts[1] || 'Другое',
+        address: parts[2] || '',
+        date: null,
+        createdAt: now + i,
+        updatedAt: now + i,
+      });
+      relActions.add({
+        id: uid(),
+        from: LOCATIONS_FOLDER_ID,
+        to: id,
+        type: 'child',
+        position: i,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    setImportText('');
+    setImportOpen(false);
   }
 
   const card = cardNote ? (
@@ -239,9 +279,38 @@ export function DirectoryView({
               </div>
             </div>
           ) : (
-            <button className="btn btn-small" onClick={() => setAddLoc(true)}>
-              ＋ Место
-            </button>
+            <div className="dir-loc-actions">
+              <button className="btn btn-small" onClick={() => setAddLoc(true)}>
+                ＋ Место
+              </button>
+              <button className="btn btn-small" onClick={() => setImportOpen((v) => !v)}>
+                Импорт списком
+              </button>
+            </div>
+          )}
+
+          {importOpen && (
+            <div className="fin-form">
+              <p className="muted small">
+                По одной локации в строке. Формат: <b>Название | Категория | Адрес</b> (категория и
+                адрес необязательны, разделитель — « | » или табуляция).
+              </p>
+              <textarea
+                className="input"
+                rows={6}
+                placeholder={'Аптека №5 | Аптека | Ташкент, Амира Темура 5\nКафе «Плов» | Кафе\nДом'}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+              />
+              <div className="ev-form-actions">
+                <button className="btn btn-primary" onClick={importLocations}>
+                  Добавить все
+                </button>
+                <button className="btn" onClick={() => setImportOpen(false)}>
+                  Отмена
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
