@@ -36,7 +36,9 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
     return [...base].sort((a, b) => b.updatedAt - a.updatedAt);
   }, [notes, fixedDate]);
 
-  function save(patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments'>) {
+  function save(
+    patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments' | 'phone' | 'address'>,
+  ) {
     const now = Date.now();
     if (editing && editing !== 'new') {
       // Существующую обновляем и оставляем окно открытым (модалка сама уйдёт в отображение).
@@ -50,6 +52,8 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
         type: patch.type ?? 'note',
         date: fixedDate ?? patch.date ?? null,
         attachments: patch.attachments ?? [],
+        phone: patch.phone,
+        address: patch.address,
         createdAt: now,
         updatedAt: now,
       });
@@ -144,7 +148,9 @@ export function NoteModal({
   allNotes: Note[];
   relations?: Relation[];
   setRelations?: React.Dispatch<React.SetStateAction<Relation[]>>;
-  onSave: (patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments'>) => void;
+  onSave: (
+    patch: Pick<Note, 'title' | 'body' | 'date' | 'type' | 'attachments' | 'phone' | 'address'>,
+  ) => void;
   onDelete?: () => void;
   onClose: () => void;
 }) {
@@ -153,12 +159,26 @@ export function NoteModal({
   const [date, setDate] = useState(note?.date ?? '');
   const [type, setType] = useState<NoteType>(note?.type ?? 'note');
   const [attachments, setAttachments] = useState<Attachment[]>(note?.attachments ?? []);
+  const [phone, setPhone] = useState(note?.phone ?? '');
+  const [address, setAddress] = useState(note?.address ?? '');
   // Существующая заметка открывается отрендеренной; новая — сразу в правке.
   const [mode, setMode] = useState<'view' | 'edit'>(note ? 'view' : 'edit');
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  // Карточка контакта/места: показываем поля телефона и адреса.
+  const isContact = type === 'person' || type === 'location';
+
   function patchOf(over?: Partial<Pick<Note, 'attachments'>>) {
-    return { title: title.trim() || 'Без названия', body, date: date || null, type, attachments, ...over };
+    return {
+      title: title.trim() || 'Без названия',
+      body,
+      date: date || null,
+      type,
+      attachments,
+      phone: phone.trim(),
+      address: address.trim(),
+      ...over,
+    };
   }
   function handleSave() {
     onSave(patchOf());
@@ -185,6 +205,8 @@ export function NoteModal({
     setBody(note?.body ?? '');
     setDate(note?.date ?? '');
     setType(note?.type ?? 'note');
+    setPhone(note?.phone ?? '');
+    setAddress(note?.address ?? '');
     setMode('view');
   }
 
@@ -246,6 +268,21 @@ export function NoteModal({
 
           <h2 className="note-read-title">{title || 'Без названия'}</h2>
 
+          {isContact && (phone || address) && (
+            <div className="note-contact">
+              {phone && (
+                <a className="note-contact-row" href={`tel:${phone}`}>
+                  <span aria-hidden>📞</span> {phone}
+                </a>
+              )}
+              {address && (
+                <span className="note-contact-row">
+                  <span aria-hidden>📍</span> {address}
+                </span>
+              )}
+            </div>
+          )}
+
           <div
             className="md note-read-body note-read-tap"
             onClick={() => setMode('edit')}
@@ -306,6 +343,30 @@ export function NoteModal({
               ))}
             </select>
           </label>
+
+          {isContact && (
+            <div className="task-form-row">
+              <label className="field">
+                <span className="field-label">Телефон</span>
+                <input
+                  className="input"
+                  type="tel"
+                  placeholder="+998…"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Адрес</span>
+                <input
+                  className="input"
+                  placeholder="Город, улица…"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                />
+              </label>
+            </div>
+          )}
 
           <div className="md-toolbar">
           <button className="md-btn" title="Жирный" onClick={() => surround('**')}>

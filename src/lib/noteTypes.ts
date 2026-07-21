@@ -8,6 +8,8 @@ export const TYPE_LABELS: Record<NoteType, string> = {
   moc: 'MOC',
   concept: 'Понятие',
   source: 'Источник',
+  person: 'Персона',
+  location: 'Локация',
 };
 
 /** Короткие подписи для бейджа на карточке/строке. */
@@ -18,4 +20,6 @@ export const TYPE_BADGE: Record<NoteType, string> = {
   moc: 'MOC',
   concept: 'понятие',
   source: 'источник',
+  person: 'персона',
+  location: 'локация',
 };

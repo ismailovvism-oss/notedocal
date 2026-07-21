@@ -125,6 +125,8 @@ function cleanNote(n: Note): Note {
     date: n.date ?? null,
     time: n.time ?? '',
     ...(n.health ? { health: n.health } : {}),
+    phone: n.phone ?? '',
+    address: n.address ?? '',
     attachments: (n.attachments ?? []).map(cleanAttachment),
     createdAt: n.createdAt,
     updatedAt: n.updatedAt ?? n.createdAt ?? 0,

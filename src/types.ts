@@ -33,8 +33,16 @@ export interface Task {
 }
 
 /** Роль заметки в системе организации. Любая заметка — это Note; роль задаётся
- *  типом, а не отдельной сущностью. */
-export type NoteType = 'note' | 'folder' | 'tag' | 'moc' | 'concept' | 'source';
+ *  типом, а не отдельной сущностью. Person/location — карточки контактов и мест. */
+export type NoteType =
+  | 'note'
+  | 'folder'
+  | 'tag'
+  | 'moc'
+  | 'concept'
+  | 'source'
+  | 'person'
+  | 'location';
 
 /** Текстовая заметка (универсальная единица знаний). */
 export interface Note {
@@ -49,6 +57,10 @@ export interface Note {
   time?: string;
   /** Если задано — заметка является записью дневника здоровья (её вид). */
   health?: HealthKind;
+  /** Телефон (для карточки персоны). */
+  phone?: string;
+  /** Адрес (для персоны или локации). */
+  address?: string;
   /** Прикреплённые файлы (Firebase Storage). */
   attachments?: Attachment[];
   createdAt: number;

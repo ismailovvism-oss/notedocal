@@ -1971,6 +1971,44 @@ button {
 /* Кликабельная область текста в режиме отображения. */
 .note-read-tap { cursor: text; border-radius: 10px; padding: 4px; margin: -4px; }
 .note-read-tap:hover { background: var(--surface-2); }
+/* Контактные данные персоны/локации в карточке. */
+.note-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 12px;
+}
+.note-contact-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--text);
+  text-decoration: none;
+}
+a.note-contact-row:hover {
+  color: var(--accent);
+}
+.fin-person-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.fin-contact-chip {
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+}
+a.fin-contact-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* ---------- Правка заметки: липкая шапка с действиями, прокрутка тела ---------- */
 .modal-note-edit {
