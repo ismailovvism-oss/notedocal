@@ -81,6 +81,21 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  // Приём «поделиться» из других приложений (Web Share Target, текст/ссылка).
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const shared = [p.get('title'), p.get('text'), p.get('url')]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    if (!shared) return;
+    const now = Date.now();
+    setClipboard((l) => [{ id: uid(), kind: 'text', text: shared, createdAt: now, updatedAt: now }, ...l]);
+    setTab('clipboard');
+    window.history.replaceState({}, '', window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Держим активную вкладку в поле зрения (прокручиваемая навигация).
   const navRef = useRef<HTMLElement>(null);
   useEffect(() => {

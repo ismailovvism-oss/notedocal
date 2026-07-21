@@ -225,7 +225,7 @@ export function DirectoryView({
               </div>
               <input
                 className="input"
-                placeholder="Адрес"
+                placeholder="Адрес, координаты или ссылка Google Maps"
                 value={locAddr}
                 onChange={(e) => setLocAddr(e.target.value)}
               />

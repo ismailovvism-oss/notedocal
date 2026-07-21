@@ -8,6 +8,11 @@
   "background_color": "#14161a",
   "theme_color": "#2f7d6b",
   "lang": "ru",
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  },
   "icons": [
     {
       "src": "./favicon.svg",
