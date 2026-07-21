@@ -69,10 +69,18 @@ button {
   display: flex;
   flex-direction: column;
 }
-/* На широких экранах даём место под колонку дня в календаре. */
+/* На широких экранах: слева вертикальный рельс навигации, контент — по центру
+   оставшегося пространства (место под колонку дня в календаре). */
 @media (min-width: 760px) {
   .app {
+    max-width: none;
+    margin: 0;
+    padding-left: 84px;
+  }
+  .content {
     max-width: 940px;
+    margin: 0 auto;
+    padding-bottom: 24px;
   }
 }
 
@@ -149,28 +157,36 @@ button {
   padding: 16px 18px 96px;
 }
 
-/* ---------- Нижняя навигация ---------- */
+/* ---------- Навигация: снизу (телефон) / рельс слева (широкий экран) ---------- */
+/* Телефон: нижняя панель, горизонтально прокручиваемая — вкладки не обрезаются. */
 .tabbar {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
+  z-index: 20;
   display: flex;
-  justify-content: center;
-  gap: 4px;
+  gap: 2px;
   padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+}
+.tabbar::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
-  flex: 1;
-  max-width: 160px;
+  flex: 0 0 auto;
+  min-width: 62px;
   border: none;
   background: transparent;
   color: var(--muted);
-  padding: 8px 4px;
+  padding: 8px 6px;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -179,14 +195,33 @@ button {
   font-size: 11px;
   transition: background 0.15s, color 0.15s;
 }
-
 .tab .tab-icon {
   font-size: 18px;
 }
-
 .tab.active {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* Широкий экран: вертикальный рельс слева, растёт под любое число вкладок. */
+@media (min-width: 760px) {
+  .tabbar {
+    top: 0;
+    bottom: 0;
+    right: auto;
+    width: 84px;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 8px;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .tab {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 /* ---------- Общие элементы ---------- */
