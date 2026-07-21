@@ -23,6 +23,7 @@ import { NotesExplorer } from './components/NotesExplorer';
 import { MonthsView } from './components/MonthsView';
 import { DashboardView } from './components/DashboardView';
 import { FinanceView } from './components/FinanceView';
+import { DirectoryView } from './components/DirectoryView';
 import { PomodoroWidget } from './components/PomodoroWidget';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
@@ -31,6 +32,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'tasks', label: 'Задачи', icon: '✓' },
   { id: 'notes', label: 'Заметки', icon: '📝' },
   { id: 'finance', label: 'Финансы', icon: '💰' },
+  { id: 'directory', label: 'Справочник', icon: '📇' },
   { id: 'months', label: 'Месяцы', icon: '🌙' },
 ];
 
@@ -251,6 +253,22 @@ export default function App() {
             setNotes={setNotes}
             relations={visibleRelations}
             setRelations={setRelations}
+            checklists={visibleChecklists}
+            setChecklists={setChecklists}
+            events={visibleEvents}
+          />
+        )}
+        {tab === 'directory' && (
+          <DirectoryView
+            notes={visibleNotes}
+            setNotes={setNotes}
+            relations={visibleRelations}
+            setRelations={setRelations}
+            finance={visibleFinance}
+            checklists={visibleChecklists}
+            setChecklists={setChecklists}
+            events={visibleEvents}
+            currency={currency}
           />
         )}
         {tab === 'months' && (

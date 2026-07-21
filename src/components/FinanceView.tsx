@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { FinanceEntry, FinanceKind, Note, Relation } from '../types';
+import type { CalEvent, Checklist, FinanceEntry, FinanceKind, Note, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { dayKey, fromKey, todayKey } from '../lib/dates';
 import {
@@ -16,7 +16,7 @@ import {
   persons,
 } from '../lib/finance';
 import { CONTACTS_FOLDER_ID, findPerson } from '../lib/persons';
-import { NoteModal } from './NotesView';
+import { ContactCard } from './ContactCard';
 
 interface Props {
   finance: FinanceEntry[];
@@ -27,6 +27,9 @@ interface Props {
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   relations: Relation[];
   setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
+  checklists: Checklist[];
+  setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
+  events: CalEvent[];
 }
 
 function monthStart(): string {
@@ -43,6 +46,9 @@ export function FinanceView({
   setNotes,
   relations,
   setRelations,
+  checklists,
+  setChecklists,
+  events,
 }: Props) {
   const [mode, setMode] = useState<'debts' | 'expenses'>('debts');
 
@@ -80,6 +86,9 @@ export function FinanceView({
           setNotes={setNotes}
           relations={relations}
           setRelations={setRelations}
+          checklists={checklists}
+          setChecklists={setChecklists}
+          events={events}
         />
       ) : (
         <ExpensesPanel finance={finance} setFinance={setFinance} currency={currency} />
@@ -96,6 +105,9 @@ function DebtsPanel({
   setNotes,
   relations,
   setRelations,
+  checklists,
+  setChecklists,
+  events,
 }: {
   finance: FinanceEntry[];
   setFinance: React.Dispatch<React.SetStateAction<FinanceEntry[]>>;
@@ -104,6 +116,9 @@ function DebtsPanel({
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   relations: Relation[];
   setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
+  checklists: Checklist[];
+  setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
+  events: CalEvent[];
 }) {
   const { add, remove } = useListActions(setFinance);
   const noteActions = useListActions(setNotes);
@@ -250,16 +265,17 @@ function DebtsPanel({
   );
 
   const cardModal = cardNote ? (
-    <NoteModal
+    <ContactCard
       note={cardNote}
-      allNotes={notes}
+      finance={finance}
+      checklists={checklists}
+      setChecklists={setChecklists}
+      notes={notes}
+      setNotes={setNotes}
       relations={relations}
       setRelations={setRelations}
-      onSave={(patch) => noteActions.update(cardNote.id, { ...patch, updatedAt: Date.now() })}
-      onDelete={() => {
-        noteActions.remove(cardNote.id);
-        setCardId(null);
-      }}
+      events={events}
+      currency={currency}
       onClose={() => setCardId(null)}
     />
   ) : null;

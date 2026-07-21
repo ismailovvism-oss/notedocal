@@ -61,6 +61,8 @@ export interface Note {
   phone?: string;
   /** Адрес (для персоны или локации). */
   address?: string;
+  /** Категория (для локации): «Аптека», «Кафе»… */
+  category?: string;
   /** Прикреплённые файлы (Firebase Storage). */
   attachments?: Attachment[];
   createdAt: number;
@@ -177,6 +179,8 @@ export interface CalEvent {
   /** Время конца HH:mm (необязательно). */
   end?: string;
   desc?: string;
+  /** Привязка к локации (id заметки типа location). */
+  locationId?: string | null;
   /** Повтор события (по умолчанию 'none'). */
   repeat?: Repeat;
   /** Повторять до этой даты включительно (YYYY-MM-DD) либо без ограничения. */
@@ -244,4 +248,11 @@ export interface FinanceEntry {
   deleted?: boolean;
 }
 
-export type Tab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'months' | 'finance';
+export type Tab =
+  | 'dashboard'
+  | 'calendar'
+  | 'tasks'
+  | 'notes'
+  | 'finance'
+  | 'directory'
+  | 'months';

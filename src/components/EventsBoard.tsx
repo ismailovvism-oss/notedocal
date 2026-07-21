@@ -1,17 +1,19 @@
 import { useMemo, useState } from 'react';
-import type { CalEvent, Repeat } from '../types';
+import type { CalEvent, Note, Repeat } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { eventsOnDay, repeatLabel } from '../lib/recurrence';
+import { listLocations } from '../lib/locations';
 
 interface Props {
   date: string;
   events: CalEvent[];
   setEvents: React.Dispatch<React.SetStateAction<CalEvent[]>>;
+  notes: Note[];
 }
 
 const REPEAT_OPTIONS: Repeat[] = ['none', 'daily', 'weekly', 'monthly', 'yearly'];
 
-export function EventsBoard({ date, events, setEvents }: Props) {
+export function EventsBoard({ date, events, setEvents, notes }: Props) {
   const { add, update, remove } = useListActions(setEvents);
 
   const [open, setOpen] = useState(false);
@@ -22,9 +24,12 @@ export function EventsBoard({ date, events, setEvents }: Props) {
   const [desc, setDesc] = useState('');
   const [repeat, setRepeat] = useState<Repeat>('none');
   const [repeatUntil, setRepeatUntil] = useState('');
+  const [locationId, setLocationId] = useState('');
 
   // Вхождения повторов на выбранный день (не только точные совпадения date).
   const list = useMemo(() => eventsOnDay(events, date), [events, date]);
+  const locations = useMemo(() => listLocations(notes), [notes]);
+  const locName = (id?: string | null) => notes.find((n) => n.id === id)?.title;
 
   function reset() {
     setTitle('');
@@ -33,6 +38,7 @@ export function EventsBoard({ date, events, setEvents }: Props) {
     setDesc('');
     setRepeat('none');
     setRepeatUntil('');
+    setLocationId('');
   }
   function startAdd() {
     setEditId(null);
@@ -47,6 +53,7 @@ export function EventsBoard({ date, events, setEvents }: Props) {
     setDesc(e.desc ?? '');
     setRepeat(e.repeat ?? 'none');
     setRepeatUntil(e.repeatUntil ?? '');
+    setLocationId(e.locationId ?? '');
     setOpen(true);
   }
   function save() {
@@ -57,6 +64,7 @@ export function EventsBoard({ date, events, setEvents }: Props) {
       desc: desc.trim(),
       repeat,
       repeatUntil: repeat === 'none' ? null : repeatUntil || null,
+      locationId: locationId || null,
     };
     if (editId) {
       update(editId, patch);
@@ -86,6 +94,9 @@ export function EventsBoard({ date, events, setEvents }: Props) {
                     </span>
                   )}
                 </span>
+                {locName(e.locationId) && (
+                  <span className="muted small ev-loc">📍 {locName(e.locationId)}</span>
+                )}
                 {e.desc && <span className="muted small ev-desc">{e.desc}</span>}
               </div>
               <button className="icon-btn" onClick={() => startEdit(e)} aria-label="Изменить">
@@ -144,6 +155,23 @@ export function EventsBoard({ date, events, setEvents }: Props) {
               </label>
             )}
           </div>
+          {locations.length > 0 && (
+            <label className="field">
+              <span className="field-label">Место</span>
+              <select
+                className="input"
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+              >
+                <option value="">— без места —</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.title || 'Без названия'}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <textarea
             className="input"
             rows={2}
