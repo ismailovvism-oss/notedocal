@@ -205,6 +205,8 @@ export interface CalEvent {
   desc?: string;
   /** Привязка к локации (id заметки типа location). */
   locationId?: string | null;
+  /** Прикреплённые файлы (Firebase Storage). */
+  attachments?: Attachment[];
   /** Повтор события (по умолчанию 'none'). */
   repeat?: Repeat;
   /** Повторять до этой даты включительно (YYYY-MM-DD) либо без ограничения. */

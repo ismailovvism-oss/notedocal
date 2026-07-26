@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import type { CalEvent, Note, Repeat } from '../types';
+import type { Attachment, CalEvent, Note, Repeat } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { eventsOnDay, repeatLabel } from '../lib/recurrence';
 import { listLocations } from '../lib/locations';
+import { deleteAttachment } from '../lib/attachments';
+import { AttachmentAdder, AttachmentList } from './Attachments';
 
 interface Props {
   date: string;
@@ -25,6 +27,7 @@ export function EventsBoard({ date, events, setEvents, notes }: Props) {
   const [repeat, setRepeat] = useState<Repeat>('none');
   const [repeatUntil, setRepeatUntil] = useState('');
   const [locationId, setLocationId] = useState('');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   // Вхождения повторов на выбранный день (не только точные совпадения date).
   const list = useMemo(() => eventsOnDay(events, date), [events, date]);
@@ -39,6 +42,7 @@ export function EventsBoard({ date, events, setEvents, notes }: Props) {
     setRepeat('none');
     setRepeatUntil('');
     setLocationId('');
+    setAttachments([]);
   }
   function startAdd() {
     setEditId(null);
@@ -54,6 +58,7 @@ export function EventsBoard({ date, events, setEvents, notes }: Props) {
     setRepeat(e.repeat ?? 'none');
     setRepeatUntil(e.repeatUntil ?? '');
     setLocationId(e.locationId ?? '');
+    setAttachments(e.attachments ?? []);
     setOpen(true);
   }
   function save() {
@@ -65,6 +70,7 @@ export function EventsBoard({ date, events, setEvents, notes }: Props) {
       repeat,
       repeatUntil: repeat === 'none' ? null : repeatUntil || null,
       locationId: locationId || null,
+      attachments,
     };
     if (editId) {
       update(editId, patch);
@@ -98,6 +104,9 @@ export function EventsBoard({ date, events, setEvents, notes }: Props) {
                   <span className="muted small ev-loc">📍 {locName(e.locationId)}</span>
                 )}
                 {e.desc && <span className="muted small ev-desc">{e.desc}</span>}
+                {e.attachments && e.attachments.length > 0 && (
+                  <AttachmentList items={e.attachments} />
+                )}
               </div>
               <button className="icon-btn" onClick={() => startEdit(e)} aria-label="Изменить">
                 ✎
@@ -179,6 +188,14 @@ export function EventsBoard({ date, events, setEvents, notes }: Props) {
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
           />
+          <AttachmentList
+            items={attachments}
+            onRemove={(a) => {
+              deleteAttachment(a);
+              setAttachments((list) => list.filter((x) => x.id !== a.id));
+            }}
+          />
+          <AttachmentAdder onAdd={(added) => setAttachments((list) => [...list, ...added])} />
           <div className="ev-form-actions">
             <button className="btn btn-primary" onClick={save}>
               {editId ? 'Сохранить' : 'Добавить'}
