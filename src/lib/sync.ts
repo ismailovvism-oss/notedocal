@@ -240,6 +240,7 @@ function cleanEvent(e: CalEvent): CalEvent {
     end: e.end ?? '',
     desc: e.desc ?? '',
     locationId: e.locationId ?? null,
+    attachments: (e.attachments ?? []).map(cleanAttachment),
     repeat: e.repeat ?? 'none',
     repeatUntil: e.repeatUntil ?? null,
     createdAt: e.createdAt,
