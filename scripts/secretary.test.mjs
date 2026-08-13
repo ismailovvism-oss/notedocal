@@ -1,0 +1,215 @@
+// Тесты чистой логики секретаря: разбор аргументов, дат, дерева задач.
+// Запуск: node --test scripts/
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  parseArgs,
+  parseDate,
+  parseTime,
+  toKey,
+  fromKey,
+  flatten,
+  treeUpdate,
+  treeRemove,
+  findTasks,
+  eventOnDay,
+  debtSign,
+  personBalances,
+  money,
+} from './secretary.mjs';
+
+const today = new Date();
+const shift = (n) => {
+  const d = new Date(today);
+  d.setDate(d.getDate() + n);
+  return toKey(d);
+};
+
+test('parseArgs делит позиционные и флаги', () => {
+  const { positional, flags } = parseArgs(['task', 'add', 'Купить хлеб', '--date', 'завтра', '--json']);
+  assert.deepEqual(positional, ['task', 'add', 'Купить хлеб']);
+  assert.equal(flags.date, 'завтра');
+  assert.equal(flags.json, true);
+});
+
+test('parseDate понимает относительные даты', () => {
+  assert.equal(parseDate('сегодня'), shift(0));
+  assert.equal(parseDate('today'), shift(0));
+  assert.equal(parseDate('завтра'), shift(1));
+  assert.equal(parseDate('послезавтра'), shift(2));
+  assert.equal(parseDate('+5'), shift(5));
+  assert.equal(parseDate('2026-08-14'), '2026-08-14');
+});
+
+test('parseDate: пустая дата — null, мусор — ошибка', () => {
+  assert.equal(parseDate(undefined), null);
+  assert.equal(parseDate('none'), null);
+  assert.equal(parseDate(true), null);
+  assert.throws(() => parseDate('когда-нибудь'), /не понял дату/);
+});
+
+test('parseDate: день недели даёт ближайший будущий', () => {
+  for (const [name, want] of [['пн', 1], ['чт', 4], ['вс', 0]]) {
+    const key = parseDate(name);
+    assert.equal(fromKey(key).getDay(), want, `${name} → ${key}`);
+    assert.ok(key > shift(0), `${name} должен быть в будущем`);
+    assert.ok(key <= shift(7), `${name} — в пределах недели`);
+  }
+});
+
+test('parseDate: 14.08 без года не уходит в прошлое', () => {
+  const key = parseDate('14.08');
+  assert.match(key, /^\d{4}-08-14$/);
+  assert.ok(key >= shift(0));
+});
+
+test('parseTime нормализует и отбраковывает', () => {
+  assert.equal(parseTime('9:05'), '09:05');
+  assert.equal(parseTime('15:00'), '15:00');
+  assert.equal(parseTime('7'), '07:00');
+  assert.equal(parseTime(undefined), undefined);
+  assert.throws(() => parseTime('25:00'), /не понял время/);
+  assert.throws(() => parseTime('вечером'), /не понял время/);
+});
+
+test('fromKey читает ключ как локальную дату', () => {
+  const d = fromKey('2026-08-14');
+  assert.equal(d.getFullYear(), 2026);
+  assert.equal(d.getMonth(), 7);
+  assert.equal(d.getDate(), 14);
+  assert.equal(toKey(d), '2026-08-14');
+});
+
+// --- Дерево задач ---
+
+const lists = () => [
+  {
+    id: 'L1',
+    title: '',
+    date: '2026-08-14',
+    items: [
+      { id: 'a', text: 'Смета', done: false, subitems: [{ id: 'a1', text: 'Уточнить цены', done: false }] },
+      { id: 'b', text: 'Фильтр для воды', done: true },
+    ],
+  },
+  {
+    id: 'L2',
+    title: 'Работа',
+    date: null,
+    items: [
+      { id: 'c', text: 'Созвон', done: false },
+      { id: 'd', text: 'Продлить визу', done: false, date: '2026-09-11' },
+    ],
+  },
+  { id: 'L3', title: 'Удалённый', date: null, items: [{ id: 'z', text: 'Призрак', done: false }], deleted: true },
+];
+
+test('flatten обходит подзадачи и пропускает удалённые списки', () => {
+  const flat = flatten(lists());
+  assert.deepEqual(flat.map((t) => t.item.id), ['a', 'a1', 'b', 'c', 'd']);
+  assert.equal(flat.find((t) => t.item.id === 'a1').path, 'Смета / Уточнить цены');
+  assert.equal(flat.find((t) => t.item.id === 'c').listTitle, 'Работа');
+});
+
+// Правило приложения (DashboardView): eff = it.date ?? c.date — дата пункта
+// главнее даты списка. Задача в недатированной категории может иметь свой день.
+test('flatten: день задачи — дата пункта, иначе дата списка', () => {
+  const flat = flatten(lists());
+  const by = (id) => flat.find((t) => t.item.id === id);
+  assert.equal(by('a').date, '2026-08-14', 'нет своей даты → берётся дата списка');
+  assert.equal(by('a1').date, '2026-08-14', 'подзадача тоже наследует день списка');
+  assert.equal(by('d').date, '2026-09-11', 'своя дата пункта главнее');
+  assert.equal(by('c').date, null, 'ни у пункта, ни у списка даты нет');
+});
+
+test('treeUpdate меняет вложенный пункт, не трогая соседей', () => {
+  const items = treeUpdate(lists()[0].items, 'a1', (it) => ({ ...it, done: true }));
+  assert.equal(items[0].subitems[0].done, true);
+  assert.equal(items[0].done, false);
+  assert.equal(items[1].done, true);
+});
+
+test('treeRemove удаляет вложенный пункт', () => {
+  const items = treeRemove(lists()[0].items, 'a1');
+  assert.equal(items[0].subitems.length, 0);
+  assert.equal(items.length, 2);
+});
+
+test('findTasks ищет по id и по подстроке', () => {
+  assert.equal(findTasks(lists(), 'a1').length, 1);
+  assert.equal(findTasks(lists(), 'фильтр')[0].item.id, 'b');
+  assert.equal(findTasks(lists(), 'СМЕТА')[0].item.id, 'a');
+  assert.equal(findTasks(lists(), 'ничего').length, 0);
+});
+
+test('findTasks возвращает несколько при неоднозначности', () => {
+  const amb = [{ id: 'L', title: '', date: null, items: [
+    { id: '1', text: 'Позвонить маме' },
+    { id: '2', text: 'Позвонить в банк' },
+  ] }];
+  assert.equal(findTasks(amb, 'позвонить').length, 2);
+});
+
+// --- Повторы событий ---
+
+test('eventOnDay: разовое событие только в свой день', () => {
+  const ev = { date: '2026-08-14' };
+  assert.equal(eventOnDay(ev, '2026-08-14'), true);
+  assert.equal(eventOnDay(ev, '2026-08-15'), false);
+});
+
+test('eventOnDay: еженедельное держит день недели и не идёт в прошлое', () => {
+  const ev = { date: '2026-08-14', repeat: 'weekly' };
+  assert.equal(eventOnDay(ev, '2026-08-21'), true);
+  assert.equal(eventOnDay(ev, '2026-08-20'), false);
+  assert.equal(eventOnDay(ev, '2026-08-07'), false);
+});
+
+test('eventOnDay: repeatUntil обрывает повтор', () => {
+  const ev = { date: '2026-08-14', repeat: 'daily', repeatUntil: '2026-08-16' };
+  assert.equal(eventOnDay(ev, '2026-08-16'), true);
+  assert.equal(eventOnDay(ev, '2026-08-17'), false);
+});
+
+test('eventOnDay: месячное и годовое', () => {
+  assert.equal(eventOnDay({ date: '2026-08-14', repeat: 'monthly' }, '2026-09-14'), true);
+  assert.equal(eventOnDay({ date: '2026-08-14', repeat: 'monthly' }, '2026-09-15'), false);
+  assert.equal(eventOnDay({ date: '2026-08-14', repeat: 'yearly' }, '2027-08-14'), true);
+  assert.equal(eventOnDay({ date: '2026-08-14', repeat: 'yearly' }, '2027-09-14'), false);
+});
+
+// --- Финансы (те же знаки, что в src/lib/finance.ts) ---
+
+test('debtSign: кто кому должен', () => {
+  assert.equal(debtSign('lent'), 1, 'дал в долг → мне должны');
+  assert.equal(debtSign('return_out'), 1, 'я вернул чужой долг → баланс в плюс');
+  assert.equal(debtSign('borrowed'), -1, 'взял в долг → я должен');
+  assert.equal(debtSign('return_in'), -1, 'мне вернули → долг уменьшился');
+  assert.equal(debtSign('expense'), 0, 'расход в долги не входит');
+  assert.equal(debtSign('income'), 0);
+});
+
+test('personBalances суммирует по контрагенту и держит последнюю дату', () => {
+  const entries = [
+    { kind: 'lent', amount: 700, person: 'Серзод', date: '2026-07-09' },
+    { kind: 'lent', amount: 250, person: 'Серзод', date: '2026-07-01' },
+    { kind: 'return_in', amount: 200, person: 'Серзод', date: '2026-08-01' },
+    { kind: 'borrowed', amount: 500, person: 'Имран', date: '2026-06-15' },
+    { kind: 'expense', amount: 90, category: 'Еда', date: '2026-08-02' },
+  ];
+  const b = personBalances(entries);
+  assert.deepEqual(b.map((x) => x.person), ['Имран', 'Серзод']);
+  assert.equal(b.find((x) => x.person === 'Серзод').net, 750, '700 + 250 − 200');
+  assert.equal(b.find((x) => x.person === 'Серзод').last, '2026-08-01');
+  assert.equal(b.find((x) => x.person === 'Имран').net, -500, 'я должен Имрану');
+});
+
+test('money убирает хвосты двоичной дроби', () => {
+  assert.equal(money(653.4799999999996), '653.48');
+  assert.equal(money(600), '600');
+  assert.equal(money(-0), '0');
+});
+
+test('personBalances пропускает записи без контрагента', () => {
+  assert.deepEqual(personBalances([{ kind: 'lent', amount: 100, date: '2026-08-01' }]), []);
+});

@@ -17,6 +17,11 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Ключ service account для scripts/secretary.mjs — НАСТОЯЩИЙ секрет,
+# в отличие от публичного веб-конфига Firebase. В репозиторий не попадает.
+service-account.json
+*-service-account.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
