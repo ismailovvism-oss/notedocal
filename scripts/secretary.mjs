@@ -393,6 +393,41 @@ async function eventAdd(db, uid, title, flags) {
   return ev;
 }
 
+/** Ищет событие по id или подстроке названия среди живых записей. */
+function findEvents(events, query) {
+  const byId = visible(events).filter((e) => e.id === query);
+  if (byId.length) return byId;
+  const q = query.toLowerCase();
+  return visible(events).filter((e) => (e.title ?? '').toLowerCase().includes(q));
+}
+
+/** Одно событие по запросу; ошибка, если не найдено или найдено несколько. */
+function oneEvent(events, query) {
+  const found = findEvents(events, query);
+  if (found.length === 0) throw new Error(`не нашёл событие: "${query}"`);
+  if (found.length > 1) {
+    throw new Error(
+      `подходит несколько событий:\n${found.map((e) => `  · ${e.title} (${e.date})`).join('\n')}`,
+    );
+  }
+  return found[0];
+}
+
+/** Локация — заметка типа 'location' (см. lib/locations.ts). Ищет по названию. */
+async function findLocation(db, uid, query) {
+  const snap = await db.collection(`users/${uid}/notes`).get();
+  const all = snap.docs.map((d) => d.data()).filter((n) => !n.deleted && n.type === 'location');
+  const byId = all.filter((n) => n.id === query);
+  if (byId.length) return byId[0];
+  const q = query.toLowerCase();
+  const hit = all.filter((n) => (n.title ?? '').toLowerCase().includes(q));
+  if (hit.length === 0) throw new Error(`не нашёл локацию: "${query}"`);
+  if (hit.length > 1) {
+    throw new Error(`подходит несколько локаций:\n${hit.map((n) => `  · ${n.title}`).join('\n')}`);
+  }
+  return hit[0];
+}
+
 /** Повторы: попадает ли событие на день (упрощённая версия recurrence.ts). */
 function eventOnDay(ev, key) {
   if (ev.date === key) return true;
@@ -714,22 +749,43 @@ async function main() {
       if (!events.length) console.log('Событий нет.');
       return;
     }
+    // Правка события: --location привязывает к месту из справочника (locationId).
+    if (action === 'set') {
+      const query = rest.join(' ').trim();
+      if (!query) throw new Error('нужен id или подстрока: event set "..." --start 15:00');
+      const location =
+        typeof flags.location === 'string' ? await findLocation(db, uid, flags.location) : null;
+      const patch = clean({
+        title: typeof flags.title === 'string' ? flags.title : undefined,
+        date: 'date' in flags ? parseDate(flags.date) : undefined,
+        start: 'start' in flags ? parseTime(flags.start) : undefined,
+        end: 'end' in flags ? parseTime(flags.end) : undefined,
+        desc: typeof flags.desc === 'string' ? flags.desc : undefined,
+        locationId: location ? location.id : undefined,
+        updatedAt: Date.now(),
+      });
+      if (Object.keys(patch).length === 1) {
+        throw new Error('нечего менять: укажи --title / --date / --start / --end / --desc / --location');
+      }
+      const updated = await mutateList(db, uid, 'events', (list) => {
+        const ev = oneEvent(list, query);
+        return {
+          list: list.map((e) => (e.id === ev.id ? { ...e, ...patch } : e)),
+          out: { ...ev, ...patch },
+        };
+      });
+      const where = location ? `, место: ${location.title}` : '';
+      console.log(json ? JSON.stringify(updated) : `Обновил: ${updated.title} (${updated.date})${where}`);
+      return;
+    }
     if (action === 'rm') {
       const query = rest.join(' ').trim();
       const removed = await mutateList(db, uid, 'events', (list) => {
-        const hit = visible(list).filter(
-          (e) => e.id === query || e.title.toLowerCase().includes(query.toLowerCase()),
-        );
-        if (hit.length === 0) throw new Error(`не нашёл событие: "${query}"`);
-        if (hit.length > 1) {
-          throw new Error(
-            `подходит несколько событий:\n${hit.map((e) => `  · ${e.title} (${e.date})`).join('\n')}`,
-          );
-        }
+        const ev = oneEvent(list, query);
         const now = Date.now();
         return {
-          list: list.map((e) => (e.id === hit[0].id ? { ...e, deleted: true, updatedAt: now } : e)),
-          out: hit[0],
+          list: list.map((e) => (e.id === ev.id ? { ...e, deleted: true, updatedAt: now } : e)),
+          out: ev,
         };
       });
       console.log(json ? JSON.stringify(removed) : `Удалил событие: ${removed.title}`);
@@ -946,6 +1002,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
   event add "название" --date D [--start HH:mm] [--end HH:mm] [--desc "..."]
                        [--repeat daily|weekly|monthly|yearly] [--until D]
   event list
+  event set "название или id" [--title "..."] [--date D] [--start HH:mm]
+            [--end HH:mm] [--desc "..."] [--location "место из справочника"]
   event rm "название или id"
 
   note add "заголовок" [--body "..."] [--date D]
