@@ -376,6 +376,17 @@ async function taskEdit(db, uid, query, action) {
 
 // ---------- События ----------
 
+/** Виды повтора события (см. Repeat в types.ts). */
+const REPEATS = ['none', 'daily', 'weekly', 'monthly', 'yearly'];
+
+/** Проверяет значение --repeat; undefined означает «не задано». */
+function parseRepeat(input) {
+  if (typeof input !== 'string') return undefined;
+  const s = input.trim().toLowerCase();
+  if (!REPEATS.includes(s)) throw new Error(`повтор — одно из: ${REPEATS.join(', ')}`);
+  return s;
+}
+
 async function eventAdd(db, uid, title, flags) {
   const ev = clean({
     id: randomUUID(),
@@ -384,7 +395,7 @@ async function eventAdd(db, uid, title, flags) {
     start: parseTime(flags.start),
     end: parseTime(flags.end),
     desc: typeof flags.desc === 'string' ? flags.desc : undefined,
-    repeat: typeof flags.repeat === 'string' ? flags.repeat : undefined,
+    repeat: parseRepeat(flags.repeat),
     repeatUntil: 'until' in flags ? parseDate(flags.until) : undefined,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -584,18 +595,45 @@ function personBalances(entries) {
 
 // ---------- Заметки ----------
 
+/** Виды записей дневника здоровья (см. HealthKind в types.ts). */
+const HEALTH_KINDS = ['meal', 'med', 'other'];
+
+/** Папка дневника здоровья: записи висят в ней связью child (lib/health.ts). */
+const HEALTH_FOLDER_ID = 'health-folder';
+
 async function noteAdd(db, uid, title, flags) {
   const now = Date.now();
+  const health = typeof flags.health === 'string' ? flags.health : undefined;
+  if (health && !HEALTH_KINDS.includes(health)) {
+    throw new Error(`вид записи здоровья — одно из: ${HEALTH_KINDS.join(', ')}`);
+  }
   const note = clean({
     id: randomUUID(),
     title,
     body: typeof flags.body === 'string' ? flags.body : '',
     type: typeof flags.type === 'string' ? flags.type : 'note',
-    date: 'date' in flags ? parseDate(flags.date) : null,
+    // Запись здоровья всегда привязана ко дню: без даты она не попадёт ни в
+    // дневник, ни в сводку. Поэтому по умолчанию — сегодня.
+    date: 'date' in flags ? parseDate(flags.date) : health ? toKey(new Date()) : null,
+    time: 'time' in flags ? parseTime(flags.time) : undefined,
+    health,
     createdAt: now,
     updatedAt: now,
   });
   await db.doc(`users/${uid}/notes/${note.id}`).set(note);
+
+  // Запись здоровья кладём в папку «Здоровье» — так же, как это делает приложение.
+  if (health) {
+    const rel = {
+      id: randomUUID(),
+      from: HEALTH_FOLDER_ID,
+      to: note.id,
+      type: 'child',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.doc(`users/${uid}/relations/${rel.id}`).set(rel);
+  }
   return note;
 }
 
@@ -761,11 +799,15 @@ async function main() {
         start: 'start' in flags ? parseTime(flags.start) : undefined,
         end: 'end' in flags ? parseTime(flags.end) : undefined,
         desc: typeof flags.desc === 'string' ? flags.desc : undefined,
+        repeat: parseRepeat(flags.repeat),
+        repeatUntil: 'until' in flags ? parseDate(flags.until) : undefined,
         locationId: location ? location.id : undefined,
         updatedAt: Date.now(),
       });
       if (Object.keys(patch).length === 1) {
-        throw new Error('нечего менять: укажи --title / --date / --start / --end / --desc / --location');
+        throw new Error(
+          'нечего менять: укажи --title / --date / --start / --end / --desc / --repeat / --location',
+        );
       }
       const updated = await mutateList(db, uid, 'events', (list) => {
         const ev = oneEvent(list, query);
@@ -1004,9 +1046,12 @@ const HELP = `Секретарь notedocal — запись и чтение де
   event list
   event set "название или id" [--title "..."] [--date D] [--start HH:mm]
             [--end HH:mm] [--desc "..."] [--location "место из справочника"]
+            [--repeat none|daily|weekly|monthly|yearly] [--until D]
   event rm "название или id"
 
   note add "заголовок" [--body "..."] [--date D]
+                       [--health meal|med|other] [--time HH:mm]
+                       с --health запись попадает в дневник здоровья
   note list [--limit N]
   note show "заголовок или id"
   note edit "заголовок или id" [--body "..."] [--title "..."]
@@ -1049,6 +1094,7 @@ export {
   personBalances,
   money,
   parseKeyMaterial,
+  parseRepeat,
 };
 
 // Запуск как команда — только когда файл вызван напрямую, а не импортирован.

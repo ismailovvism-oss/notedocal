@@ -17,6 +17,7 @@ import {
   personBalances,
   money,
   parseKeyMaterial,
+  parseRepeat,
 } from './secretary.mjs';
 
 const today = new Date();
@@ -233,4 +234,12 @@ test('money убирает хвосты двоичной дроби', () => {
 
 test('personBalances пропускает записи без контрагента', () => {
   assert.deepEqual(personBalances([{ kind: 'lent', amount: 100, date: '2026-08-01' }]), []);
+});
+
+test('parseRepeat принимает известные виды и отбраковывает прочие', () => {
+  assert.equal(parseRepeat('weekly'), 'weekly');
+  assert.equal(parseRepeat(' Monthly '), 'monthly', 'регистр и пробелы не мешают');
+  assert.equal(parseRepeat(undefined), undefined, 'не задан — не трогаем поле');
+  assert.equal(parseRepeat(true), undefined, 'флаг без значения не считается видом');
+  assert.throws(() => parseRepeat('еженедельно'), /повтор — одно из/);
 });
