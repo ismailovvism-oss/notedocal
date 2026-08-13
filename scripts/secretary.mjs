@@ -9,7 +9,9 @@
 //   users/{uid}/notes/*  — заметки, по документу на запись.
 //
 // Доступ — через service account (Admin SDK), правила Firestore он обходит.
-// Ключ берётся из GOOGLE_APPLICATION_CREDENTIALS или ./service-account.json.
+// Ключ берётся из SECRETARY_KEY (JSON или base64 — для облачных сред, где
+// файла в проекте нет), иначе из GOOGLE_APPLICATION_CREDENTIALS или
+// ./service-account.json. Владелец данных — SECRETARY_EMAIL/SECRETARY_UID.
 //
 // Примеры:
 //   node scripts/secretary.mjs who
@@ -143,17 +145,46 @@ function keyPath() {
   return resolve(process.cwd(), 'service-account.json');
 }
 
-function connect() {
+/**
+ * Читает ключ, заданный строкой: сам JSON либо он же в base64.
+ * Base64 удобен там, где секрет задаётся одной строкой переменной окружения
+ * (облачная среда, CI) и переносы строк в приватном ключе ломают значение.
+ */
+function parseKeyMaterial(raw) {
+  const s = String(raw).trim();
+  const json = s.startsWith('{') ? s : Buffer.from(s, 'base64').toString('utf8');
+  let key;
+  try {
+    key = JSON.parse(json);
+  } catch {
+    throw new Error('SECRETARY_KEY не разобрать: нужен JSON ключа service account или он же в base64');
+  }
+  if (!key.project_id || !key.private_key) {
+    throw new Error('SECRETARY_KEY не похож на ключ service account (нет project_id/private_key)');
+  }
+  return key;
+}
+
+/**
+ * Ключ доступа: сначала переменная SECRETARY_KEY (для сред без файловой
+ * системы проекта — облако, CI), иначе файл service-account.json.
+ */
+function loadKey() {
+  if (process.env.SECRETARY_KEY) return parseKeyMaterial(process.env.SECRETARY_KEY);
   const path = keyPath();
   if (!existsSync(path)) {
     throw new Error(
       `не найден ключ service account: ${path}\n` +
         'Firebase Console → Project settings → Service accounts → Generate new private key,\n' +
-        'сохранить как service-account.json в корне проекта (он в .gitignore).',
+        'сохранить как service-account.json в корне проекта (он в .gitignore),\n' +
+        'либо задать переменную SECRETARY_KEY (JSON ключа или он же в base64).',
     );
   }
-  const key = JSON.parse(readFileSync(path, 'utf8'));
-  initializeApp({ credential: cert(key) });
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function connect() {
+  initializeApp({ credential: cert(loadKey()) });
   return { db: getFirestore(), auth: getAuth() };
 }
 
@@ -940,7 +971,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
 Флаг --json у любой команды — машинный вывод.
 
 Владелец данных: SECRETARY_EMAIL (или SECRETARY_UID) в .env.
-Ключ доступа: GOOGLE_APPLICATION_CREDENTIALS или ./service-account.json`;
+Ключ доступа: SECRETARY_KEY (JSON или base64), иначе
+GOOGLE_APPLICATION_CREDENTIALS или ./service-account.json`;
 
 // Чистые функции вынесены наружу — чтобы их можно было проверить
 // (scripts/secretary.test.mjs) без обращения к Firebase.
@@ -958,6 +990,7 @@ export {
   debtSign,
   personBalances,
   money,
+  parseKeyMaterial,
 };
 
 // Запуск как команда — только когда файл вызван напрямую, а не импортирован.

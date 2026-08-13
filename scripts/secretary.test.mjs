@@ -16,6 +16,7 @@ import {
   debtSign,
   personBalances,
   money,
+  parseKeyMaterial,
 } from './secretary.mjs';
 
 const today = new Date();
@@ -202,6 +203,26 @@ test('personBalances суммирует по контрагенту и держ�
   assert.equal(b.find((x) => x.person === 'Серзод').net, 750, '700 + 250 − 200');
   assert.equal(b.find((x) => x.person === 'Серзод').last, '2026-08-01');
   assert.equal(b.find((x) => x.person === 'Имран').net, -500, 'я должен Имрану');
+});
+
+// --- Ключ доступа из переменной окружения (облачная среда, CI) ---
+
+const FAKE_KEY = { project_id: 'notedocal', private_key: '-----BEGIN PRIVATE KEY-----\nx\n' };
+
+test('parseKeyMaterial принимает и JSON, и base64', () => {
+  const json = JSON.stringify(FAKE_KEY);
+  assert.deepEqual(parseKeyMaterial(json), FAKE_KEY);
+  assert.deepEqual(parseKeyMaterial(`  ${json}  `), FAKE_KEY, 'пробелы по краям не мешают');
+  assert.deepEqual(parseKeyMaterial(Buffer.from(json).toString('base64')), FAKE_KEY);
+});
+
+test('parseKeyMaterial отбраковывает мусор и чужой JSON', () => {
+  assert.throws(() => parseKeyMaterial('не ключ'), /не разобрать/);
+  assert.throws(() => parseKeyMaterial('{"a":1}'), /не похож на ключ/);
+  assert.throws(
+    () => parseKeyMaterial(Buffer.from('{"a":1}').toString('base64')),
+    /не похож на ключ/,
+  );
 });
 
 test('money убирает хвосты двоичной дроби', () => {
