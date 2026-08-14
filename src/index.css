@@ -1638,12 +1638,30 @@ button {
 }
 /* Постоянная пропорция обложки: карточки в ряду одной высоты и с фото, и без. */
 .dir-card-photo {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   aspect-ratio: 4 / 3;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+}
+/* Категория поверх обложки: внутри города карточки сгруппированы по
+   надкатегории, а точную категорию видно прямо на фото. */
+.dir-card-tag {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 12px);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dir-card-photo img {
   width: 100%;
@@ -1662,6 +1680,18 @@ button {
 .dir-card .dir-addr {
   max-width: 100%;
   padding: 0 8px;
+}
+
+/* Выбор категории в форме: по одной строке на надкатегорию. */
+.dir-cat-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.dir-cat-row-name {
+  flex: 0 0 76px;
+  text-align: right;
 }
 
 /* ---- Фотографии в карточке места ---- */

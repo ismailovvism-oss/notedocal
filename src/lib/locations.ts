@@ -5,32 +5,34 @@ import type { Note } from '../types';
 
 export const LOCATIONS_FOLDER_ID = 'places-folder';
 
-// Порядок — от повседневного к редкому; «Другое» всегда последним.
-// Старые категории не удаляем: они уже проставлены у существующих мест.
-export const LOCATION_CATEGORIES = [
-  'Дом',
-  'Работа',
-  'Учёба',
-  'Мечеть',
-  'Магазин',
-  'Рынок',
-  'Аптека',
-  'Клиника',
-  'Больница',
-  'Кафе',
-  'Ресторан',
-  'Заправка',
-  'Банк',
-  'Госуслуги',
-  'Спорт',
-  'Сервис',
-  'Парковка',
-  'Зиярат',
-  'Транспорт',
-  'Развлечения',
-  'Отдых',
-  'Другое',
+/**
+ * Категории сгруппированы в надкатегории: их больше трёх десятков, и плоским
+ * списком ими пользоваться невозможно — ни выбрать в форме, ни найти в списке.
+ * Порядок групп — от частого к редкому, «Прочее» последним.
+ * Старые категории не удаляем: они уже проставлены у существующих мест.
+ */
+export const CATEGORY_GROUPS: { group: string; categories: string[] }[] = [
+  { group: 'Еда', categories: ['Кафе', 'Ресторан', 'Сладости'] },
+  { group: 'Покупки', categories: ['Магазин', 'Рынок', 'Продукты'] },
+  { group: 'Отдых', categories: ['Парк', 'Пляж', 'Аквапарк', 'Развлечения', 'Отдых', 'Спорт'] },
+  { group: 'Поездки', categories: ['Достопримечательность', 'Музей', 'Природа', 'Отель'] },
+  { group: 'Ислам', categories: ['Мечеть', 'Зиярат'] },
+  { group: 'Здоровье', categories: ['Аптека', 'Клиника', 'Больница'] },
+  {
+    group: 'Услуги',
+    categories: ['Банк', 'Госуслуги', 'Сервис', 'Заправка', 'Парковка', 'Транспорт'],
+  },
+  { group: 'Своё', categories: ['Дом', 'Работа', 'Учёба'] },
+  { group: 'Прочее', categories: ['Другое'] },
 ];
+
+export const LOCATION_CATEGORIES = CATEGORY_GROUPS.flatMap((g) => g.categories);
+
+/** Надкатегория категории; неизвестные попадают в «Прочее». */
+export function groupOf(category?: string): string {
+  const c = (category ?? '').trim();
+  return CATEGORY_GROUPS.find((g) => g.categories.includes(c))?.group ?? 'Прочее';
+}
 
 /** Значок категории — заполняет карточку места, пока нет фотографии. */
 export const CATEGORY_ICON: Record<string, string> = {
@@ -40,11 +42,13 @@ export const CATEGORY_ICON: Record<string, string> = {
   Мечеть: '🕌',
   Магазин: '🛒',
   Рынок: '🥬',
+  Продукты: '🧺',
   Аптека: '💊',
   Клиника: '🩺',
   Больница: '🏥',
   Кафе: '☕',
   Ресторан: '🍽',
+  Сладости: '🍰',
   Заправка: '⛽',
   Банк: '🏦',
   Госуслуги: '🏛',
@@ -55,6 +59,13 @@ export const CATEGORY_ICON: Record<string, string> = {
   Транспорт: '✈️',
   Развлечения: '🎡',
   Отдых: '🌴',
+  Парк: '🌳',
+  Пляж: '🏖',
+  Аквапарк: '🌊',
+  Природа: '⛰',
+  Достопримечательность: '🏛',
+  Музей: '🖼',
+  Отель: '🏨',
   Другое: '📍',
 };
 
@@ -88,14 +99,29 @@ export function cityOf(n: Note): string {
   return n.city?.trim() || 'Без города';
 }
 
+/** Локации одной надкатегории, порядок групп — как в CATEGORY_GROUPS. */
+function byGroup(items: Note[]): { group: string; items: Note[] }[] {
+  const m = new Map<string, Note[]>();
+  for (const n of items) {
+    const g = groupOf(n.category);
+    const a = m.get(g);
+    if (a) a.push(n);
+    else m.set(g, [n]);
+  }
+  const order = CATEGORY_GROUPS.map((g) => g.group);
+  return [...m.entries()]
+    .map(([group, list]) => ({ group, items: list }))
+    .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
+}
+
 /**
- * Локации по городам, внутри города — по категориям.
- * Города по алфавиту, «Без города» всегда последним: это ещё не разобранные
- * места, и им не место в начале списка.
+ * Локации по городам, внутри города — по надкатегориям.
+ * Города — по числу мест (где их больше, туда чаще и смотришь), «Без города»
+ * всегда последним: это ещё не разобранные места.
  */
 export function locationsByCity(
   notes: Note[],
-): { city: string; count: number; groups: { category: string; items: Note[] }[] }[] {
+): { city: string; count: number; groups: { group: string; items: Note[] }[] }[] {
   const byCity = new Map<string, Note[]>();
   for (const n of listLocations(notes)) {
     const c = cityOf(n);
@@ -104,15 +130,11 @@ export function locationsByCity(
     else byCity.set(c, [n]);
   }
   return [...byCity.entries()]
-    .map(([city, items]) => ({
-      city,
-      count: items.length,
-      groups: locationsByCategory(items),
-    }))
+    .map(([city, items]) => ({ city, count: items.length, groups: byGroup(items) }))
     .sort((a, b) => {
       if (a.city === 'Без города') return 1;
       if (b.city === 'Без города') return -1;
-      return a.city.localeCompare(b.city);
+      return b.count - a.count || a.city.localeCompare(b.city);
     });
 }
 

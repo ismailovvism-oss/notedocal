@@ -29,6 +29,7 @@ import { pathToFileURL } from 'node:url';
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 
 // ---------- Разбор аргументов ----------
 
@@ -183,9 +184,46 @@ function loadKey() {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
+/** Бакет Storage совпадает с тем, что зашит в src/lib/firebaseConfig.ts. */
+const STORAGE_BUCKET = 'notedocal.firebasestorage.app';
+
 function connect() {
-  initializeApp({ credential: cert(loadKey()) });
-  return { db: getFirestore(), auth: getAuth() };
+  initializeApp({ credential: cert(loadKey()), storageBucket: STORAGE_BUCKET });
+  return { db: getFirestore(), auth: getAuth(), bucket: getStorage().bucket() };
+}
+
+/**
+ * Скачивает картинку по ссылке и кладёт в Storage как вложение — тем же путём
+ * и с той же ссылкой, что делает приложение (`users/{uid}/files/{id}-{имя}`
+ * плюс токен скачивания), иначе картинка не откроется в карточке.
+ */
+async function uploadPhotoFromUrl(bucket, uid, url, name = 'photo.jpg') {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`не скачать фото (${res.status})`);
+  const type = res.headers.get('content-type') || 'image/jpeg';
+  if (!type.startsWith('image/')) throw new Error(`по ссылке не картинка (${type})`);
+  const bytes = Buffer.from(await res.arrayBuffer());
+
+  const id = randomUUID();
+  // Кириллица и пробелы вычищаются целиком, поэтому проверяем, что осталось
+  // осмысленное имя, а не строка из подчёркиваний.
+  const cleaned = name.replace(/[^\w.-]+/g, '_').slice(-60);
+  const safe = /[a-z0-9]/i.test(cleaned) ? cleaned : 'photo.jpg';
+  const path = `users/${uid}/files/${id}-${safe}`;
+  const token = randomUUID();
+  await bucket.file(path).save(bytes, {
+    contentType: type,
+    metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+  });
+  return {
+    id,
+    name: safe,
+    size: bytes.length,
+    type,
+    url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`,
+    path,
+    createdAt: Date.now(),
+  };
 }
 
 /** uid владельца данных: из SECRETARY_UID, либо по email из SECRETARY_EMAIL. */
@@ -604,33 +642,42 @@ const HEALTH_FOLDER_ID = 'health-folder';
 /** Папка «Места»: локации висят в ней такой же связью (lib/locations.ts). */
 const LOCATIONS_FOLDER_ID = 'places-folder';
 
-/** Категории локаций — держать в согласии с LOCATION_CATEGORIES в lib/locations.ts. */
+/** Категории локаций — держать в согласии с CATEGORY_GROUPS в lib/locations.ts. */
 const LOCATION_CATEGORIES = [
-  'Дом',
-  'Работа',
-  'Учёба',
-  'Мечеть',
+  'Кафе',
+  'Ресторан',
+  'Сладости',
   'Магазин',
   'Рынок',
+  'Продукты',
+  'Парк',
+  'Пляж',
+  'Аквапарк',
+  'Развлечения',
+  'Отдых',
+  'Спорт',
+  'Достопримечательность',
+  'Музей',
+  'Природа',
+  'Отель',
+  'Мечеть',
+  'Зиярат',
   'Аптека',
   'Клиника',
   'Больница',
-  'Кафе',
-  'Ресторан',
-  'Заправка',
   'Банк',
   'Госуслуги',
-  'Спорт',
   'Сервис',
+  'Заправка',
   'Парковка',
-  'Зиярат',
   'Транспорт',
-  'Развлечения',
-  'Отдых',
+  'Дом',
+  'Работа',
+  'Учёба',
   'Другое',
 ];
 
-async function noteAdd(db, uid, title, flags) {
+async function noteAdd(db, uid, title, flags, bucket) {
   const now = Date.now();
   const health = typeof flags.health === 'string' ? flags.health : undefined;
   if (health && !HEALTH_KINDS.includes(health)) {
@@ -660,6 +707,12 @@ async function noteAdd(db, uid, title, flags) {
     createdAt: now,
     updatedAt: now,
   });
+  // Фото по ссылке: скачиваем и кладём в Storage, чтобы место сразу было с
+  // обложкой (ссылка на чужой хост со временем протухает).
+  if (typeof flags.photo === 'string' && bucket) {
+    const att = await uploadPhotoFromUrl(bucket, uid, flags.photo, `${title}.jpg`);
+    note.attachments = [att];
+  }
   await db.doc(`users/${uid}/notes/${note.id}`).set(note);
 
   // Записи здоровья и локации лежат в своих служебных папках — приложение
@@ -746,7 +799,7 @@ async function main() {
     return;
   }
 
-  const { db, auth } = connect();
+  const { db, auth, bucket } = connect();
 
   // who — список аккаунтов проекта (чтобы узнать uid/email владельца).
   if (group === 'who') {
@@ -948,7 +1001,7 @@ async function main() {
     if (action === 'add') {
       const title = rest.join(' ').trim();
       if (!title) throw new Error('нужен заголовок: note add "..."');
-      const note = await noteAdd(db, uid, title, flags);
+      const note = await noteAdd(db, uid, title, flags, bucket);
       console.log(json ? JSON.stringify(note) : `Заметка сохранена: ${note.title}`);
       return;
     }
@@ -1063,7 +1116,7 @@ async function main() {
         const ev = await eventAdd(db, uid, e.title, e);
         done.push(`событие: ${ev.title} (${ev.date})`);
       } else if (e.kind === 'note') {
-        const n = await noteAdd(db, uid, e.title, e);
+        const n = await noteAdd(db, uid, e.title, e, bucket);
         done.push(`заметка: ${n.title}`);
       } else {
         throw new Error(`неизвестный kind: ${JSON.stringify(e.kind)}`);

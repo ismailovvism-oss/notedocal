@@ -4,7 +4,7 @@ import { uid, useListActions } from '../lib/storage';
 import { formatMoney, personBalances } from '../lib/finance';
 import { CONTACTS_FOLDER_ID, listPersons } from '../lib/persons';
 import {
-  LOCATION_CATEGORIES,
+  CATEGORY_GROUPS,
   LOCATIONS_FOLDER_ID,
   coverPhoto,
   iconOf,
@@ -244,9 +244,10 @@ export function DirectoryView({
                   <span className="muted small dir-city-count">{city.count}</span>
                 </h3>
                 {city.groups.map((group) => (
-                  <div key={group.category} className="dir-cat">
+                  <div key={group.group} className="dir-cat">
                     <h4 className="dir-cat-title">
-                      <span aria-hidden>{iconOf(group.category)}</span> {group.category}
+                      {group.group}
+                      <span className="muted small"> · {group.items.length}</span>
                     </h4>
                     <div className="dir-grid">
                       {group.items.map((l) => {
@@ -261,9 +262,11 @@ export function DirectoryView({
                                   {iconOf(l.category)}
                                 </span>
                               )}
+                              <span className="dir-card-tag">
+                                {iconOf(l.category)} {l.category || 'Другое'}
+                              </span>
                             </span>
                             <span className="dir-card-name">{l.title || 'Без названия'}</span>
-                            {l.address && <span className="muted small dir-addr">{l.address}</span>}
                           </button>
                         );
                       })}
@@ -282,17 +285,22 @@ export function DirectoryView({
                 value={locName}
                 onChange={(e) => setLocName(e.target.value)}
               />
-              <div className="fin-cat-pick">
-                {LOCATION_CATEGORIES.map((c) => (
-                  <button
-                    key={c}
-                    className={`fin-cat-btn ${locCat === c ? 'active' : ''}`}
-                    onClick={() => setLocCat(c)}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
+              {CATEGORY_GROUPS.map((g) => (
+                <div key={g.group} className="dir-cat-row">
+                  <span className="muted small dir-cat-row-name">{g.group}</span>
+                  <div className="fin-cat-pick">
+                    {g.categories.map((c) => (
+                      <button
+                        key={c}
+                        className={`fin-cat-btn ${locCat === c ? 'active' : ''}`}
+                        onClick={() => setLocCat(c)}
+                      >
+                        {iconOf(c)} {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
               <input
                 className="input"
                 placeholder="Адрес, координаты или ссылка Google Maps"
