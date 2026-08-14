@@ -8,10 +8,10 @@ import { debtSign, formatMoney, personBalances, personLedger } from '../lib/fina
 import type { LinkedTask } from '../lib/checklistLinks';
 import { tasksLinkedToNote, toggleItemInList } from '../lib/checklistLinks';
 import { effectiveContacts } from '../lib/persons';
-import { mapLink } from '../lib/locations';
+import { mapLink, photosOf } from '../lib/locations';
 import { personCredentials, personDocuments, expiryStatus } from '../lib/docs';
 import { decryptStr, type Vault } from '../lib/vault';
-import { AttachmentList } from './Attachments';
+import { AttachmentAdder, AttachmentList } from './Attachments';
 import { ContactLinks } from './ContactLinks';
 import { CredentialEditor } from './CredentialEditor';
 import { NoteModal } from './NotesView';
@@ -170,6 +170,8 @@ export function ContactCard({
   }
 
   const isLocation = note.type === 'location';
+  const locPhotos = isLocation ? photosOf(note) : [];
+  const otherFiles = (note.attachments ?? []).filter((a) => !a.type?.startsWith('image/'));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -178,6 +180,7 @@ export function ContactCard({
           <div className="note-read-meta">
             <span className={`type-badge type-${note.type}`}>{isLocation ? 'локация' : 'персона'}</span>
             {note.category && <span className="chip">{note.category}</span>}
+            {isLocation && note.city && <span className="chip">{note.city}</span>}
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
             ✕
@@ -205,7 +208,32 @@ export function ContactCard({
           <div className="md note-read-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(note.body) }} />
         )}
 
-        <AttachmentList items={note.attachments} />
+        {/* Фото места — крупной галереей; прочие файлы остаются списком ниже. */}
+        {isLocation && (
+          <div className="cc-section">
+            <div className="cc-sec-head">
+              <span className="field-label">Фото места</span>
+              <AttachmentAdder
+                onAdd={(added) =>
+                  noteActions.update(note.id, { attachments: [...(note.attachments ?? []), ...added] })
+                }
+              />
+            </div>
+            {locPhotos.length > 0 ? (
+              <div className="loc-gallery">
+                {locPhotos.map((ph) => (
+                  <a key={ph.id} href={ph.url} target="_blank" rel="noreferrer" className="loc-photo">
+                    <img src={ph.url} alt={ph.name} loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="muted small">Фотографий пока нет — снимок сразу попадёт в карточку.</p>
+            )}
+          </div>
+        )}
+
+        <AttachmentList items={isLocation ? otherFiles : note.attachments} />
 
         {!isLocation && ledger.length > 0 && (
           <div className="cc-section">

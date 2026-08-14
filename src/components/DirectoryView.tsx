@@ -3,7 +3,14 @@ import type { CalEvent, Checklist, FinanceEntry, Note, Relation } from '../types
 import { uid, useListActions } from '../lib/storage';
 import { formatMoney, personBalances } from '../lib/finance';
 import { CONTACTS_FOLDER_ID, listPersons } from '../lib/persons';
-import { LOCATION_CATEGORIES, LOCATIONS_FOLDER_ID, locationsByCategory } from '../lib/locations';
+import {
+  LOCATION_CATEGORIES,
+  LOCATIONS_FOLDER_ID,
+  coverPhoto,
+  iconOf,
+  knownCities,
+  locationsByCity,
+} from '../lib/locations';
 import type { Vault } from '../lib/vault';
 import { ContactCard } from './ContactCard';
 
@@ -42,6 +49,7 @@ export function DirectoryView({
   const [locName, setLocName] = useState('');
   const [locCat, setLocCat] = useState('Магазин');
   const [locAddr, setLocAddr] = useState('');
+  const [locCity, setLocCity] = useState('');
   // Массовый импорт локаций списком.
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
@@ -50,7 +58,8 @@ export function DirectoryView({
 
   const persons = useMemo(() => listPersons(notes), [notes]);
   const balances = useMemo(() => personBalances(finance), [finance]);
-  const places = useMemo(() => locationsByCategory(notes), [notes]);
+  const cities = useMemo(() => locationsByCity(notes), [notes]);
+  const cityHints = useMemo(() => knownCities(notes), [notes]);
   const cardNote = cardId ? notes.find((n) => n.id === cardId) ?? null : null;
 
   function ensureFolder(id: string, title: string) {
@@ -92,6 +101,7 @@ export function DirectoryView({
       type: 'location',
       category: locCat.trim() || 'Другое',
       address: locAddr.trim(),
+      city: locCity.trim(),
       date: null,
       createdAt: now,
       updatedAt: now,
@@ -111,8 +121,8 @@ export function DirectoryView({
     setCardId(id);
   }
 
-  // Импорт списком: строка = «Название | Категория | Адрес» (| или таб;
-  // категория и адрес необязательны).
+  // Импорт списком: строка = «Название | Категория | Адрес | Город» (| или таб;
+  // всё, кроме названия, необязательно).
   function importLocations() {
     const lines = importText.split('\n').map((l) => l.trim()).filter(Boolean);
     if (lines.length === 0) return;
@@ -130,6 +140,7 @@ export function DirectoryView({
         type: 'location',
         category: parts[1] || 'Другое',
         address: parts[2] || '',
+        city: parts[3] || '',
         date: null,
         createdAt: now + i,
         updatedAt: now + i,
@@ -223,23 +234,42 @@ export function DirectoryView({
         </div>
       ) : (
         <div>
-          {places.length === 0 ? (
+          {cities.length === 0 ? (
             <p className="empty">Мест пока нет</p>
           ) : (
-            places.map((group) => (
-              <div key={group.category} className="dir-cat">
-                <h3 className="dir-cat-title">{group.category}</h3>
-                <ul className="fin-people">
-                  {group.items.map((l) => (
-                    <li key={l.id}>
-                      <button className="fin-person" onClick={() => setCardId(l.id)}>
-                        <span className="fin-person-name">{l.title || 'Без названия'}</span>
-                        {l.address && <span className="muted small dir-addr">{l.address}</span>}
-                        <span className="fin-chev">›</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+            cities.map((city) => (
+              <div key={city.city} className="dir-city">
+                <h3 className="dir-city-title">
+                  {city.city}
+                  <span className="muted small dir-city-count">{city.count}</span>
+                </h3>
+                {city.groups.map((group) => (
+                  <div key={group.category} className="dir-cat">
+                    <h4 className="dir-cat-title">
+                      <span aria-hidden>{iconOf(group.category)}</span> {group.category}
+                    </h4>
+                    <div className="dir-grid">
+                      {group.items.map((l) => {
+                        const cover = coverPhoto(l);
+                        return (
+                          <button key={l.id} className="dir-card" onClick={() => setCardId(l.id)}>
+                            <span className="dir-card-photo">
+                              {cover ? (
+                                <img src={cover.url} alt="" loading="lazy" />
+                              ) : (
+                                <span className="dir-card-ic" aria-hidden>
+                                  {iconOf(l.category)}
+                                </span>
+                              )}
+                            </span>
+                            <span className="dir-card-name">{l.title || 'Без названия'}</span>
+                            {l.address && <span className="muted small dir-addr">{l.address}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))
           )}
@@ -269,6 +299,18 @@ export function DirectoryView({
                 value={locAddr}
                 onChange={(e) => setLocAddr(e.target.value)}
               />
+              <input
+                className="input"
+                placeholder="Город (по нему группируются места)"
+                list="dir-city-hints"
+                value={locCity}
+                onChange={(e) => setLocCity(e.target.value)}
+              />
+              <datalist id="dir-city-hints">
+                {cityHints.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
               <div className="ev-form-actions">
                 <button className="btn btn-primary" onClick={addLocation}>
                   Добавить
@@ -292,13 +334,15 @@ export function DirectoryView({
           {importOpen && (
             <div className="fin-form">
               <p className="muted small">
-                По одной локации в строке. Формат: <b>Название | Категория | Адрес</b> (категория и
-                адрес необязательны, разделитель — « | » или табуляция).
+                По одной локации в строке. Формат: <b>Название | Категория | Адрес | Город</b> (всё,
+                кроме названия, необязательно; разделитель — « | » или табуляция).
               </p>
               <textarea
                 className="input"
                 rows={6}
-                placeholder={'Аптека №5 | Аптека | Ташкент, Амира Темура 5\nКафе «Плов» | Кафе\nДом'}
+                placeholder={
+                  'Аптека №5 | Аптека | Амира Темура 5 | Ташкент\nКафе «Плов» | Кафе | | Ташкент\nДом'
+                }
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
               />

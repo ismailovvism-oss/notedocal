@@ -1594,6 +1594,95 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---- Места: город → категория → карточки с фото ---- */
+.dir-city {
+  margin-bottom: 22px;
+}
+.dir-city-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 17px;
+}
+.dir-city-count {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.dir-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.dir-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.dir-card:hover {
+  border-color: var(--accent);
+}
+/* Постоянная пропорция обложки: карточки в ряду одной высоты и с фото, и без. */
+.dir-card-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.dir-card-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.dir-card-ic {
+  font-size: 30px;
+  opacity: 0.55;
+}
+.dir-card-name {
+  padding: 4px 8px 0;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.dir-card .dir-addr {
+  max-width: 100%;
+  padding: 0 8px;
+}
+
+/* ---- Фотографии в карточке места ---- */
+.loc-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.loc-photo {
+  display: block;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.loc-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .dir-loc-actions {
   display: flex;
   flex-wrap: wrap;

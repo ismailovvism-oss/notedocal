@@ -654,6 +654,8 @@ async function noteAdd(db, uid, title, flags) {
     health,
     // Адрес локации: ссылка на карту либо текст (см. mapLink в lib/locations.ts).
     address: typeof flags.address === 'string' ? flags.address : isLocation ? '' : undefined,
+    // Город: по нему справочник группирует места (locationsByCity).
+    city: typeof flags.city === 'string' ? flags.city : isLocation ? '' : undefined,
     category: category ?? (isLocation ? 'Другое' : undefined),
     createdAt: now,
     updatedAt: now,
@@ -980,11 +982,12 @@ async function main() {
         title: typeof flags.title === 'string' ? flags.title : undefined,
         body: typeof flags.body === 'string' ? flags.body : undefined,
         address: typeof flags.address === 'string' ? flags.address : undefined,
+        city: typeof flags.city === 'string' ? flags.city : undefined,
         category,
         updatedAt: Date.now(),
       });
       if (Object.keys(patch).length === 1) {
-        throw new Error('нечего менять: укажи --title / --body / --address / --category');
+        throw new Error('нечего менять: укажи --title / --body / --address / --city / --category');
       }
       await db.doc(`users/${uid}/notes/${note.id}`).set(patch, { merge: true });
       console.log(json ? JSON.stringify({ ...note, ...patch }) : `Заметка обновлена: ${patch.title ?? note.title}`);
@@ -1098,12 +1101,12 @@ const HELP = `Секретарь notedocal — запись и чтение де
   note add "заголовок" [--body "..."] [--date D]
                        [--health meal|med|other] [--time HH:mm]
                        с --health запись попадает в дневник здоровья
-                       --type location [--address "ссылка/адрес"] [--category ...]
-                       заводит место в справочнике («Места»)
+                       --type location [--address "ссылка/адрес"] [--city "Город"]
+                       [--category ...] заводит место в справочнике («Места»)
   note list [--limit N]
   note show "заголовок или id"
   note edit "заголовок или id" [--title "..."] [--body "..."]
-                               [--address "..."] [--category "..."]
+                               [--address "..."] [--city "..."] [--category "..."]
   note rm   "заголовок или id"
 
   finance add --amount N [--kind lent|borrowed|return_in|return_out|expense|income]
