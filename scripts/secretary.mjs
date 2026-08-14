@@ -601,32 +601,59 @@ const HEALTH_KINDS = ['meal', 'med', 'other'];
 /** Папка дневника здоровья: записи висят в ней связью child (lib/health.ts). */
 const HEALTH_FOLDER_ID = 'health-folder';
 
+/** Папка «Места»: локации висят в ней такой же связью (lib/locations.ts). */
+const LOCATIONS_FOLDER_ID = 'places-folder';
+
+/** Категории локаций (LOCATION_CATEGORIES в lib/locations.ts). */
+const LOCATION_CATEGORIES = [
+  'Дом',
+  'Работа',
+  'Магазин',
+  'Аптека',
+  'Кафе',
+  'Ресторан',
+  'Заправка',
+  'Больница',
+  'Другое',
+];
+
 async function noteAdd(db, uid, title, flags) {
   const now = Date.now();
   const health = typeof flags.health === 'string' ? flags.health : undefined;
   if (health && !HEALTH_KINDS.includes(health)) {
     throw new Error(`вид записи здоровья — одно из: ${HEALTH_KINDS.join(', ')}`);
   }
+  const type = typeof flags.type === 'string' ? flags.type : 'note';
+  const isLocation = type === 'location';
+  const category = typeof flags.category === 'string' ? flags.category : undefined;
+  if (isLocation && category && !LOCATION_CATEGORIES.includes(category)) {
+    throw new Error(`категория локации — одна из: ${LOCATION_CATEGORIES.join(', ')}`);
+  }
   const note = clean({
     id: randomUUID(),
     title,
     body: typeof flags.body === 'string' ? flags.body : '',
-    type: typeof flags.type === 'string' ? flags.type : 'note',
+    type,
     // Запись здоровья всегда привязана ко дню: без даты она не попадёт ни в
     // дневник, ни в сводку. Поэтому по умолчанию — сегодня.
     date: 'date' in flags ? parseDate(flags.date) : health ? toKey(new Date()) : null,
     time: 'time' in flags ? parseTime(flags.time) : undefined,
     health,
+    // Адрес локации: ссылка на карту либо текст (см. mapLink в lib/locations.ts).
+    address: typeof flags.address === 'string' ? flags.address : isLocation ? '' : undefined,
+    category: category ?? (isLocation ? 'Другое' : undefined),
     createdAt: now,
     updatedAt: now,
   });
   await db.doc(`users/${uid}/notes/${note.id}`).set(note);
 
-  // Запись здоровья кладём в папку «Здоровье» — так же, как это делает приложение.
-  if (health) {
+  // Записи здоровья и локации лежат в своих служебных папках — приложение
+  // собирает их именно оттуда, без связи запись останется «бесхозной».
+  const folder = health ? HEALTH_FOLDER_ID : isLocation ? LOCATIONS_FOLDER_ID : null;
+  if (folder) {
     const rel = {
       id: randomUUID(),
-      from: HEALTH_FOLDER_ID,
+      from: folder,
       to: note.id,
       type: 'child',
       createdAt: now,
@@ -1052,6 +1079,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
   note add "заголовок" [--body "..."] [--date D]
                        [--health meal|med|other] [--time HH:mm]
                        с --health запись попадает в дневник здоровья
+                       --type location [--address "ссылка/адрес"] [--category ...]
+                       заводит место в справочнике («Места»)
   note list [--limit N]
   note show "заголовок или id"
   note edit "заголовок или id" [--body "..."] [--title "..."]
