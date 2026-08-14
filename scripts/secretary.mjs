@@ -604,16 +604,27 @@ const HEALTH_FOLDER_ID = 'health-folder';
 /** Папка «Места»: локации висят в ней такой же связью (lib/locations.ts). */
 const LOCATIONS_FOLDER_ID = 'places-folder';
 
-/** Категории локаций (LOCATION_CATEGORIES в lib/locations.ts). */
+/** Категории локаций — держать в согласии с LOCATION_CATEGORIES в lib/locations.ts. */
 const LOCATION_CATEGORIES = [
   'Дом',
   'Работа',
+  'Учёба',
+  'Мечеть',
   'Магазин',
+  'Рынок',
   'Аптека',
+  'Клиника',
+  'Больница',
   'Кафе',
   'Ресторан',
   'Заправка',
-  'Больница',
+  'Банк',
+  'Госуслуги',
+  'Спорт',
+  'Сервис',
+  'Парковка',
+  'Зиярат',
+  'Транспорт',
   'Другое',
 ];
 
@@ -959,13 +970,19 @@ async function main() {
     // Правка заметки: --body заменяет текст целиком, --title переименовывает.
     if (action === 'edit') {
       const note = await oneNote(db, uid, rest.join(' ').trim());
+      const category = typeof flags.category === 'string' ? flags.category : undefined;
+      if (category && note.type === 'location' && !LOCATION_CATEGORIES.includes(category)) {
+        throw new Error(`категория локации — одна из: ${LOCATION_CATEGORIES.join(', ')}`);
+      }
       const patch = clean({
         title: typeof flags.title === 'string' ? flags.title : undefined,
         body: typeof flags.body === 'string' ? flags.body : undefined,
+        address: typeof flags.address === 'string' ? flags.address : undefined,
+        category,
         updatedAt: Date.now(),
       });
       if (Object.keys(patch).length === 1) {
-        throw new Error('нечего менять: укажи --body "..." и/или --title "..."');
+        throw new Error('нечего менять: укажи --title / --body / --address / --category');
       }
       await db.doc(`users/${uid}/notes/${note.id}`).set(patch, { merge: true });
       console.log(json ? JSON.stringify({ ...note, ...patch }) : `Заметка обновлена: ${patch.title ?? note.title}`);
@@ -1083,7 +1100,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
                        заводит место в справочнике («Места»)
   note list [--limit N]
   note show "заголовок или id"
-  note edit "заголовок или id" [--body "..."] [--title "..."]
+  note edit "заголовок или id" [--title "..."] [--body "..."]
+                               [--address "..."] [--category "..."]
   note rm   "заголовок или id"
 
   finance add --amount N [--kind lent|borrowed|return_in|return_out|expense|income]
