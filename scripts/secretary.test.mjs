@@ -18,6 +18,16 @@ import {
   money,
   parseKeyMaterial,
   parseRepeat,
+  parseStatus,
+  parsePriority,
+  parseSize,
+  parseTags,
+  extractTags,
+  routeTask,
+  completeTask,
+  nextTaskDate,
+  taskMatches,
+  INBOX_TITLE,
 } from './secretary.mjs';
 
 const today = new Date();
@@ -242,4 +252,98 @@ test('parseRepeat принимает известные виды и отбрак
   assert.equal(parseRepeat(undefined), undefined, 'не задан — не трогаем поле');
   assert.equal(parseRepeat(true), undefined, 'флаг без значения не считается видом');
   assert.throws(() => parseRepeat('еженедельно'), /повтор — одно из/);
+});
+
+// ---------- Измерения задачи: теги, состояние, важность, размер ----------
+
+test('parseStatus понимает русские синонимы, active не хранит', () => {
+  assert.equal(parseStatus('жду'), 'waiting');
+  assert.equal(parseStatus(' Когда-нибудь '), 'someday');
+  assert.equal(parseStatus('active'), undefined, 'значение по умолчанию не пишем в запись');
+  assert.equal(parseStatus(undefined), undefined);
+  assert.throws(() => parseStatus('потом'), /состояние — одно из/);
+});
+
+test('parsePriority: normal не хранится, синонимы работают', () => {
+  assert.equal(parsePriority('важно'), 'high');
+  assert.equal(parsePriority('не-горит'), 'low');
+  assert.equal(parsePriority('обычно'), undefined);
+  assert.throws(() => parsePriority('среднее'), /важность — одно из/);
+});
+
+test('parseSize принимает минуты и часы', () => {
+  assert.equal(parseSize('15'), 15);
+  assert.equal(parseSize('15м'), 15);
+  assert.equal(parseSize('1ч'), 60);
+  assert.equal(parseSize(true), undefined, 'флаг без значения — не размер');
+  assert.throws(() => parseSize('немного'), /размер — число минут/);
+});
+
+test('parseTags режет по запятой и нормализует', () => {
+  assert.deepEqual(parseTags(' #Купить, позвонить ,'), ['купить', 'позвонить']);
+  assert.deepEqual(parseTags(undefined), []);
+});
+
+test('extractTags вынимает #теги из текста', () => {
+  const r = extractTags('Купить масло #купить #Дом');
+  assert.equal(r.text, 'Купить масло');
+  assert.deepEqual(r.tags, ['купить', 'дом']);
+  assert.deepEqual(extractTags('Просто задача').tags, [], 'без решёток текст не меняется');
+});
+
+test('routeTask раскладывает по ключевым словам, остальное — во Входящие', () => {
+  assert.equal(routeTask('Купить батарейки').list, 'Купить');
+  assert.equal(routeTask('Статья о повестке').list, 'Ислам');
+  assert.equal(routeTask('Лендинг для офиса').list, 'Прог');
+  assert.equal(routeTask('Открыть карту в Саудии').list, 'Нужно');
+  assert.equal(routeTask('Оплатить свет').list, 'Дом');
+  assert.equal(routeTask('Посмотреть курс Айнура').list, INBOX_TITLE, 'непонятное — в свалку');
+});
+
+test('completeTask: обычная закрывается, повторяющаяся уезжает на срок', () => {
+  assert.deepEqual(completeTask({ text: 'x', done: false }, '2026-08-16').done, true);
+
+  const weekly = completeTask(
+    { text: 'укол', done: false, date: '2026-08-20', repeat: 'weekly' },
+    '2026-08-16',
+  );
+  assert.equal(weekly.done, false, 'повтор не закрывается');
+  assert.equal(weekly.date, '2026-08-27');
+
+  const past = completeTask(
+    { text: 'свет', done: false, date: '2026-07-28', repeat: 'monthly' },
+    '2026-08-16',
+  );
+  assert.equal(past.date, '2026-09-16', 'просроченный повтор считается от сегодня');
+
+  const last = completeTask(
+    { text: 'курс', done: false, date: '2026-08-20', repeat: 'weekly', repeatUntil: '2026-08-25' },
+    '2026-08-16',
+  );
+  assert.equal(last.done, true, 'после repeatUntil задача закрывается');
+});
+
+test('nextTaskDate считает следующий срок по виду повтора', () => {
+  assert.equal(nextTaskDate('2026-08-16', 'daily'), '2026-08-17');
+  assert.equal(nextTaskDate('2026-08-16', 'weekly'), '2026-08-23');
+  assert.equal(nextTaskDate('2026-08-16', 'monthly'), '2026-09-16');
+  assert.equal(nextTaskDate('2026-08-16', 'yearly'), '2027-08-16');
+  assert.equal(nextTaskDate('2026-01-31', 'monthly'), '2026-03-03', 'короткий месяц перетекает');
+});
+
+test('taskMatches: замыслы скрыты, срезы складываются', () => {
+  const ref = (item, listTitle = 'Дом') => ({ item, listTitle });
+  const plain = ref({ text: 'a', done: false });
+  const someday = ref({ text: 'b', done: false, status: 'someday' });
+  const small = ref({ text: 'c', done: false, sizeMin: 15, tags: ['купить'] });
+
+  assert.equal(taskMatches(plain, {}), true);
+  assert.equal(taskMatches(someday, {}), false, 'по умолчанию замыслы не показываем');
+  assert.equal(taskMatches(someday, { all: true }), true);
+  assert.equal(taskMatches(someday, { status: 'когда-нибудь' }), true);
+  assert.equal(taskMatches(small, { size: '15' }), true);
+  assert.equal(taskMatches(plain, { size: '15' }), false, 'без размера не влезает в срез');
+  assert.equal(taskMatches(small, { tag: 'купить' }), true);
+  assert.equal(taskMatches(small, { tag: 'купить,позвонить' }), false, 'теги — по И');
+  assert.equal(taskMatches(small, { list: 'Работа' }), false);
 });

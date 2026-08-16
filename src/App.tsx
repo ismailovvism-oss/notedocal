@@ -24,12 +24,14 @@ import { ChecklistBoard } from './components/ChecklistBoard';
 import { NotesExplorer } from './components/NotesExplorer';
 import { MonthsView } from './components/MonthsView';
 import { DashboardView } from './components/DashboardView';
+import { TodayView } from './components/TodayView';
 import { FinanceView } from './components/FinanceView';
 import { DirectoryView } from './components/DirectoryView';
 import { ClipboardView } from './components/ClipboardView';
 import { PomodoroWidget } from './components/PomodoroWidget';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'today', label: 'Сегодня', icon: '⚡' },
   { id: 'dashboard', label: 'Обзор', icon: '📊' },
   { id: 'calendar', label: 'Календарь', icon: '📅' },
   { id: 'tasks', label: 'Задачи', icon: '✓' },
@@ -229,6 +231,13 @@ export default function App() {
       </header>
 
       <main className="content">
+        {tab === 'today' && (
+          <TodayView
+            checklists={visibleChecklists}
+            setChecklists={setChecklists}
+            events={visibleEvents}
+          />
+        )}
         {tab === 'dashboard' && (
           <DashboardView
             events={visibleEvents}

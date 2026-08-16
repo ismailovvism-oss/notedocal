@@ -289,6 +289,102 @@ const visible = (list) => list.filter((it) => !it.deleted);
 
 // ---------- Задачи (пункты чек-листов) ----------
 
+/** Список-свалка: сюда падает надиктованное, пока не разобрано (INBOX_TITLE
+ *  в src/lib/tasks.ts). */
+const INBOX_TITLE = 'Входящие';
+
+const TASK_STATUSES = ['active', 'someday', 'waiting'];
+const TASK_PRIORITIES = ['low', 'normal', 'high'];
+
+/** Синонимы, чтобы диктовать по-русски: `--status жду`, `--priority важно`. */
+const STATUS_ALIASES = {
+  active: 'active', активная: 'active', вработе: 'active',
+  someday: 'someday', 'когда-нибудь': 'someday', замысел: 'someday', идея: 'someday',
+  waiting: 'waiting', жду: 'waiting', ожидание: 'waiting',
+};
+const PRIORITY_ALIASES = {
+  high: 'high', важно: 'high', важное: 'high', срочно: 'high',
+  normal: 'normal', обычно: 'normal', обычное: 'normal',
+  low: 'low', низкий: 'low', 'не-горит': 'low',
+};
+
+function parseStatus(raw) {
+  if (typeof raw !== 'string') return undefined;
+  const v = STATUS_ALIASES[raw.trim().toLowerCase()];
+  if (!v) throw new Error(`состояние — одно из: ${TASK_STATUSES.join(', ')} (или жду / когда-нибудь)`);
+  return v === 'active' ? undefined : v; // active — значение по умолчанию, не храним
+}
+
+function parsePriority(raw) {
+  if (typeof raw !== 'string') return undefined;
+  const v = PRIORITY_ALIASES[raw.trim().toLowerCase()];
+  if (!v) throw new Error(`важность — одно из: ${TASK_PRIORITIES.join(', ')} (или важно / не-горит)`);
+  return v === 'normal' ? undefined : v;
+}
+
+/** Размер задачи в минутах: «15», «15м», «1ч». */
+function parseSize(raw) {
+  if (raw === undefined || raw === true) return undefined;
+  const s = String(raw).trim().toLowerCase();
+  const m = /^(\d+)\s*(м|мин|m|ч|h)?$/.exec(s);
+  if (!m) throw new Error('размер — число минут: --size 15 (или 1ч)');
+  const n = Number(m[1]);
+  return m[2] === 'ч' || m[2] === 'h' ? n * 60 : n;
+}
+
+const normTag = (raw) => String(raw).trim().replace(/^#/, '').toLowerCase();
+
+/** `--tag купить,позвонить` → ['купить','позвонить']. */
+function parseTags(raw) {
+  if (typeof raw !== 'string') return [];
+  return raw
+    .split(',')
+    .map(normTag)
+    .filter(Boolean);
+}
+
+/** Вынимает «#теги» из текста (тот же разбор, что в src/lib/tasks.ts). */
+function extractTags(text) {
+  const tags = [];
+  const cleaned = String(text)
+    .replace(/(^|\s)#([^\s#]+)/g, (_m, space, tag) => {
+      const t = normTag(tag);
+      if (t && !tags.includes(t)) tags.push(t);
+      return space;
+    })
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return { text: cleaned, tags };
+}
+
+/**
+ * Автораскладка надиктованного: по ключевым словам угадывает список и тип
+ * действия. Правило одно — угадали, кладём в сферу; не угадали, кладём во
+ * «Входящие» и разбираем потом. Свалка должна быть осознанной, а не «Нужно»,
+ * куда сыпется всё, что никуда не подошло.
+ */
+// ⚠️ Никаких \b в шаблонах: в JavaScript граница слова считается по ASCII
+// (\w = [A-Za-z0-9_]), поэтому у кириллицы её просто нет — «карту » мимо
+// /карт[ауы]\b/. Конец слова закрываем через (?![а-яё]).
+const ROUTES = [
+  { list: 'Купить', tags: ['купить'], re: /купить|батарей|помп|масл[оа]|продукт/i },
+  { list: 'Ислам', tags: ['написать'], re: /стать[ьяю]|книг[ауи]|маджлис|хадис|тафсир|намаз|фатв/i },
+  { list: 'Прог', tags: ['код'], re: /лендинг|сайт|приложени|скрипт|прог(а|у|и)?(?![а-яё])|верстк|бот(?![а-яё])/i },
+  { list: 'Нужно', tags: ['оформить'], re: /виз[аыу]|икам|карт[ауы](?![а-яё])|номер|паспорт|документ|банк|страхов/i },
+  { list: 'Нужно', tags: ['позвонить'], re: /позвонить|написать\s+(ему|ей|им)|связаться|уточнить у/i },
+  { list: 'Дом', tags: ['оплатить'], re: /оплат|счёт|счет за|электрич|свет(?![а-яё])|вода(?![а-яё])|аренд|интернет|wifi|вайфай/i },
+  { list: 'Семья', tags: [], re: /жен[еа](?![а-яё])|дет[ямис]|ханифа|аят(?![а-яё])|хаммад|ортодонт|подолог|школ/i },
+];
+
+function routeTask(text, tags = []) {
+  for (const r of ROUTES) {
+    if (r.re.test(text)) return { list: r.list, tags: r.tags };
+  }
+  // Тег задали руками — доверяем ему и не отправляем во «Входящие» вслепую.
+  if (tags.length) return { list: INBOX_TITLE, tags: [] };
+  return { list: INBOX_TITLE, tags: [] };
+}
+
 /**
  * Добавляет задачу так же, как кнопка «быстрая задача» в приложении:
  * ищет список с пустым названием и дописывает в него, иначе создаёт новый
@@ -301,15 +397,28 @@ const visible = (list) => list.filter((it) => !it.deleted);
  * своей категории и осталась видна лишь в календаре того дня.
  * Дата самого списка — редкий случай, для него `--list-date`.
  */
-async function taskAdd(db, uid, text, flags) {
+async function taskAdd(db, uid, rawText, flags) {
   const date = 'list-date' in flags ? parseDate(flags['list-date']) : null;
-  const listTitle = typeof flags.list === 'string' ? flags.list.trim() : '';
+  const { text, tags: inlineTags } = extractTags(rawText);
+  const given = [...new Set([...inlineTags, ...parseTags(flags.tag)])];
+  const routed = routeTask(text, given);
+  const listTitle =
+    typeof flags.list === 'string' && flags.list.trim() ? flags.list.trim() : routed.list;
+  const tags = [...new Set([...given, ...routed.tags])];
+
   const item = clean({
     id: randomUUID(),
     text,
     done: false,
     desc: typeof flags.desc === 'string' ? flags.desc : undefined,
     date: 'date' in flags ? parseDate(flags.date) : undefined,
+    tags: tags.length ? tags : undefined,
+    status: parseStatus(flags.status),
+    waitingFor: typeof flags['waiting-for'] === 'string' ? flags['waiting-for'] : undefined,
+    priority: parsePriority(flags.priority),
+    sizeMin: parseSize(flags.size),
+    repeat: 'repeat' in flags ? parseRepeat(flags.repeat) : undefined,
+    repeatUntil: 'until' in flags ? parseDate(flags.until) : undefined,
   });
 
   return mutateList(db, uid, 'checklists', (lists) => {
@@ -405,10 +514,99 @@ async function taskEdit(db, uid, query, action) {
       const items =
         action === 'rm'
           ? treeRemove(l.items, t.item.id)
-          : treeUpdate(l.items, t.item.id, (it) => ({ ...it, done: action === 'done' }));
+          : treeUpdate(l.items, t.item.id, (it) =>
+              action === 'done' ? completeTask(it) : { ...it, done: false },
+            );
       return { ...l, items, updatedAt: now };
     });
     return { list, out: t };
+  });
+}
+
+/**
+ * Отметка «сделано» с учётом повтора (тот же расчёт, что toggleWithRepeat в
+ * src/lib/tasks.ts): повторяющаяся задача не закрывается, а уезжает на
+ * следующий срок — иначе её пришлось бы каждый раз заводить заново.
+ */
+function completeTask(it, today = toKey(new Date())) {
+  const repeat = it.repeat ?? 'none';
+  if (repeat === 'none') return { ...it, done: true };
+  const from = it.date && it.date >= today ? it.date : today;
+  const next = nextTaskDate(from, repeat);
+  if (it.repeatUntil && next > it.repeatUntil) return { ...it, done: true };
+  return { ...it, done: false, date: next, remindAt: null };
+}
+
+/** Следующий срок повторяющейся задачи (YYYY-MM-DD). */
+function nextTaskDate(dateKey, repeat) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  if (repeat === 'daily') return toKey(addDays(fromKey(dateKey), 1));
+  if (repeat === 'weekly') return toKey(addDays(fromKey(dateKey), 7));
+  if (repeat === 'monthly') return toKey(new Date(y, m, d));
+  if (repeat === 'yearly') return toKey(new Date(y + 1, m - 1, d));
+  return dateKey;
+}
+
+/** Правка полей задачи на месте; `--list` переносит её в другой список. */
+async function taskSet(db, uid, query, flags) {
+  const patch = clean({
+    text: typeof flags.text === 'string' ? flags.text : undefined,
+    desc: typeof flags.desc === 'string' ? flags.desc : undefined,
+    date: 'date' in flags ? parseDate(flags.date) : undefined,
+    status: 'status' in flags ? (parseStatus(flags.status) ?? null) : undefined,
+    waitingFor: typeof flags['waiting-for'] === 'string' ? flags['waiting-for'] : undefined,
+    priority: 'priority' in flags ? (parsePriority(flags.priority) ?? null) : undefined,
+    sizeMin: 'size' in flags ? (parseSize(flags.size) ?? null) : undefined,
+    repeat: 'repeat' in flags ? parseRepeat(flags.repeat) : undefined,
+    repeatUntil: 'until' in flags ? parseDate(flags.until) : undefined,
+  });
+  const tags = parseTags(flags.tag);
+  const moveTo = typeof flags.list === 'string' ? flags.list.trim() : '';
+  if (!Object.keys(patch).length && !tags.length && !moveTo) {
+    throw new Error('нечего менять: --text / --date / --tag / --status / --priority / --size / --repeat / --list');
+  }
+
+  return mutateList(db, uid, 'checklists', (lists) => {
+    const found = findTasks(lists, query);
+    if (found.length === 0) throw new Error(`не нашёл задачу по запросу: "${query}"`);
+    if (found.length > 1) {
+      const names = found.map((t) => `  · ${t.path}`).join('\n');
+      throw new Error(`под запрос "${query}" подходит несколько задач:\n${names}`);
+    }
+    const t = found[0];
+    const now = Date.now();
+    // null в patch означает «сбросить поле» (например, --priority normal).
+    const apply = (it) => {
+      const next = { ...it, ...patch };
+      if (tags.length) next.tags = [...new Set([...(it.tags ?? []), ...tags])];
+      for (const [k, v] of Object.entries(patch)) if (v === null) delete next[k];
+      return next;
+    };
+
+    if (!moveTo || moveTo === t.listTitle) {
+      const list = lists.map((l) =>
+        l.id === t.listId ? { ...l, items: treeUpdate(l.items, t.item.id, apply), updatedAt: now } : l,
+      );
+      return { list, out: { ...t, item: apply(t.item) } };
+    }
+
+    // Перенос: вынимаем из старого списка и кладём в целевой (создаём, если нет).
+    const moved = apply(t.item);
+    let list = lists.map((l) =>
+      l.id === t.listId ? { ...l, items: treeRemove(l.items, t.item.id), updatedAt: now } : l,
+    );
+    const target = list.find((l) => !l.deleted && (l.title ?? '').trim() === moveTo && !l.date);
+    if (target) {
+      list = list.map((l) =>
+        l.id === target.id ? { ...l, items: [...(l.items ?? []), moved], updatedAt: now } : l,
+      );
+    } else {
+      list = [
+        { id: randomUUID(), title: moveTo, date: null, items: [moved], createdAt: now, updatedAt: now },
+        ...list,
+      ];
+    }
+    return { list, out: { ...t, item: moved, listTitle: moveTo } };
   });
 }
 
@@ -774,6 +972,19 @@ function dayLabel(key) {
   return `${key} (${wd})`;
 }
 
+/** Значки измерений в строке вывода: важность, состояние, размер, теги, повтор. */
+function taskBadges(it) {
+  const parts = [];
+  if (it.priority === 'high') parts.push('‼️');
+  if (it.priority === 'low') parts.push('↓');
+  if (it.status === 'waiting') parts.push(it.waitingFor ? `⏳ждёт: ${it.waitingFor}` : '⏳жду');
+  if (it.status === 'someday') parts.push('💭');
+  if (it.sizeMin) parts.push(it.sizeMin < 60 ? `${it.sizeMin}м` : `${Math.round(it.sizeMin / 60)}ч`);
+  if (it.repeat && it.repeat !== 'none') parts.push('🔁');
+  for (const t of it.tags ?? []) parts.push(`#${t}`);
+  return parts.length ? ` ${parts.join(' ')}` : '';
+}
+
 function printTasks(tasks) {
   if (!tasks.length) {
     console.log('  (пусто)');
@@ -782,8 +993,34 @@ function printTasks(tasks) {
   for (const t of tasks) {
     const mark = t.item.done ? '✓' : '·';
     const where = t.listTitle ? ` [${t.listTitle}]` : '';
-    console.log(`  ${mark} ${t.path}${where}`);
+    console.log(`  ${mark} ${t.path}${where}${taskBadges(t.item)}`);
   }
+}
+
+/** Фильтр задач для `task list` (те же срезы, что в приложении). */
+function taskMatches(t, flags) {
+  const it = t.item;
+  if (flags.open && it.done) return false;
+  const status = it.status ?? 'active';
+  if (typeof flags.status === 'string') {
+    if (status !== parseStatusFilter(flags.status)) return false;
+  } else if (status === 'someday' && !flags.all) {
+    return false; // замыслы не мешаются, пока их не спросили
+  }
+  const tags = parseTags(flags.tag);
+  if (tags.length && !tags.every((x) => (it.tags ?? []).includes(x))) return false;
+  if (flags.priority && (it.priority ?? 'normal') !== parsePriority(flags.priority)) return false;
+  const size = parseSize(flags.size);
+  if (size && (it.sizeMin ?? Infinity) > size) return false;
+  if (typeof flags.list === 'string' && t.listTitle !== flags.list.trim()) return false;
+  return true;
+}
+
+/** `--status активная` тоже должно работать, поэтому 'active' не схлопываем. */
+function parseStatusFilter(raw) {
+  const v = STATUS_ALIASES[String(raw).trim().toLowerCase()];
+  if (!v) throw new Error(`состояние — одно из: ${TASK_STATUSES.join(', ')}`);
+  return v;
 }
 
 // ---------- Команды ----------
@@ -820,14 +1057,16 @@ async function main() {
       const text = rest.join(' ').trim();
       if (!text) throw new Error('нужен текст задачи: task add "..."');
       const { item, list } = await taskAdd(db, uid, text, flags);
-      const when = list.date ? ` на ${list.date}` : ' (без даты)';
-      console.log(json ? JSON.stringify(item) : `Добавил: ${item.text}${when}`);
+      const when = item.date ? ` на ${item.date}` : list.date ? ` на ${list.date}` : '';
+      const where = list.title ? ` [${list.title}]` : '';
+      console.log(
+        json ? JSON.stringify(item) : `Добавил: ${item.text}${where}${when}${taskBadges(item)}`,
+      );
       return;
     }
     if (action === 'list') {
       const lists = await readList(db, uid, 'checklists');
-      let tasks = flatten(lists);
-      if (flags.open) tasks = tasks.filter((t) => !t.item.done);
+      let tasks = flatten(lists).filter((t) => taskMatches(t, flags));
       if (flags.date) {
         const key = parseDate(flags.date);
         tasks = tasks.filter((t) => t.date === key);
@@ -854,7 +1093,35 @@ async function main() {
       if (!query) throw new Error(`нужен текст или id задачи: task ${action} "..."`);
       const t = await taskEdit(db, uid, query, action === 'undo' ? 'undone' : action);
       const verb = { done: 'Выполнено', undo: 'Снял отметку', rm: 'Удалил' }[action];
-      console.log(json ? JSON.stringify(t) : `${verb}: ${t.path}`);
+      const repeats = action === 'done' && t.item.repeat && t.item.repeat !== 'none';
+      const tail = repeats ? ' (повтор — уедет на следующий срок)' : '';
+      console.log(json ? JSON.stringify(t) : `${verb}: ${t.path}${tail}`);
+      return;
+    }
+    if (action === 'set') {
+      const query = rest.join(' ').trim();
+      if (!query) throw new Error('нужен текст или id задачи: task set "..." --tag …');
+      const t = await taskSet(db, uid, query, flags);
+      console.log(
+        json ? JSON.stringify(t) : `Поправил: ${t.item.text} [${t.listTitle}]${taskBadges(t.item)}`,
+      );
+      return;
+    }
+    // Разбор входящих: показать свалку, чтобы разложить её командой task set.
+    if (action === 'triage') {
+      const lists = await readList(db, uid, 'checklists');
+      const tasks = flatten(lists).filter(
+        (t) => !t.item.done && t.listTitle === INBOX_TITLE,
+      );
+      if (json) {
+        console.log(JSON.stringify(tasks, null, 2));
+        return;
+      }
+      console.log(`Входящие: ${tasks.length}`);
+      printTasks(tasks);
+      if (tasks.length) {
+        console.log('\nРазложить: task set "текст" --list "Дом" --tag оплатить --size 15');
+      }
       return;
     }
     throw new Error(`не знаю команду task ${action ?? ''}`);
@@ -1076,10 +1343,16 @@ async function main() {
       });
     }
     const overdue = tasks.filter((t) => t.date && t.date < from);
-    const undated = tasks.filter((t) => !t.date);
+    // Замыслы («когда-нибудь») и ожидание не мешаются в сводке дел: первое —
+    // бэклог идей, второе — не моя очередь ходить. Показываем их отдельно.
+    const undated = tasks.filter((t) => !t.date && !t.item.status);
+    const waiting = tasks.filter((t) => t.item.status === 'waiting');
+    const someday = tasks.filter((t) => t.item.status === 'someday');
 
     if (json) {
-      console.log(JSON.stringify({ from, days, overdue, undated, agenda: result }, null, 2));
+      console.log(
+        JSON.stringify({ from, days, overdue, undated, waiting, someday, agenda: result }, null, 2),
+      );
       return;
     }
     if (overdue.length) {
@@ -1098,6 +1371,13 @@ async function main() {
     if (undated.length) {
       console.log('\nБез даты');
       printTasks(undated);
+    }
+    if (waiting.length) {
+      console.log('\nЖду ответа');
+      printTasks(waiting);
+    }
+    if (someday.length) {
+      console.log(`\nКогда-нибудь: ${someday.length} (task list --status когда-нибудь)`);
     }
     return;
   }
@@ -1136,10 +1416,20 @@ const HELP = `Секретарь notedocal — запись и чтение де
   who                                 аккаунты проекта (найти свой uid/email)
 
   task add "текст" [--date D] [--list "Название"] [--desc "..."]
+                   [--tag купить,позвонить] [--status жду|когда-нибудь]
+                   [--waiting-for "кого ждём"] [--priority важно|не-горит]
+                   [--size 15] [--repeat weekly] [--until D]
                    --date ставит день самой задаче, список остаётся в своей
                    категории. Датировать список целиком — --list-date D.
-  task list [--open] [--date D]
-  task done "текст или id"
+                   Без --list список подбирается по ключевым словам, а что не
+                   опознано — падает во «Входящие» (разобрать: task triage).
+                   Теги можно писать в тексте: «Купить масло #купить».
+  task list [--open] [--date D] [--tag ...] [--status ...] [--priority ...]
+            [--size 15] [--list "Название"] [--all]
+  task set  "текст или id" [--text ...] [--list ...] [--tag ...] [--date D]
+            [--status ...] [--priority ...] [--size N] [--repeat ...] [--until D]
+  task triage                         показать «Входящие» для разбора
+  task done "текст или id"            повторяющаяся уедет на следующий срок
   task undo "текст или id"
   task rm   "текст или id"
 
@@ -1200,6 +1490,16 @@ export {
   money,
   parseKeyMaterial,
   parseRepeat,
+  parseStatus,
+  parsePriority,
+  parseSize,
+  parseTags,
+  extractTags,
+  routeTask,
+  completeTask,
+  nextTaskDate,
+  taskMatches,
+  INBOX_TITLE,
 };
 
 // Запуск как команда — только когда файл вызван напрямую, а не импортирован.

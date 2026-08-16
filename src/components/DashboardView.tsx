@@ -18,6 +18,7 @@ import {
 } from '../lib/dates';
 import { eventsOnDay } from '../lib/recurrence';
 import { HEALTH_META, healthOnDay, mealPeriodSummary, mealStreaks } from '../lib/health';
+import { toggleWithRepeat } from '../lib/tasks';
 
 interface Props {
   events: CalEvent[];
@@ -47,7 +48,7 @@ function findItem(items: ChecklistItem[], id: string): boolean {
 function toggleInItems(items: ChecklistItem[], id: string): ChecklistItem[] {
   return items.map((it) =>
     it.id === id
-      ? { ...it, done: !it.done }
+      ? toggleWithRepeat(it) // повторяющаяся задача уезжает на следующий срок
       : { ...it, subitems: it.subitems ? toggleInItems(it.subitems, id) : it.subitems },
   );
 }

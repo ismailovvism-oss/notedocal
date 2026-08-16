@@ -2668,3 +2668,88 @@ a.fin-contact-chip:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Срезы задач, теги, экран «Сегодня» ---------- */
+.cl-filter {
+  margin-bottom: 10px;
+}
+.cl-filter-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cl-filter-search {
+  flex: 1;
+}
+.cl-filter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-top: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.cl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+/* Чип-фильтр кликабелен, в отличие от чипа-ярлыка выше. */
+.cl-chips .chip,
+button.chip {
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.chip.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.cl-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: none;
+}
+.cl-tag {
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.cl-size {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.td-sizes {
+  margin-bottom: 12px;
+}
+.td-group {
+  margin-bottom: 16px;
+}
+.td-title {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+.td-hint {
+  margin: -4px 0 6px;
+}
+.td-overdue .td-title {
+  color: var(--danger);
+}
+.td-overdue .db-row {
+  border-left: 2px solid var(--danger);
+  padding-left: 6px;
+}
+.td-suggest .db-row {
+  opacity: 0.9;
+}
+.td-waiting {
+  opacity: 0.85;
+}
