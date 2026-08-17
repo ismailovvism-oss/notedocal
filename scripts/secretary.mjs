@@ -840,6 +840,85 @@ const HEALTH_FOLDER_ID = 'health-folder';
 /** Папка «Места»: локации висят в ней такой же связью (lib/locations.ts). */
 const LOCATIONS_FOLDER_ID = 'places-folder';
 
+/** Папка «Контакты»: персоны висят в ней связью child (lib/persons.ts). */
+const CONTACTS_FOLDER_ID = 'contacts-folder';
+
+/** Способы связи в карточке персоны (ContactType в types.ts). */
+const CONTACT_TYPES = ['phone', 'whatsapp', 'telegram', 'email', 'other'];
+
+/**
+ * Заводит персону в справочнике: заметка типа 'person' плюс связь с папкой
+ * «Контакты» — ровно как DirectoryView.addPerson в приложении. Без связи
+ * карточка осталась бы «бесхозной» и в справочнике не показалась.
+ *
+ * Если персона с таким именем есть — дописывает недостающие контакты, а не
+ * плодит вторую карточку (имена в финансах сходятся по строке).
+ */
+async function personAdd(db, uid, name, flags) {
+  const wanted = [];
+  for (const type of CONTACT_TYPES) {
+    const raw = flags[type];
+    if (typeof raw !== 'string') continue;
+    for (const value of raw.split(',').map((v) => v.trim()).filter(Boolean)) {
+      wanted.push({ type, value });
+    }
+  }
+  const key = (c) => `${c.type}:${c.value.replace(/\s+/g, '').toLowerCase()}`;
+  const now = Date.now();
+
+  const snap = await db.collection(`users/${uid}/notes`).get();
+  const notes = snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
+  const existing = notes.find(
+    (n) => n.type === 'person' && (n.title ?? '').trim().toLowerCase() === name.trim().toLowerCase(),
+  );
+
+  if (!notes.some((n) => n.id === CONTACTS_FOLDER_ID)) {
+    await db.doc(`users/${uid}/notes/${CONTACTS_FOLDER_ID}`).set({
+      id: CONTACTS_FOLDER_ID,
+      title: 'Контакты',
+      body: '',
+      type: 'folder',
+      date: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  if (existing) {
+    const contacts = [...(existing.contacts ?? [])];
+    const have = new Set(contacts.map(key));
+    const added = wanted.filter((c) => !have.has(key(c)));
+    if (added.length) {
+      contacts.push(...added);
+      await db.doc(`users/${uid}/notes/${existing.id}`).set({ ...existing, contacts, updatedAt: now });
+    }
+    return { person: { ...existing, contacts }, added, created: false };
+  }
+
+  const person = clean({
+    id: randomUUID(),
+    title: name,
+    body: typeof flags.body === 'string' ? flags.body : '',
+    type: 'person',
+    date: null,
+    contacts: wanted.length ? wanted : undefined,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.doc(`users/${uid}/notes/${person.id}`).set(person);
+  const rel = {
+    id: randomUUID(),
+    from: CONTACTS_FOLDER_ID,
+    to: person.id,
+    type: 'child',
+    position: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.doc(`users/${uid}/relations/${rel.id}`).set(rel);
+  return { person, added: wanted, created: true };
+}
+
 /** Категории локаций — держать в согласии с CATEGORY_GROUPS в lib/locations.ts. */
 const LOCATION_CATEGORIES = [
   'Кафе',
@@ -1383,6 +1462,43 @@ async function main() {
   }
 
   // batch — пачка записей из JSON-файла (или stdin с "-").
+  if (group === 'person') {
+    if (action === 'add') {
+      const name = rest.join(' ').trim();
+      if (!name) throw new Error('нужно имя: person add "Имя" --phone +966…');
+      const { person, added, created } = await personAdd(db, uid, name, flags);
+      const what = added.map((c) => `${c.type} ${c.value}`).join(', ');
+      console.log(
+        json
+          ? JSON.stringify(person)
+          : created
+            ? `Завёл персону: ${person.title}${what ? ` — ${what}` : ''}`
+            : added.length
+              ? `Дописал в ${person.title}: ${what}`
+              : `Уже есть, менять нечего: ${person.title}`,
+      );
+      return;
+    }
+    if (action === 'list') {
+      const snap = await db.collection(`users/${uid}/notes`).get();
+      const persons = snap.docs
+        .map((d) => d.data())
+        .filter((n) => !n.deleted && n.type === 'person')
+        .sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
+      if (json) {
+        console.log(JSON.stringify(persons, null, 2));
+        return;
+      }
+      for (const p of persons) {
+        const contacts = (p.contacts ?? []).map((c) => `${c.type} ${c.value}`).join(', ');
+        console.log(`  ${p.title}${contacts ? ` — ${contacts}` : ''}`);
+      }
+      if (!persons.length) console.log('  (пусто)');
+      return;
+    }
+    throw new Error(`не знаю команду person ${action ?? ''}`);
+  }
+
   if (group === 'batch') {
     const src = action === '-' || !action ? 0 : action;
     const payload = JSON.parse(readFileSync(src, 'utf8'));
@@ -1398,6 +1514,16 @@ async function main() {
       } else if (e.kind === 'note') {
         const n = await noteAdd(db, uid, e.title, e, bucket);
         done.push(`заметка: ${n.title}`);
+      } else if (e.kind === 'finance') {
+        // Перенос книги из чужой таблицы — это десятки строк за раз; поштучно
+        // они заняли бы столько же вызовов, сколько сама книга строк.
+        const fin = await financeAdd(db, uid, e);
+        done.push(`финансы: ${FIN_LABEL[fin.kind]} ${fin.person ?? ''} ${fin.amount} (${fin.date})`);
+      } else if (e.kind === 'person') {
+        const { person, added, created } = await personAdd(db, uid, e.title ?? e.name, e);
+        done.push(
+          `персона: ${person.title}${created ? '' : ' (уже была)'}${added.length ? ` +${added.length} контакт(ов)` : ''}`,
+        );
       } else {
         throw new Error(`неизвестный kind: ${JSON.stringify(e.kind)}`);
       }
@@ -1463,7 +1589,15 @@ const HELP = `Секретарь notedocal — запись и чтение де
 
   agenda [--date D] [--days N]        сводка: события + открытые задачи
 
-  batch файл.json                     пачка записей ([{kind:"task",text:…}, …])
+  person add "Имя" [--phone +966…] [--telegram @ник] [--whatsapp ...]
+                   [--email ...] [--body "..."]   карточка в справочнике
+                   несколько значений — через запятую; повторный вызов
+                   дописывает контакты, а не плодит вторую карточку
+  person list
+
+  batch файл.json                     пачка записей: kind = task | event |
+                                      note | finance | person (перенос книги
+                                      из чужой таблицы — десятками строк)
 
 Даты (D): сегодня | завтра | послезавтра | пн…вс | +3 | 14.08 | 2026-08-14 | none
 Флаг --json у любой команды — машинный вывод.
