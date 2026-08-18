@@ -11,6 +11,8 @@ import {
   flatten,
   treeUpdate,
   treeRemove,
+  treeRemoveMany,
+  collectPurge,
   findTasks,
   eventOnDay,
   debtSign,
@@ -145,6 +147,69 @@ test('treeRemove удаляет вложенный пункт', () => {
   const items = treeRemove(lists()[0].items, 'a1');
   assert.equal(items[0].subitems.length, 0);
   assert.equal(items.length, 2);
+});
+
+// --- Очистка выполненного (task purge) ---
+
+// Дерево, где выполненное перемешано с живым: закрытый родитель с открытым
+// подпунктом, закрытый родитель с закрытым подпунктом, датированное закрытое.
+const purgeLists = () => [
+  {
+    id: 'L1',
+    title: 'Дом',
+    date: null,
+    items: [
+      { id: 'p1', text: 'Ремонт', done: true, subitems: [{ id: 'p1a', text: 'Позвонить мастеру', done: false }] },
+      { id: 'p2', text: 'Кран', done: true, subitems: [{ id: 'p2a', text: 'Прокладка', done: true }] },
+      { id: 'p3', text: 'Открытая', done: false, subitems: [{ id: 'p3a', text: 'Закрытая внутри', done: true }] },
+    ],
+  },
+  {
+    id: 'L2',
+    title: 'Работа',
+    date: '2026-01-10',
+    items: [
+      { id: 'p4', text: 'Старый отчёт', done: true },
+      { id: 'p5', text: 'Свежая', done: true, date: '2026-08-17' },
+    ],
+  },
+  { id: 'L3', title: 'Удалённый', date: null, items: [{ id: 'pz', text: 'Призрак', done: true }], deleted: true },
+];
+
+test('collectPurge берёт выполненные и не трогает открытые', () => {
+  const { gone } = collectPurge(purgeLists(), { today: '2026-08-18' });
+  assert.deepEqual(gone.map((t) => t.item.id), ['p2', 'p3a', 'p4', 'p5']);
+});
+
+test('collectPurge не сносит закрытого родителя с незакрытым подпунктом', () => {
+  const { gone, kept } = collectPurge(purgeLists(), { today: '2026-08-18' });
+  assert.equal(gone.some((t) => t.item.id === 'p1'), false);
+  assert.deepEqual(kept.map((t) => t.item.id), ['p1']);
+});
+
+test('collectPurge не считает подпункты удаляемого родителя дважды', () => {
+  const { gone } = collectPurge(purgeLists(), { today: '2026-08-18' });
+  assert.equal(gone.some((t) => t.item.id === 'p2a'), false, 'уедет вместе с p2');
+  assert.equal(gone.find((t) => t.item.id === 'p3a').path, 'Открытая / Закрытая внутри');
+});
+
+test('collectPurge: --list сужает до одной сферы, удалённые списки мимо', () => {
+  const { gone } = collectPurge(purgeLists(), { list: 'Работа', today: '2026-08-18' });
+  assert.deepEqual(gone.map((t) => t.item.id), ['p4', 'p5']);
+  assert.equal(gone.some((t) => t.item.id === 'pz'), false);
+});
+
+// --older считает по дате задачи (своей или списка) — времени выполнения в
+// данных нет, поэтому недатированное под срез не попадает.
+test('collectPurge: --older отбирает по дате, недатированные оставляет', () => {
+  const { gone } = collectPurge(purgeLists(), { older: 30, today: '2026-08-18' });
+  assert.deepEqual(gone.map((t) => t.item.id), ['p4'], 'p5 свежая, p2/p3a без даты');
+});
+
+test('treeRemoveMany удаляет пачкой на разной глубине', () => {
+  const items = treeRemoveMany(purgeLists()[0].items, new Set(['p2', 'p3a']));
+  assert.deepEqual(items.map((it) => it.id), ['p1', 'p3']);
+  assert.equal(items[1].subitems.length, 0);
 });
 
 test('findTasks ищет по id и по подстроке', () => {

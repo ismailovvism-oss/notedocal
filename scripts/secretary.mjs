@@ -487,6 +487,55 @@ function treeRemove(items, id) {
     .map((it) => (it.subitems ? { ...it, subitems: treeRemove(it.subitems, id) } : it));
 }
 
+/** Удаляет из дерева все пункты, чьи id перечислены (рекурсивно). */
+function treeRemoveMany(items, ids) {
+  return (items ?? [])
+    .filter((it) => !ids.has(it.id))
+    .map((it) => (it.subitems ? { ...it, subitems: treeRemoveMany(it.subitems, ids) } : it));
+}
+
+/** Есть ли внутри пункта незакрытые подпункты (на любой глубине). */
+function hasOpenSubitems(item) {
+  return (item.subitems ?? []).some((it) => !it.done || hasOpenSubitems(it));
+}
+
+/**
+ * Отбор выполненных задач для `task purge`.
+ *
+ * Выполненный родитель с незакрытыми подпунктами не удаляется: вместе с ним
+ * пропали бы живые дела. Если родителя сносим — его подпункты уедут вместе с
+ * ним, поэтому вглубь не спускаемся и второй раз их не считаем.
+ *
+ * `older` считает по дате задачи (своей или списка): времени выполнения в
+ * данных нет, так что недатированные под этот срез не попадают.
+ */
+function collectPurge(lists, opts = {}) {
+  const wanted = typeof opts.list === 'string' ? opts.list.trim() : null;
+  const today = opts.today ?? toKey(new Date());
+  const cutoff = opts.older == null ? null : toKey(addDays(fromKey(today), -opts.older));
+  const gone = [];
+  const kept = [];
+  const walk = (items, l, prefix) => {
+    for (const it of items ?? []) {
+      const path = prefix ? `${prefix} / ${it.text}` : it.text;
+      const entry = { item: it, listId: l.id, listTitle: (l.title ?? '').trim(), path };
+      const date = it.date ?? l.date ?? null;
+      const fits =
+        !!it.done &&
+        (!wanted || entry.listTitle === wanted) &&
+        (!cutoff || (date != null && date <= cutoff));
+      if (fits && !hasOpenSubitems(it)) {
+        gone.push(entry);
+        continue;
+      }
+      if (fits) kept.push(entry);
+      if (it.subitems?.length) walk(it.subitems, l, path);
+    }
+  };
+  for (const l of visible(lists)) walk(l.items, l, '');
+  return { gone, kept };
+}
+
 /** Находит задачи по id или по подстроке текста (без учёта регистра). */
 function findTasks(lists, query) {
   const all = flatten(lists);
@@ -1186,6 +1235,44 @@ async function main() {
       );
       return;
     }
+    // Полная очистка выполненного. Без --yes только показывает, что уедет:
+    // удаление задач не откатить, «надгробий» у пунктов чек-листа нет.
+    if (action === 'purge') {
+      const older = 'older' in flags ? Number(flags.older) : null;
+      if (older != null && !Number.isFinite(older)) throw new Error('--older — число дней');
+      const apply = !!flags.yes && !flags['dry-run'];
+      const opts = { list: flags.list, older };
+      const { gone, kept } = apply
+        ? await mutateList(db, uid, 'checklists', (lists) => {
+            const found = collectPurge(lists, opts);
+            const ids = new Set(found.gone.map((t) => t.item.id));
+            const touched = new Set(found.gone.map((t) => t.listId));
+            const now = Date.now();
+            const list = lists.map((l) =>
+              touched.has(l.id) ? { ...l, items: treeRemoveMany(l.items, ids), updatedAt: now } : l,
+            );
+            return { list, out: found };
+          })
+        : collectPurge(await readList(db, uid, 'checklists'), opts);
+      if (json) {
+        console.log(JSON.stringify({ applied: apply, gone, kept }, null, 2));
+        return;
+      }
+      if (!gone.length) console.log('Выполненных задач под очистку нет.');
+      else {
+        console.log(
+          apply
+            ? `Удалил выполненных: ${gone.length}`
+            : `Под очистку: ${gone.length} — удалить: повтори с --yes`,
+        );
+        printTasks(gone);
+      }
+      if (kept.length) {
+        console.log(`\nОставил ${kept.length} — внутри незакрытые подпункты:`);
+        printTasks(kept);
+      }
+      return;
+    }
     // Разбор входящих: показать свалку, чтобы разложить её командой task set.
     if (action === 'triage') {
       const lists = await readList(db, uid, 'checklists');
@@ -1555,6 +1642,11 @@ const HELP = `Секретарь notedocal — запись и чтение де
   task set  "текст или id" [--text ...] [--list ...] [--tag ...] [--date D]
             [--status ...] [--priority ...] [--size N] [--repeat ...] [--until D]
   task triage                         показать «Входящие» для разбора
+  task purge [--list "Название"] [--older N] [--yes]
+                   удалить выполненные пачкой. Без --yes только показывает,
+                   что уедет; --older считает по дате задачи (времени
+                   выполнения в данных нет, недатированные не трогает).
+                   Родителя с незакрытыми подпунктами не удаляет.
   task done "текст или id"            повторяющаяся уедет на следующий срок
   task undo "текст или id"
   task rm   "текст или id"
@@ -1617,6 +1709,9 @@ export {
   flatten,
   treeUpdate,
   treeRemove,
+  treeRemoveMany,
+  hasOpenSubitems,
+  collectPurge,
   findTasks,
   eventOnDay,
   debtSign,
