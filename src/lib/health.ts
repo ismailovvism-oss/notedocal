@@ -11,24 +11,38 @@ import { addDaysKey } from './dates';
 /** Фиксированный id папки-заметки «Здоровье» (одинаков на всех устройствах). */
 export const HEALTH_FOLDER_ID = 'health-folder';
 
-export const HEALTH_KINDS: HealthKind[] = ['meal', 'med', 'other'];
+/** Виды, которые можно завести кнопкой в дневнике. 'course' сюда не входит:
+ *  курс препарата заводится отдельной карточкой, а не записью дня. */
+export const HEALTH_KINDS: HealthKind[] = ['meal', 'med', 'metric', 'lab', 'symptom', 'other'];
 
 export const HEALTH_META: Record<HealthKind, { icon: string; label: string }> = {
   meal: { icon: '🍽', label: 'Приём пищи' },
   med: { icon: '💊', label: 'Препарат' },
+  metric: { icon: '📏', label: 'Замер' },
+  lab: { icon: '🧪', label: 'Анализ' },
+  symptom: { icon: '🤕', label: 'Симптом' },
   other: { icon: '🩹', label: 'Другое' },
+  course: { icon: '💉', label: 'Курс препарата' },
 };
 
 /** Записи здоровья на день, отсортированные по времени. */
 export function healthOnDay(notes: Note[], key: string): Note[] {
   return notes
-    .filter((n) => !n.deleted && n.health && n.date === key)
+    .filter((n) => !n.deleted && n.health && n.health !== 'course' && n.date === key)
     .sort((a, b) => ((a.time || '99:99') < (b.time || '99:99') ? -1 : 1));
 }
 
 /** Сводка по видам за день (для маркера на ячейке календаря). */
 export function healthCounts(entries: Note[]): Record<HealthKind, number> {
-  const c: Record<HealthKind, number> = { meal: 0, med: 0, other: 0 };
+  const c: Record<HealthKind, number> = {
+    meal: 0,
+    med: 0,
+    metric: 0,
+    lab: 0,
+    symptom: 0,
+    other: 0,
+    course: 0,
+  };
   for (const e of entries) if (e.health) c[e.health] += 1;
   return c;
 }

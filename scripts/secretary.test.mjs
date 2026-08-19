@@ -29,6 +29,11 @@ import {
   completeTask,
   nextTaskDate,
   taskMatches,
+  parseSite,
+  parseSiteLevel,
+  findMetric,
+  metricStatus,
+  courseStateOf,
   INBOX_TITLE,
 } from './secretary.mjs';
 
@@ -411,4 +416,83 @@ test('taskMatches: замыслы скрыты, срезы складывают�
   assert.equal(taskMatches(small, { tag: 'купить' }), true);
   assert.equal(taskMatches(small, { tag: 'купить,позвонить' }), false, 'теги — по И');
   assert.equal(taskMatches(small, { list: 'Работа' }), false);
+});
+
+// ---- Здоровье: показатели и курс препарата ----
+
+test('findMetric: код, синоним и начало названия', () => {
+  assert.equal(findMetric('ldl').code, 'ldl');
+  assert.equal(findMetric('вес').code, 'weight');
+  assert.equal(findMetric('липаза').code, 'lipase');
+  assert.equal(findMetric('витамин').code, 'vitd');
+  assert.equal(findMetric('неттакого'), null);
+});
+
+test('metricStatus: цель жёстче нормы, без цели судим по норме', () => {
+  const ldl = findMetric('ldl'); // норма <100, цель <70
+  assert.equal(metricStatus(ldl, 60), 'ok');
+  assert.equal(metricStatus(ldl, 85), 'warn', 'в норме, но мимо цели');
+  assert.equal(metricStatus(ldl, 190), 'bad');
+
+  const hba1c = findMetric('hba1c'); // норма <5.6, цель <6.5
+  assert.equal(metricStatus(hba1c, 5.7), 'warn', 'выше нормы, но в цели — не красный');
+
+  const vitd = findMetric('vitd'); // цели нет
+  assert.equal(metricStatus(vitd, 12), 'bad');
+  assert.equal(metricStatus(vitd, 45), 'ok');
+
+  const hdl = findMetric('hdl'); // норма >40, цель >60
+  assert.equal(metricStatus(hdl, 49.2), 'warn');
+  assert.equal(metricStatus(hdl, 30), 'bad');
+});
+
+test('courseStateOf: счётчик доз и дата покупки новой упаковки', () => {
+  const course = {
+    code: 'mounjaro',
+    everyDays: 7,
+    dosesPerPen: 4,
+    penStart: '2026-08-13',
+  };
+  const shot = (date) => ({ health: 'med', code: 'mounjaro', date });
+
+  const start = courseStateOf([shot('2026-08-13')], course, '2026-08-19');
+  assert.equal(start.taken, 1);
+  assert.equal(start.left, 3);
+  assert.equal(start.nextDate, '2026-08-20');
+  assert.equal(start.buyBy, '2026-09-10', 'после 4-й дозы 03.09 следующий укол 10.09');
+  assert.equal(start.overdue, false);
+
+  const late = courseStateOf([shot('2026-08-13')], course, '2026-08-22');
+  assert.equal(late.overdue, true, 'укол 20.08 не отмечен — просрочен');
+
+  // Уколы до текущей упаковки в счёт не идут.
+  const old = courseStateOf([shot('2026-07-01'), shot('2026-08-13')], course, '2026-08-19');
+  assert.equal(old.taken, 1);
+
+  const empty = courseStateOf([], course, '2026-08-13');
+  assert.equal(empty.taken, 0);
+  assert.equal(empty.nextDate, '2026-08-13', 'первый укол — в день старта упаковки');
+});
+
+// ---- Локация боли ----
+
+test('parseSite: код в заголовок, слова — врачу', () => {
+  const a = parseSite('л сп д+3');
+  assert.equal(a.code, 'Л-СП-Д+3');
+  assert.equal(a.words, 'слева, по средней подмышечной линии, на 3 см выше рёберной дуги');
+
+  assert.equal(parseSite('л-сп-д+3').code, 'Л-СП-Д+3', 'через дефис — тот же код');
+  assert.match(parseSite('право ск п-4').words, /справа, по среднеключичной линии, на 4 см ниже пупка/);
+  assert.match(parseSite('л зп р10').words, /на уровне 10-го ребра/);
+
+  assert.throws(() => parseSite('л хх д+3'), /Линии/, 'неизвестная линия — подсказка, а не молчание');
+  assert.throws(() => parseSite('вверх сп'), /Стороны/);
+});
+
+test('parseSiteLevel: якоря — дуга, пупок, ребро', () => {
+  assert.equal(parseSiteLevel('д+3'), 'на 3 см выше рёберной дуги');
+  assert.equal(parseSiteLevel('д−2'), 'на 2 см ниже рёберной дуги', 'минус-тире тоже понимаем');
+  assert.equal(parseSiteLevel('п+5'), 'на 5 см выше пупка');
+  assert.equal(parseSiteLevel('р9'), 'на уровне 9-го ребра');
+  assert.equal(parseSiteLevel('чтото'), null);
 });

@@ -881,7 +881,150 @@ function personBalances(entries) {
 // ---------- Заметки ----------
 
 /** Виды записей дневника здоровья (см. HealthKind в types.ts). */
-const HEALTH_KINDS = ['meal', 'med', 'other'];
+const HEALTH_KINDS = ['meal', 'med', 'metric', 'lab', 'symptom', 'other'];
+
+/** Справочник показателей — тот же файл, что читает приложение
+ *  (src/lib/metrics.json), чтобы нормы и цели не разъезжались. */
+const METRICS_CATALOG = JSON.parse(
+  readFileSync(new URL('../src/lib/metrics.json', import.meta.url), 'utf8'),
+);
+const METRICS = METRICS_CATALOG.items;
+const WATCH_LABS = METRICS_CATALOG.watch ?? [];
+
+/** Показатель по коду, синониму или началу названия. */
+function findMetric(q) {
+  if (!q) return null;
+  const s = String(q).toLowerCase();
+  return (
+    METRICS.find((m) => m.code === s) ??
+    METRICS.find((m) => (m.aliases ?? []).includes(s)) ??
+    METRICS.find((m) => m.label.toLowerCase().startsWith(s)) ??
+    null
+  );
+}
+
+/** Оценка значения: вне нормы и вне цели — bad, что-то одно — warn. */
+function metricStatus(def, value) {
+  const inNorm =
+    (def.normLow == null || value >= def.normLow) && (def.normHigh == null || value <= def.normHigh);
+  const hasGoal = def.goalMin != null || def.goalMax != null;
+  // Без личной цели судим по норме: вышел за референс — красный.
+  if (!hasGoal) return inNorm ? 'ok' : 'bad';
+  const inGoal =
+    (def.goalMin == null || value >= def.goalMin) && (def.goalMax == null || value <= def.goalMax);
+  if (!inNorm && !inGoal) return 'bad';
+  if (!inNorm || !inGoal) return 'warn';
+  return 'ok';
+}
+
+const STATUS_MARK = { ok: '🟢', warn: '🟡', bad: '🔴' };
+
+function metricRange(def) {
+  const parts = [];
+  if (def.normLow != null && def.normHigh != null) parts.push(`норма ${def.normLow}–${def.normHigh}`);
+  else if (def.normHigh != null) parts.push(`норма <${def.normHigh}`);
+  else if (def.normLow != null) parts.push(`норма >${def.normLow}`);
+  if (def.goalMax != null) parts.push(`цель <${def.goalMax}`);
+  else if (def.goalMin != null) parts.push(`цель >${def.goalMin}`);
+  return parts.join(' · ');
+}
+
+function fmtMetric(def, n) {
+  const d = def.decimals ?? 0;
+  const v = Number(n.value ?? 0).toFixed(d);
+  return def.pair && n.value2 != null ? `${v}/${Number(n.value2).toFixed(d)}` : v;
+}
+
+/** ---- Локация боли: короткий код → фраза для врача ----
+ *  Диктовка «лево СП Д+3» разворачивается в «левая боковая область по средней
+ *  подмышечной линии, на 3 см выше рёберной дуги». Смысл системы в том, чтобы
+ *  два эпизода в разные дни можно было сравнить, а не пересказать заново. */
+const SITE_SIDES = {
+  л: 'слева',
+  лево: 'слева',
+  left: 'слева',
+  п: 'справа',
+  право: 'справа',
+  right: 'справа',
+};
+
+const SITE_LINES = {
+  ц: ['срединной линии', 'по центру живота'],
+  ск: ['среднеключичной линии', 'вниз от середины ключицы'],
+  пп: ['передней подмышечной линии', 'по переднему краю подмышки'],
+  сп: ['средней подмышечной линии', 'ровно сбоку, «в профиль»'],
+  зп: ['задней подмышечной линии', 'по заднему краю подмышки'],
+  лп: ['лопаточной линии', 'сзади, под лопаткой'],
+};
+
+/** Уровень: Д±N (рёберная дуга), П±N (пупок), РN (ребро). */
+function parseSiteLevel(raw) {
+  const s = String(raw).toLowerCase().replace(/\s+/g, '').replace('−', '-');
+  let m = /^([дп])([+-])(\d+)$/.exec(s);
+  if (m) {
+    const anchor = m[1] === 'д' ? 'рёберной дуги' : 'пупка';
+    const dir = m[2] === '+' ? 'выше' : 'ниже';
+    return `на ${m[3]} см ${dir} ${anchor}`;
+  }
+  m = /^р(\d+)$/.exec(s);
+  if (m) return `на уровне ${m[1]}-го ребра`;
+  if (s === 'д') return 'по рёберной дуге';
+  if (s === 'п') return 'на уровне пупка';
+  return null;
+}
+
+/** «л-сп-д+3» или «лево сп д+3» → фраза для врача. */
+function parseSite(raw) {
+  // Сторона и линия — первые два слова, всё остальное целиком уровень: в нём
+  // самом бывает дефис («п-4»), поэтому по дефисам его резать нельзя.
+  const m = /^(\S+?)[-\s,]+(\S+?)(?:[-\s,]+(.+))?$/.exec(String(raw).toLowerCase().trim());
+  const parts = m ? [m[1], m[2], m[3] ?? ''] : [String(raw).toLowerCase().trim(), '', ''];
+  const side = SITE_SIDES[parts[0]];
+  const line = SITE_LINES[parts[1]];
+  const level = parts[2] ? parseSiteLevel(parts[2]) : null;
+  if (!side || !line) {
+    throw new Error(
+      'локация: <сторона> <линия> <уровень>, напр. "л сп д+3". ' +
+        `Стороны: л, п. Линии: ${Object.keys(SITE_LINES).join(', ')}. ` +
+        'Уровень: д+3, д-4, п+2, р10.',
+    );
+  }
+  const code = [parts[0], parts[1], parts[2]].filter(Boolean).join('-').toUpperCase();
+  const words = `${side}, по ${line[0]}${level ? `, ${level}` : ''}`;
+  return { code, words };
+}
+
+/** Все заметки пользователя (без надгробий). */
+async function readNotes(db, uid) {
+  const snap = await db.collection(`users/${uid}/notes`).get();
+  return snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
+}
+
+function daysBetweenKeys(a, b) {
+  return Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+}
+
+/** Состояние курса препарата — та же логика, что в src/lib/meds.ts. */
+function courseStateOf(notes, course, todayKey) {
+  const every = course.everyDays > 0 ? course.everyDays : 7;
+  const perPen = course.dosesPerPen > 0 ? course.dosesPerPen : 0;
+  const shots = notes
+    .filter(
+      (n) =>
+        n.health === 'med' &&
+        n.code === course.code &&
+        n.date &&
+        (!course.penStart || n.date >= course.penStart),
+    )
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const taken = shots.length;
+  const lastDate = taken ? shots[taken - 1].date : null;
+  const left = perPen ? Math.max(0, perPen - taken) : 0;
+  const shiftKey = (key, n) => toKey(addDays(new Date(key + 'T00:00:00'), n));
+  const nextDate = lastDate ? shiftKey(lastDate, every) : (course.penStart ?? null);
+  const buyBy = perPen && nextDate ? shiftKey(nextDate, every * left) : null;
+  return { taken, left, lastDate, nextDate, buyBy, overdue: !!nextDate && nextDate < todayKey };
+}
 
 /** Папка дневника здоровья: записи висят в ней связью child (lib/health.ts). */
 const HEALTH_FOLDER_ID = 'health-folder';
@@ -1430,6 +1573,249 @@ async function main() {
     throw new Error(`не знаю команду finance ${action ?? ''}`);
   }
 
+  // ---------- Здоровье: замеры, анализы, симптомы, курсы ----------
+  if (group === 'health') {
+    const today = toKey(new Date());
+
+    if (action === 'sites') {
+      console.log('Локация боли: сторона · линия · уровень, напр. "л сп д+3".\n');
+      console.log('Стороны: л (лево), п (право)\n');
+      console.log('Линии:');
+      for (const [k, [words, how]] of Object.entries(SITE_LINES)) {
+        console.log(`  ${k.toUpperCase().padEnd(3)} ${words.padEnd(30)} — ${how}`);
+      }
+      console.log('\nУровень:');
+      console.log('  д+3   на 3 см выше рёберной дуги');
+      console.log('  д-4   на 4 см ниже дуги, по животу');
+      console.log('  п+2   от пупка вверх (п-2 — вниз)');
+      console.log('  р10   по 10-му ребру');
+      console.log('\nСила: 1–2 лёгкая · 3–4 отвлекает · 5–6 мешает · 7–8 сильная · 9–10 нестерпимая');
+      console.log('Памятка целиком — заметка «Памятка: как называть, где болит» в приложении.');
+      return;
+    }
+
+    if (action === 'codes') {
+      for (const g of ['metric', 'lab']) {
+        console.log(g === 'metric' ? '\nЗамеры:' : '\nАнализы:');
+        for (const m of METRICS.filter((x) => x.group === g)) {
+          console.log(`  ${m.code.padEnd(12)} ${m.label} (${m.unit}) ${metricRange(m)}`);
+        }
+      }
+      return;
+    }
+
+    if (action === 'metric' || action === 'lab') {
+      const def = findMetric(rest[0]);
+      if (!def) throw new Error(`не знаю показатель "${rest[0]}" — список: health codes`);
+      const raw = (rest[1] ?? '').replace(',', '.');
+      const value = Number(raw);
+      if (!Number.isFinite(value)) throw new Error('нужно число: health ' + action + ' вес 90');
+      const value2 = rest[2] != null ? Number(String(rest[2]).replace(',', '.')) : undefined;
+      const note = await noteAdd(
+        db,
+        uid,
+        typeof flags.title === 'string' ? flags.title : def.label,
+        { ...flags, health: def.group, body: typeof flags.note === 'string' ? flags.note : '' },
+        bucket,
+      );
+      await db
+        .doc(`users/${uid}/notes/${note.id}`)
+        .set({ code: def.code, value, value2: value2 ?? null, updatedAt: Date.now() }, { merge: true });
+      const st = metricStatus(def, value);
+      const line = `${STATUS_MARK[st]} ${def.label}: ${fmtMetric(def, { value, value2 })} ${def.unit} · ${note.date}${metricRange(def) ? ' · ' + metricRange(def) : ''}`;
+      console.log(json ? JSON.stringify({ ...note, code: def.code, value, value2 }) : line);
+      if (st !== 'ok' && def.hint) console.log(`   ${def.hint}`);
+      return;
+    }
+
+    if (action === 'symptom') {
+      const text = rest.join(' ').trim();
+      if (!text) throw new Error('нужен текст: health symptom "левый бок" --severity 4 --site "л сп д+3"');
+      const severity = flags.severity != null ? Number(flags.severity) : null;
+      // Локация кодом: в заголовок — код (сравнимо между эпизодами), в тело —
+      // расшифровка словами, её и читает врач.
+      const site = flags.site ? parseSite(flags.site) : null;
+      const bodyParts = [];
+      if (site) bodyParts.push(site.words);
+      if (typeof flags.note === 'string' && flags.note) bodyParts.push(flags.note);
+      const note = await noteAdd(
+        db,
+        uid,
+        site ? `${text} · ${site.code}` : text,
+        { ...flags, health: 'symptom', body: bodyParts.join(' · ') },
+        bucket,
+      );
+      if (severity != null) {
+        await db
+          .doc(`users/${uid}/notes/${note.id}`)
+          .set({ severity, updatedAt: Date.now() }, { merge: true });
+      }
+      console.log(
+        json
+          ? JSON.stringify({ ...note, severity })
+          : `Записал симптом: ${text}${severity != null ? ` · ${severity}/10` : ''} · ${note.date}`,
+      );
+      return;
+    }
+
+    if (action === 'course') {
+      const notes = await readNotes(db, uid);
+      const courses = notes.filter((n) => n.health === 'course');
+      // Без флагов — показать состояние курсов.
+      const wantsEdit = ['dose', 'every', 'doses', 'start', 'code', 'title'].some((k) => k in flags);
+      if (!wantsEdit) {
+        if (!courses.length) {
+          console.log('Курсов нет. Завести: health course --title <название> --code <код> --dose "<доза>" --every 7 --doses 4 --start сегодня');
+          return;
+        }
+        if (json) {
+          console.log(
+            JSON.stringify(courses.map((c) => ({ ...c, state: courseStateOf(notes, c, today) })), null, 2),
+          );
+          return;
+        }
+        for (const c of courses) {
+          const st = courseStateOf(notes, c, today);
+          console.log(
+            `💉 ${c.title}${c.dose ? ` · ${c.dose}` : ''} · раз в ${c.everyDays} дн.\n` +
+              `   доз в упаковке ${c.dosesPerPen}, сделано ${st.taken}, осталось ${st.left}\n` +
+              `   следующий: ${st.nextDate ?? '—'}${st.overdue ? ' ⚠ просрочен' : ''}\n` +
+              `   новая упаковка к: ${st.buyBy ?? '—'}`,
+          );
+        }
+        return;
+      }
+      const patch = clean({
+        title: typeof flags.title === 'string' ? flags.title : undefined,
+        code: typeof flags.code === 'string' ? flags.code : undefined,
+        dose: typeof flags.dose === 'string' ? flags.dose : undefined,
+        everyDays: flags.every != null ? Number(flags.every) : undefined,
+        dosesPerPen: flags.doses != null ? Number(flags.doses) : undefined,
+        penStart: 'start' in flags ? parseDate(flags.start) : undefined,
+        updatedAt: Date.now(),
+      });
+      const existing = rest.length
+        ? courses.find((c) => c.code === rest[0] || c.title.toLowerCase().includes(rest.join(' ').toLowerCase()))
+        : courses[0];
+      if (existing) {
+        await db.doc(`users/${uid}/notes/${existing.id}`).set(patch, { merge: true });
+        console.log(`Поправил курс: ${patch.title ?? existing.title}`);
+        return;
+      }
+      const now = Date.now();
+      const note = clean({
+        id: randomUUID(),
+        title: patch.title ?? 'Препарат',
+        body: '',
+        type: 'note',
+        date: null,
+        health: 'course',
+        code: patch.code ?? 'med',
+        dose: patch.dose ?? '',
+        everyDays: patch.everyDays ?? 7,
+        dosesPerPen: patch.dosesPerPen ?? 0,
+        penStart: patch.penStart ?? today,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.doc(`users/${uid}/notes/${note.id}`).set(note);
+      await db.doc(`users/${uid}/relations/${randomUUID()}`).set({
+        id: randomUUID(),
+        from: HEALTH_FOLDER_ID,
+        to: note.id,
+        type: 'child',
+        createdAt: now,
+        updatedAt: now,
+      });
+      console.log(`Завёл курс: ${note.title} · ${note.dose} · раз в ${note.everyDays} дн.`);
+      return;
+    }
+
+    if (action === 'shot') {
+      const notes = await readNotes(db, uid);
+      const courses = notes.filter((n) => n.health === 'course');
+      const c = rest.length
+        ? courses.find((x) => x.code === rest[0] || x.title.toLowerCase().includes(rest.join(' ').toLowerCase()))
+        : courses[0];
+      if (!c) throw new Error('курс не найден — заведи: health course --title …');
+      const note = await noteAdd(
+        db,
+        uid,
+        `${c.title}${c.dose ? ` ${c.dose}` : ''}`,
+        { ...flags, health: 'med', body: typeof flags.note === 'string' ? flags.note : '' },
+        bucket,
+      );
+      await db
+        .doc(`users/${uid}/notes/${note.id}`)
+        .set({ code: c.code, updatedAt: Date.now() }, { merge: true });
+      const st = courseStateOf([...notes, { ...note, code: c.code, health: 'med' }], c, today);
+      console.log(
+        `Записал укол: ${c.title} · ${note.date}. Осталось доз ${st.left}, следующий ${st.nextDate ?? '—'}` +
+          (st.buyBy ? `, новая упаковка к ${st.buyBy}` : ''),
+      );
+      return;
+    }
+
+    if (action === 'labs') {
+      const notes = await readNotes(db, uid);
+      const rows = [];
+      for (const def of METRICS) {
+        const pts = notes
+          .filter((n) => n.code === def.code && n.value != null && n.date)
+          .sort((a, b) => (a.date < b.date ? -1 : 1));
+        const last = pts[pts.length - 1];
+        if (!last && !WATCH_LABS.includes(def.code)) continue;
+        rows.push({ def, last, prev: pts.length > 1 ? pts[pts.length - 2] : null });
+      }
+      if (json) {
+        console.log(JSON.stringify(rows.map((r) => ({ code: r.def.code, last: r.last ?? null })), null, 2));
+        return;
+      }
+      for (const { def, last, prev } of rows) {
+        if (!last) {
+          console.log(`⬜ ${def.label}: не сдавался ни разу${def.hint ? ` — ${def.hint}` : ''}`);
+          continue;
+        }
+        const st = metricStatus(def, last.value);
+        const age = daysBetweenKeys(last.date, today);
+        const stale = def.repeatDays != null && age >= def.repeatDays ? ` ⏰ пора пересдать (${age} дн.)` : '';
+        const was = prev ? `, было ${prev.value} (${prev.date})` : '';
+        console.log(
+          `${STATUS_MARK[st]} ${def.label}: ${fmtMetric(def, last)} ${def.unit} · ${last.date}${was}${stale}`,
+        );
+      }
+      return;
+    }
+
+    if (action === 'list' || !action) {
+      const notes = await readNotes(db, uid);
+      const days = flags.days != null ? Number(flags.days) : 30;
+      const from = toKey(addDays(new Date(), -days));
+      const rows = notes
+        .filter((n) => ['metric', 'lab', 'symptom', 'med', 'meal'].includes(n.health) && n.date >= from)
+        .sort((a, b) => (a.date + (a.time ?? '') < b.date + (b.time ?? '') ? -1 : 1));
+      if (json) {
+        console.log(JSON.stringify(rows, null, 2));
+        return;
+      }
+      let day = '';
+      for (const n of rows) {
+        if (n.date !== day) {
+          day = n.date;
+          console.log(`\n${dayLabel(day)}`);
+        }
+        const def = findMetric(n.code);
+        const val = def && n.value != null ? ` ${fmtMetric(def, n)} ${def.unit}` : '';
+        const sev = n.severity != null ? ` ${n.severity}/10` : '';
+        console.log(`  ${(n.time ?? '  —  ').padEnd(6)} ${n.title}${val}${sev}`);
+      }
+      if (!rows.length) console.log('Записей нет.');
+      return;
+    }
+
+    throw new Error('health: metric | lab | symptom | shot | course | labs | list | codes');
+  }
+
   if (group === 'note') {
     if (action === 'add') {
       const title = rest.join(' ').trim();
@@ -1660,7 +2046,7 @@ const HELP = `Секретарь notedocal — запись и чтение де
   event rm "название или id"
 
   note add "заголовок" [--body "..."] [--date D]
-                       [--health meal|med|other] [--time HH:mm]
+                       [--health meal|med|metric|lab|symptom|other] [--time HH:mm]
                        с --health запись попадает в дневник здоровья
                        --type location [--address "ссылка/адрес"] [--city "Город"]
                        [--category ...] заводит место в справочнике («Места»)
@@ -1669,6 +2055,25 @@ const HELP = `Секретарь notedocal — запись и чтение де
   note edit "заголовок или id" [--title "..."] [--body "..."]
                                [--address "..."] [--city "..."] [--category "..."]
   note rm   "заголовок или id"
+
+  health metric <код> <значение> [<второе>] [--date D] [--time HH:mm] [--note ...]
+                       замер: вес, пульс, давление (два числа), сахар
+  health lab    <код> <значение> [--date D]     результат анализа
+  health symptom "что болит" [--severity 0..10] [--site "л сп д+3"]
+                             [--date D] [--time HH:mm] [--note ...]
+                       --site: сторона (л|п) · линия (ц|ск|пп|сп|зп|лп) ·
+                       уровень (д+3 — на 3 см выше рёберной дуги, п-2 — ниже
+                       пупка, р10 — по 10-му ребру). Код идёт в заголовок,
+                       расшифровка словами — в описание для врача.
+  health shot   [курс] [--date D]               отметить укол по курсу
+  health course [курс] [--title T --code C --dose "7.5 мг"
+                        --every 7 --doses 4 --start D]
+                       без флагов — состояние: доз осталось, следующий укол,
+                       когда покупать новую упаковку
+  health labs                          все показатели: норма, цель, что пора пересдать
+  health list [--days 30]              лента записей дневника
+  health codes                         коды показателей
+  health sites                         памятка: как назвать локацию боли
 
   finance add --amount N [--kind lent|borrowed|return_in|return_out|expense|income]
               [--person "Имя"] [--date D] [--note "..."] [--category "..."]
@@ -1729,6 +2134,14 @@ export {
   nextTaskDate,
   taskMatches,
   INBOX_TITLE,
+  parseSite,
+  parseSiteLevel,
+  findMetric,
+  metricStatus,
+  metricRange,
+  fmtMetric,
+  courseStateOf,
+  METRICS,
 };
 
 // Запуск как команда — только когда файл вызван напрямую, а не импортирован.

@@ -32,3 +32,7 @@ service-account.json
 *.njsproj
 *.sln
 *.sw?
+
+# Медицинские данные — репозиторий публичный (Pages из main), в коммит не идут
+medical-profile-ismail.md
+ЗДОРОВЬЕ.md

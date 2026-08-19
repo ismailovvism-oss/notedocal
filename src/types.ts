@@ -69,6 +69,22 @@ export interface Note {
   time?: string;
   /** Если задано — заметка является записью дневника здоровья (её вид). */
   health?: HealthKind;
+  /** Код показателя или препарата из lib/metrics.json (ldl, weight, mounjaro). */
+  code?: string;
+  /** Значение замера или анализа. */
+  value?: number;
+  /** Второе число замера — диастолическое давление. */
+  value2?: number;
+  /** Сила симптома, 0–10. */
+  severity?: number;
+  /** Курс препарата (health 'course'): доза одной инъекции, «7.5 мг». */
+  dose?: string;
+  /** Курс: периодичность в днях (7 — раз в неделю). */
+  everyDays?: number;
+  /** Курс: сколько доз в упаковке (ручке). */
+  dosesPerPen?: number;
+  /** Курс: дата первой дозы из текущей упаковки (YYYY-MM-DD). */
+  penStart?: string;
   /** Телефон (устаревшее одиночное поле; заменено на contacts). */
   phone?: string;
   /** Список способов связи (телефоны, мессенджеры, почта) для персоны. */
@@ -250,7 +266,15 @@ export interface CalEvent {
 }
 
 /** Вид записи дневника здоровья (когда заметка — запись здоровья). */
-export type HealthKind = 'meal' | 'med' | 'other';
+export type HealthKind =
+  | 'meal'
+  | 'med'
+  | 'metric'
+  | 'lab'
+  | 'symptom'
+  | 'other'
+  /** Курс препарата: расписание и ручка, а не запись дня (см. lib/meds.ts). */
+  | 'course';
 
 /** Фаза помидоро-таймера: работа, короткий или длинный перерыв. */
 export type PomodoroPhase = 'work' | 'short' | 'long';
