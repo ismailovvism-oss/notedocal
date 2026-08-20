@@ -621,7 +621,7 @@ function TaskModal({
             <span className="field-label">Жду от кого / чего</span>
             <input
               className="input"
-              placeholder="Например: ответ Насима"
+              placeholder="Например: ответ по заявке"
               value={item.waitingFor ?? ''}
               onChange={(e) => ops.setField(item.id, { waitingFor: e.target.value })}
             />
