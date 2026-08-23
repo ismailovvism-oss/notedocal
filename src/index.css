@@ -2963,3 +2963,137 @@ button.chip {
 .hl-sites p {
   margin: 6px 0 0;
 }
+
+/* ---- Карта дел: матрица важно/срочно и три дела на сегодня ---- */
+.pl-focus {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow);
+}
+.pl-focus-title {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+.pl-focus-empty {
+  margin: 0;
+}
+.pl-focus-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pl-focus-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.pl-focus-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.pl-lists {
+  margin-bottom: 12px;
+}
+.pl-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 759px) {
+  .pl-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.pl-cell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px 12px;
+  min-height: 120px;
+}
+.pl-do {
+  border-top-color: var(--high);
+}
+.pl-plan {
+  border-top-color: var(--accent);
+}
+.pl-delegate {
+  border-top-color: var(--warn);
+}
+.pl-drop {
+  border-top-color: var(--low);
+}
+.pl-over {
+  background: var(--accent-soft);
+}
+.pl-cell-head h3 {
+  font-size: 14px;
+  margin: 0;
+}
+.pl-cell-hint {
+  margin: 2px 0 8px;
+}
+.pl-empty {
+  margin: 4px 0;
+}
+.pl-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--border);
+  cursor: grab;
+}
+.pl-card:active {
+  cursor: grabbing;
+}
+.pl-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pl-card-text {
+  font-size: 14px;
+  word-break: break-word;
+}
+.pl-card-meta {
+  display: block;
+}
+.pl-card-acts {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.pl-card-acts .icon-btn {
+  opacity: 0.35;
+  font-size: 13px;
+}
+.pl-card-acts .icon-btn.pl-on {
+  opacity: 1;
+}
+.pl-card-acts .icon-btn:disabled {
+  opacity: 0.15;
+  cursor: default;
+}
+.pl-picked {
+  background: var(--accent-soft);
+  border-radius: 8px;
+}
+.pl-overdue .pl-card-meta {
+  color: var(--danger);
+}
+.pl-more {
+  margin-top: 8px;
+}
+.pl-legend {
+  margin-top: 12px;
+}

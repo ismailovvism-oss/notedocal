@@ -223,6 +223,9 @@ export interface ChecklistItem {
   repeat?: Repeat;
   /** Дата, после которой повтор прекращается (YYYY-MM-DD). */
   repeatUntil?: string | null;
+  /** День (YYYY-MM-DD), на который дело взято в фокус («три дела на сегодня»
+   *  на «Карте дел»). Днём, а не галочкой: вчерашний выбор сам сходит на нет. */
+  focus?: string | null;
 }
 
 /** Список задач (чек-лист), привязанный к дню. */
@@ -346,6 +349,7 @@ export interface ClipItem {
 
 export type Tab =
   | 'today'
+  | 'planner'
   | 'dashboard'
   | 'calendar'
   | 'tasks'
