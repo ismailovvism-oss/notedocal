@@ -1147,6 +1147,36 @@ const LOCATION_CATEGORIES = [
   'Другое',
 ];
 
+/**
+ * Находит папку заметок по названию, а если её нет — заводит. Папка в этом
+ * приложении — обычная заметка с type: 'folder', вложения держатся связью
+ * 'child' (NotesExplorer строит дерево именно так).
+ */
+async function ensureFolder(db, uid, title) {
+  const name = title.trim();
+  if (!name) throw new Error('--folder: нужно название папки');
+  const snap = await db.collection(`users/${uid}/notes`).get();
+  const existing = snap.docs
+    .map((d) => d.data())
+    .find(
+      (n) =>
+        !n.deleted && n.type === 'folder' && (n.title ?? '').trim().toLowerCase() === name.toLowerCase(),
+    );
+  if (existing) return existing.id;
+  const now = Date.now();
+  const id = randomUUID();
+  await db.doc(`users/${uid}/notes/${id}`).set({
+    id,
+    title: name,
+    body: '',
+    type: 'folder',
+    date: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return id;
+}
+
 async function noteAdd(db, uid, title, flags, bucket) {
   const now = Date.now();
   const health = typeof flags.health === 'string' ? flags.health : undefined;
@@ -1187,7 +1217,9 @@ async function noteAdd(db, uid, title, flags, bucket) {
 
   // Записи здоровья и локации лежат в своих служебных папках — приложение
   // собирает их именно оттуда, без связи запись останется «бесхозной».
-  const folder = health ? HEALTH_FOLDER_ID : isLocation ? LOCATIONS_FOLDER_ID : null;
+  // Обычную заметку можно положить в любую папку по названию: --folder «Идеи».
+  const named = typeof flags.folder === 'string' ? await ensureFolder(db, uid, flags.folder) : null;
+  const folder = health ? HEALTH_FOLDER_ID : isLocation ? LOCATIONS_FOLDER_ID : named;
   if (folder) {
     const rel = {
       id: randomUUID(),
@@ -2046,9 +2078,10 @@ const HELP = `Секретарь notedocal — запись и чтение де
             [--repeat none|daily|weekly|monthly|yearly] [--until D]
   event rm "название или id"
 
-  note add "заголовок" [--body "..."] [--date D]
+  note add "заголовок" [--body "..."] [--date D] [--folder "Идеи"]
                        [--health meal|med|metric|lab|symptom|other] [--time HH:mm]
                        с --health запись попадает в дневник здоровья
+                       --folder кладёт заметку в папку (заведёт, если её нет)
                        --type location [--address "ссылка/адрес"] [--city "Город"]
                        [--category ...] заводит место в справочнике («Места»)
   note list [--limit N]
