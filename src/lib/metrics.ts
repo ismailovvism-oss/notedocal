@@ -81,7 +81,8 @@ export function rangeLabel(def: MetricDef): string {
   if (def.normLow != null && def.normHigh != null) parts.push(`норма ${def.normLow}–${def.normHigh}`);
   else if (def.normHigh != null) parts.push(`норма <${def.normHigh}`);
   else if (def.normLow != null) parts.push(`норма >${def.normLow}`);
-  if (def.goalMax != null) parts.push(`цель <${def.goalMax}`);
+  if (def.goalMin != null && def.goalMax != null) parts.push(`цель ${def.goalMin}–${def.goalMax}`);
+  else if (def.goalMax != null) parts.push(`цель <${def.goalMax}`);
   else if (def.goalMin != null) parts.push(`цель >${def.goalMin}`);
   return parts.join(' · ');
 }
