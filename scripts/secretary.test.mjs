@@ -12,6 +12,8 @@ import {
   treeUpdate,
   treeRemove,
   treeRemoveMany,
+  subtreeIds,
+  isNone,
   collectPurge,
   findTasks,
   eventOnDay,
@@ -495,4 +497,43 @@ test('parseSiteLevel: якоря — дуга, пупок, ребро', () => {
   assert.equal(parseSiteLevel('п+5'), 'на 5 см выше пупка');
   assert.equal(parseSiteLevel('р9'), 'на уровне 9-го ребра');
   assert.equal(parseSiteLevel('чтото'), null);
+});
+
+test('subtreeIds: id пункта и всех его подпунктов', () => {
+  const item = {
+    id: 'a',
+    text: 'Вопросы',
+    subitems: [
+      { id: 'b', text: 'пицца' },
+      { id: 'c', text: 'копилка', subitems: [{ id: 'd', text: 'уточнить' }] },
+    ],
+  };
+  assert.deepEqual(subtreeIds(item), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(subtreeIds({ id: 'x', text: 'один' }), ['x'], 'без подпунктов — сам id');
+});
+
+test('isNone: «пусто» тем же словарём, что у дат', () => {
+  for (const word of ['none', 'нет', 'без', '-', '', '  ', null, undefined]) {
+    assert.equal(isNone(word), true, `${JSON.stringify(word)} — это «пусто»`);
+  }
+  assert.equal(isNone('Вопросы'), false);
+});
+
+test('findTasks: точное название бьёт подстроку', () => {
+  const lists = [
+    {
+      id: 'l1',
+      title: 'Ислам',
+      date: null,
+      items: [
+        { id: 'i1', text: 'Собрать и разобрать вопросы из сессий' },
+        { id: 'i2', text: 'Вопросы' },
+      ],
+    },
+  ];
+  const found = findTasks(lists, 'Вопросы');
+  assert.equal(found.length, 1, 'иначе подкатегория цепляет соседнюю задачу');
+  assert.equal(found[0].item.id, 'i2');
+
+  assert.equal(findTasks(lists, 'разобрать').length, 1, 'подстрока работает, когда точного нет');
 });

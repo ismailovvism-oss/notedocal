@@ -86,6 +86,12 @@ function fromKey(key) {
   return new Date(y, m - 1, d);
 }
 
+/** «Пусто» одним словом — тот же словарь, что у дат: none / нет / без / -. */
+function isNone(input) {
+  const s = String(input ?? '').trim().toLowerCase();
+  return !s || s === 'none' || s === 'null' || s === 'нет' || s === 'без' || s === '-';
+}
+
 /**
  * Человеческая дата → YYYY-MM-DD.
  * Понимает: today/сегодня, tomorrow/завтра, послезавтра, +N, день недели
@@ -423,27 +429,57 @@ async function taskAdd(db, uid, rawText, flags) {
 
   return mutateList(db, uid, 'checklists', (lists) => {
     const now = Date.now();
+    // Подкатегория внутри списка: список плоский, а подзадачи рекурсивные,
+    // поэтому «Вопросы» внутри «Ислам» — это родительский пункт с subitems.
+    const under = typeof flags.under === 'string' ? flags.under.trim() : '';
+
+    if (under) {
+      // Родителя ищем по id или ТОЧНОМУ названию: подстрока подцепила бы
+      // «Собрать и разобрать вопросы» вместо подкатегории «Вопросы», и обещание
+      // «нет родителя — заведу» перестало бы быть предсказуемым.
+      const key = under.toLowerCase();
+      const found = flatten(lists).filter(
+        (t) => t.item.id === under || t.item.text.trim().toLowerCase() === key,
+      );
+      if (found.length > 1) {
+        const names = found.map((t) => `  · ${t.path}`).join('\n');
+        throw new Error(`под --under "${under}" подходит несколько задач:\n${names}`);
+      }
+      if (found.length === 1) {
+        const p = found[0];
+        const nest = (it) => ({ ...it, subitems: [...(it.subitems ?? []), item] });
+        const list = lists.map((l) =>
+          l.id === p.listId
+            ? { ...l, items: treeUpdate(l.items, p.item.id, nest), updatedAt: now }
+            : l,
+        );
+        return { list, out: { item, list: list.find((l) => l.id === p.listId), parent: p.path } };
+      }
+    }
+
+    // Родителя ещё нет — заводим пустышкой, задача едет внутрь неё.
+    const entry = under ? { id: randomUUID(), text: under, done: false, subitems: [item] } : item;
     const sameDay = lists.filter((l) => !l.deleted && (l.date ?? null) === date);
     const target = sameDay.find((l) =>
       listTitle ? (l.title ?? '').trim() === listTitle : !(l.title ?? '').trim(),
     );
 
     if (target) {
-      const updated = { ...target, items: [...(target.items ?? []), item], updatedAt: now };
+      const updated = { ...target, items: [...(target.items ?? []), entry], updatedAt: now };
       return {
         list: lists.map((l) => (l.id === target.id ? updated : l)),
-        out: { item, list: updated },
+        out: { item, list: updated, parent: under || undefined },
       };
     }
     const created = {
       id: randomUUID(),
       title: listTitle,
       date,
-      items: [item],
+      items: [entry],
       createdAt: now,
       updatedAt: now,
     };
-    return { list: [created, ...lists], out: { item, list: created } };
+    return { list: [created, ...lists], out: { item, list: created, parent: under || undefined } };
   });
 }
 
@@ -494,6 +530,11 @@ function treeRemoveMany(items, ids) {
     .map((it) => (it.subitems ? { ...it, subitems: treeRemoveMany(it.subitems, ids) } : it));
 }
 
+/** Все id пункта и его подпунктов — чтобы не подчинить задачу самой себе. */
+function subtreeIds(item) {
+  return [item.id, ...(item.subitems ?? []).flatMap(subtreeIds)];
+}
+
 /** Есть ли внутри пункта незакрытые подпункты (на любой глубине). */
 function hasOpenSubitems(item) {
   return (item.subitems ?? []).some((it) => !it.done || hasOpenSubitems(it));
@@ -536,12 +577,18 @@ function collectPurge(lists, opts = {}) {
   return { gone, kept };
 }
 
-/** Находит задачи по id или по подстроке текста (без учёта регистра). */
+/**
+ * Находит задачи по id, по точному тексту или по подстроке (без учёта
+ * регистра). Порядок важен: точное название бьёт подстроку, иначе «Вопросы»
+ * цепляет «Собрать и разобрать вопросы» и правка уезжает не туда.
+ */
 function findTasks(lists, query) {
   const all = flatten(lists);
-  const exact = all.filter((t) => t.item.id === query);
-  if (exact.length) return exact;
-  const q = query.toLowerCase();
+  const byId = all.filter((t) => t.item.id === query);
+  if (byId.length) return byId;
+  const q = query.trim().toLowerCase();
+  const byText = all.filter((t) => t.item.text.trim().toLowerCase() === q);
+  if (byText.length) return byText;
   return all.filter((t) => t.item.text.toLowerCase().includes(q));
 }
 
@@ -611,8 +658,9 @@ async function taskSet(db, uid, query, flags) {
   });
   const tags = parseTags(flags.tag);
   const moveTo = typeof flags.list === 'string' ? flags.list.trim() : '';
-  if (!Object.keys(patch).length && !tags.length && !moveTo) {
-    throw new Error('нечего менять: --text / --date / --tag / --status / --priority / --size / --repeat / --list');
+  const under = typeof flags.under === 'string' ? flags.under.trim() : '';
+  if (!Object.keys(patch).length && !tags.length && !moveTo && !under) {
+    throw new Error('нечего менять: --text / --date / --tag / --status / --priority / --size / --repeat / --list / --under');
   }
 
   return mutateList(db, uid, 'checklists', (lists) => {
@@ -631,6 +679,49 @@ async function taskSet(db, uid, query, flags) {
       for (const [k, v] of Object.entries(patch)) if (v === null) delete next[k];
       return next;
     };
+
+    // --under: подчинить задачу другому пункту («Вопросы» внутри «Ислам»)
+    // или, с none, вынуть её обратно в корень списка.
+    if (under) {
+      const moved = apply(t.item);
+      const detach = isNone(under);
+      let holder = null;
+      if (!detach) {
+        const mine = new Set(subtreeIds(t.item));
+        const found = findTasks(lists, under).filter((p) => !mine.has(p.item.id));
+        if (found.length === 0) throw new Error(`--under: не нашёл задачу «${under}»`);
+        if (found.length > 1) {
+          const names = found.map((p) => `  · ${p.path}`).join('\n');
+          throw new Error(`под --under "${under}" подходит несколько задач:\n${names}`);
+        }
+        holder = found[0];
+      }
+      const targetListId = holder ? holder.listId : t.listId;
+      let list = lists.map((l) =>
+        l.id === t.listId ? { ...l, items: treeRemove(l.items, t.item.id), updatedAt: now } : l,
+      );
+      list = list.map((l) => {
+        if (l.id !== targetListId) return l;
+        const items = holder
+          ? treeUpdate(l.items, holder.item.id, (it) => ({
+              ...it,
+              subitems: [...(it.subitems ?? []), moved],
+            }))
+          : [...(l.items ?? []), moved];
+        return { ...l, items, updatedAt: now };
+      });
+      const target = list.find((l) => l.id === targetListId);
+      return {
+        list,
+        out: {
+          ...t,
+          item: moved,
+          listId: targetListId,
+          listTitle: (target?.title ?? '').trim(),
+          parent: holder ? holder.path : undefined,
+        },
+      };
+    }
 
     if (!moveTo || moveTo === t.listTitle) {
       const list = lists.map((l) =>
@@ -1077,6 +1168,11 @@ async function personAdd(db, uid, name, flags) {
     });
   }
 
+  // --folder кладёт карточку ещё и в свою папку («Семья»), не забирая её из
+  // «Контактов»: у заметки может быть несколько родителей.
+  const extraFolder =
+    typeof flags.folder === 'string' ? await ensureFolder(db, uid, flags.folder) : null;
+
   if (existing) {
     const contacts = [...(existing.contacts ?? [])];
     const have = new Set(contacts.map(key));
@@ -1085,6 +1181,7 @@ async function personAdd(db, uid, name, flags) {
       contacts.push(...added);
       await db.doc(`users/${uid}/notes/${existing.id}`).set({ ...existing, contacts, updatedAt: now });
     }
+    if (extraFolder) await linkChild(db, uid, extraFolder, existing.id);
     return { person: { ...existing, contacts }, added, created: false };
   }
 
@@ -1109,6 +1206,7 @@ async function personAdd(db, uid, name, flags) {
     updatedAt: now,
   };
   await db.doc(`users/${uid}/relations/${rel.id}`).set(rel);
+  if (extraFolder) await linkChild(db, uid, extraFolder, person.id);
   return { person, added: wanted, created: true };
 }
 
@@ -1177,6 +1275,60 @@ async function ensureFolder(db, uid, title) {
   return id;
 }
 
+/**
+ * Находит карточку человека по имени. Карточка — заметка с type: 'person';
+ * к ней той же связью 'child' цепляются документы, а теперь и обычные заметки,
+ * чтобы всё про человека лежало в одном месте, а не расползалось по папкам.
+ */
+async function findPersonId(db, uid, name) {
+  const wanted = name.trim().toLowerCase();
+  if (!wanted) throw new Error('--person: нужно имя');
+  const snap = await db.collection(`users/${uid}/notes`).get();
+  const person = snap.docs
+    .map((d) => d.data())
+    .find((n) => !n.deleted && n.type === 'person' && (n.title ?? '').trim().toLowerCase() === wanted);
+  if (!person) throw new Error(`--person: карточки «${name}» нет, заведи её через person add`);
+  return person.id;
+}
+
+/** Вешает заметку на родителя связью 'child', если такой связи ещё нет. */
+async function linkChild(db, uid, parentId, childId) {
+  const snap = await db.collection(`users/${uid}/relations`).get();
+  const has = snap.docs
+    .map((d) => d.data())
+    .some((r) => !r.deleted && r.type === 'child' && r.from === parentId && r.to === childId);
+  if (has) return false;
+  const now = Date.now();
+  const rel = { id: randomUUID(), from: parentId, to: childId, type: 'child', createdAt: now, updatedAt: now };
+  await db.doc(`users/${uid}/relations/${rel.id}`).set(rel);
+  return true;
+}
+
+/** Снимает связь 'child' надгробием — чтобы удаление доехало до телефона. */
+async function unlinkChild(db, uid, parentId, childId) {
+  const snap = await db.collection(`users/${uid}/relations`).get();
+  const hits = snap.docs
+    .map((d) => d.data())
+    .filter((r) => !r.deleted && r.type === 'child' && r.from === parentId && r.to === childId);
+  for (const r of hits) {
+    await db.doc(`users/${uid}/relations/${r.id}`).set({ deleted: true, updatedAt: Date.now() }, { merge: true });
+  }
+  return hits.length;
+}
+
+/** Папка или карточка человека по названию — общий разбор для --folder/--person/--detach. */
+async function holderId(db, uid, title) {
+  const wanted = title.trim().toLowerCase();
+  const snap = await db.collection(`users/${uid}/notes`).get();
+  const holder = snap.docs
+    .map((d) => d.data())
+    .find(
+      (n) => !n.deleted && ['folder', 'person'].includes(n.type) && (n.title ?? '').trim().toLowerCase() === wanted,
+    );
+  if (!holder) throw new Error(`нет папки или карточки «${title}»`);
+  return holder.id;
+}
+
 async function noteAdd(db, uid, title, flags, bucket) {
   const now = Date.now();
   const health = typeof flags.health === 'string' ? flags.health : undefined;
@@ -1218,19 +1370,15 @@ async function noteAdd(db, uid, title, flags, bucket) {
   // Записи здоровья и локации лежат в своих служебных папках — приложение
   // собирает их именно оттуда, без связи запись останется «бесхозной».
   // Обычную заметку можно положить в любую папку по названию: --folder «Идеи».
-  const named = typeof flags.folder === 'string' ? await ensureFolder(db, uid, flags.folder) : null;
-  const folder = health ? HEALTH_FOLDER_ID : isLocation ? LOCATIONS_FOLDER_ID : named;
-  if (folder) {
-    const rel = {
-      id: randomUUID(),
-      from: folder,
-      to: note.id,
-      type: 'child',
-      createdAt: now,
-      updatedAt: now,
-    };
-    await db.doc(`users/${uid}/relations/${rel.id}`).set(rel);
-  }
+  // Родителей может быть несколько: дерево в NotesExplorer это умеет и само
+  // показывает, сколько у заметки родителей. Так «Хаммад · зуб» лежит и на
+  // карточке сына, и в папке «Здоровье семьи», не размножаясь копиями.
+  const parents = [];
+  if (health) parents.push(HEALTH_FOLDER_ID);
+  else if (isLocation) parents.push(LOCATIONS_FOLDER_ID);
+  if (typeof flags.folder === 'string') parents.push(await ensureFolder(db, uid, flags.folder));
+  if (typeof flags.person === 'string') parents.push(await findPersonId(db, uid, flags.person));
+  for (const parent of parents) await linkChild(db, uid, parent, note.id);
   return note;
 }
 
@@ -1255,13 +1403,31 @@ async function oneNote(db, uid, query) {
   return found[0];
 }
 
-async function noteList(db, uid, limit) {
+/**
+ * Лента заметок. С `parent` — только вложения этой папки или карточки человека
+ * (связь 'child'), чтобы можно было спросить «что есть по Хаммаду» и не
+ * вычитывать всю базу глазами.
+ */
+async function noteList(db, uid, limit, parent) {
   const snap = await db.collection(`users/${uid}/notes`).get();
-  return snap.docs
-    .map((d) => d.data())
-    .filter((n) => !n.deleted)
-    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    .slice(0, limit);
+  const notes = snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
+  let pool = notes;
+  if (parent) {
+    const wanted = parent.trim().toLowerCase();
+    const holder = notes.find(
+      (n) => ['folder', 'person'].includes(n.type) && (n.title ?? '').trim().toLowerCase() === wanted,
+    );
+    if (!holder) throw new Error(`--folder: нет папки или карточки «${parent}»`);
+    const rels = await db.collection(`users/${uid}/relations`).get();
+    const kids = new Set(
+      rels.docs
+        .map((d) => d.data())
+        .filter((r) => !r.deleted && r.type === 'child' && r.from === holder.id)
+        .map((r) => r.to),
+    );
+    pool = notes.filter((n) => kids.has(n.id));
+  }
+  return pool.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, limit);
 }
 
 // ---------- Вывод ----------
@@ -1360,9 +1526,9 @@ async function main() {
     if (action === 'add') {
       const text = rest.join(' ').trim();
       if (!text) throw new Error('нужен текст задачи: task add "..."');
-      const { item, list } = await taskAdd(db, uid, text, flags);
+      const { item, list, parent } = await taskAdd(db, uid, text, flags);
       const when = item.date ? ` на ${item.date}` : list.date ? ` на ${list.date}` : '';
-      const where = list.title ? ` [${list.title}]` : '';
+      const where = list.title ? ` [${list.title}${parent ? ` / ${parent}` : ''}]` : '';
       console.log(
         json ? JSON.stringify(item) : `Добавил: ${item.text}${where}${when}${taskBadges(item)}`,
       );
@@ -1407,7 +1573,9 @@ async function main() {
       if (!query) throw new Error('нужен текст или id задачи: task set "..." --tag …');
       const t = await taskSet(db, uid, query, flags);
       console.log(
-        json ? JSON.stringify(t) : `Поправил: ${t.item.text} [${t.listTitle}]${taskBadges(t.item)}`,
+        json
+          ? JSON.stringify(t)
+          : `Поправил: ${t.item.text} [${t.listTitle}${t.parent ? ` / ${t.parent}` : ''}]${taskBadges(t.item)}`,
       );
       return;
     }
@@ -1859,7 +2027,8 @@ async function main() {
     }
     if (action === 'list') {
       const limit = Number(flags.limit ?? 20);
-      const notes = await noteList(db, uid, limit);
+      const parent = typeof flags.folder === 'string' ? flags.folder : null;
+      const notes = await noteList(db, uid, limit, parent);
       if (json) {
         console.log(JSON.stringify(notes, null, 2));
         return;
@@ -1889,12 +2058,29 @@ async function main() {
         address: typeof flags.address === 'string' ? flags.address : undefined,
         city: typeof flags.city === 'string' ? flags.city : undefined,
         category,
+        // Срок документа (виза, паспорт): --expires D; «none» снимает срок.
+        expires: 'expires' in flags ? (flags.expires === 'none' ? '' : parseDate(flags.expires)) : undefined,
         updatedAt: Date.now(),
       });
-      if (Object.keys(patch).length === 1) {
-        throw new Error('нечего менять: укажи --title / --body / --address / --city / --category');
+      if (patch.expires !== undefined && note.type !== 'document') {
+        throw new Error(`--expires только у документов, а «${note.title}» — ${note.type}`);
       }
-      await db.doc(`users/${uid}/notes/${note.id}`).set(patch, { merge: true });
+      // Перевесить заметку: --folder/--person цепляют, --detach снимает.
+      const moves = [];
+      for (const key of ['folder', 'person']) {
+        if (typeof flags[key] !== 'string') continue;
+        const parent = await holderId(db, uid, flags[key]);
+        if (await linkChild(db, uid, parent, note.id)) moves.push(`+${flags[key]}`);
+      }
+      if (typeof flags.detach === 'string') {
+        const parent = await holderId(db, uid, flags.detach);
+        if (await unlinkChild(db, uid, parent, note.id)) moves.push(`−${flags.detach}`);
+      }
+      if (Object.keys(patch).length === 1 && !moves.length) {
+        throw new Error('нечего менять: укажи --title / --body / --address / --city / --category / --expires / --folder / --person / --detach');
+      }
+      if (Object.keys(patch).length > 1) await db.doc(`users/${uid}/notes/${note.id}`).set(patch, { merge: true });
+      if (moves.length) console.log(`Связи: ${moves.join(' ')}`);
       console.log(json ? JSON.stringify({ ...note, ...patch }) : `Заметка обновлена: ${patch.title ?? note.title}`);
       return;
     }
@@ -2047,7 +2233,7 @@ const HELP = `Секретарь notedocal — запись и чтение де
 
   who                                 аккаунты проекта (найти свой uid/email)
 
-  task add "текст" [--date D] [--list "Название"] [--desc "..."]
+  task add "текст" [--date D] [--list "Название"] [--under "Вопросы"] [--desc "..."]
                    [--tag купить,позвонить] [--status жду|когда-нибудь]
                    [--waiting-for "кого ждём"] [--priority важно|не-горит]
                    [--size 15] [--repeat weekly] [--until D]
@@ -2055,11 +2241,15 @@ const HELP = `Секретарь notedocal — запись и чтение де
                    категории. Датировать список целиком — --list-date D.
                    Без --list список подбирается по ключевым словам, а что не
                    опознано — падает во «Входящие» (разобрать: task triage).
+                   --under кладёт задачу подпунктом внутрь другой задачи
+                   (подкатегория: «Вопросы» внутри списка «Ислам»). Родителя
+                   заведёт, если его нет.
                    Теги можно писать в тексте: «Купить масло #купить».
   task list [--open] [--date D] [--tag ...] [--status ...] [--priority ...]
             [--size 15] [--list "Название"] [--all]
   task set  "текст или id" [--text ...] [--list ...] [--tag ...] [--date D]
             [--status ...] [--priority ...] [--size N] [--repeat ...] [--until D]
+            [--under "Вопросы"] подчинить задачу другой; none — вынуть в корень
   task triage                         показать «Входящие» для разбора
   task purge [--list "Название"] [--older N] [--yes]
                    удалить выполненные пачкой. Без --yes только показывает,
@@ -2082,12 +2272,18 @@ const HELP = `Секретарь notedocal — запись и чтение де
                        [--health meal|med|metric|lab|symptom|other] [--time HH:mm]
                        с --health запись попадает в дневник здоровья
                        --folder кладёт заметку в папку (заведёт, если её нет)
+                       --person "Хаммад" вешает заметку на карточку человека
+                       (можно вместе с --folder: родителей бывает несколько)
                        --type location [--address "ссылка/адрес"] [--city "Город"]
                        [--category ...] заводит место в справочнике («Места»)
-  note list [--limit N]
+  note list [--limit N] [--folder "Семья"]   --folder: что лежит в папке
+                                            или на карточке человека
   note show "заголовок или id"
   note edit "заголовок или id" [--title "..."] [--body "..."]
                                [--address "..."] [--city "..."] [--category "..."]
+                               [--expires D] срок документа (виза, паспорт); none — снять
+                               [--folder "Семья"] [--person "Лилия"] цепляет заметку
+                               [--detach "Семья"] снимает связь с папкой/карточкой
   note rm   "заголовок или id"
 
   health metric <код> <значение> [<второе>] [--date D] [--time HH:mm] [--note ...]
@@ -2124,6 +2320,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
                    [--email ...] [--body "..."]   карточка в справочнике
                    несколько значений — через запятую; повторный вызов
                    дописывает контакты, а не плодит вторую карточку
+                   [--folder "Семья"] кладёт карточку ещё и в свою папку,
+                   не забирая её из «Контактов»
   person list
 
   batch файл.json                     пачка записей: kind = task | event |
@@ -2150,6 +2348,8 @@ export {
   treeRemove,
   treeRemoveMany,
   hasOpenSubitems,
+  subtreeIds,
+  isNone,
   collectPurge,
   findTasks,
   eventOnDay,
