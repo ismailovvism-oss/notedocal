@@ -24,7 +24,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { resolve, basename, extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -224,6 +224,45 @@ async function uploadPhotoFromUrl(bucket, uid, url, name = 'photo.jpg') {
   return {
     id,
     name: safe,
+    size: bytes.length,
+    type,
+    url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`,
+    path,
+    createdAt: Date.now(),
+  };
+}
+
+/** MIME по расширению — тех типов, что реально носят в карточки документов. */
+const MIME = {
+  '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.png': 'image/png', '.webp': 'image/webp', '.heic': 'image/heic',
+  '.gif': 'image/gif', '.txt': 'text/plain', '.md': 'text/markdown',
+};
+
+/**
+ * Кладёт локальный файл в Storage вложением — тем же путём и с той же ссылкой,
+ * что делает приложение, иначе вложение не откроется в карточке. В отличие от
+ * фото по ссылке, здесь берём что дают: в документы носят и PDF, и сканы.
+ */
+async function uploadFile(bucket, uid, file) {
+  const bytes = readFileSync(file);
+  const base = basename(file);
+  const type = MIME[extname(base).toLowerCase()] ?? 'application/octet-stream';
+
+  const id = randomUUID();
+  // Кириллица и пробелы вычищаются целиком, поэтому проверяем, что осталось
+  // осмысленное имя, а не строка из подчёркиваний.
+  const cleaned = base.replace(/[^\w.-]+/g, '_').slice(-60);
+  const safe = /[a-z0-9]/i.test(cleaned) ? cleaned : `file${extname(base) || ''}`;
+  const path = `users/${uid}/files/${id}-${safe}`;
+  const token = randomUUID();
+  await bucket.file(path).save(bytes, {
+    contentType: type,
+    metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+  });
+  return {
+    id,
+    name: base,
     size: bytes.length,
     type,
     url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`,
@@ -1361,7 +1400,9 @@ async function noteAdd(db, uid, title, flags, bucket) {
   });
   // Фото по ссылке: скачиваем и кладём в Storage, чтобы место сразу было с
   // обложкой (ссылка на чужой хост со временем протухает).
-  if (typeof flags.photo === 'string' && bucket) {
+  if (typeof flags.file === 'string' && bucket) {
+    note.attachments = [await uploadFile(bucket, uid, flags.file)];
+  } else if (typeof flags.photo === 'string' && bucket) {
     const att = await uploadPhotoFromUrl(bucket, uid, flags.photo, `${title}.jpg`);
     note.attachments = [att];
   }
@@ -2076,8 +2117,16 @@ async function main() {
         const parent = await holderId(db, uid, flags.detach);
         if (await unlinkChild(db, uid, parent, note.id)) moves.push(`−${flags.detach}`);
       }
+      // --file дописывает вложение, а не заменяет: в карточке документа
+      // копятся страницы и версии скана, старую терять нельзя.
+      if (typeof flags.file === 'string') {
+        if (!bucket) throw new Error('--file: нет доступа к хранилищу');
+        const att = await uploadFile(bucket, uid, flags.file);
+        patch.attachments = [...(note.attachments ?? []), att];
+        moves.push(`+файл ${att.name}`);
+      }
       if (Object.keys(patch).length === 1 && !moves.length) {
-        throw new Error('нечего менять: укажи --title / --body / --address / --city / --category / --expires / --folder / --person / --detach');
+        throw new Error('нечего менять: укажи --title / --body / --file / --address / --city / --category / --expires / --folder / --person / --detach');
       }
       if (Object.keys(patch).length > 1) await db.doc(`users/${uid}/notes/${note.id}`).set(patch, { merge: true });
       if (moves.length) console.log(`Связи: ${moves.join(' ')}`);
@@ -2268,7 +2317,7 @@ const HELP = `Секретарь notedocal — запись и чтение де
             [--repeat none|daily|weekly|monthly|yearly] [--until D]
   event rm "название или id"
 
-  note add "заголовок" [--body "..."] [--date D] [--folder "Идеи"]
+  note add "заголовок" [--body "..."] [--date D] [--folder "Идеи"] [--file путь]
                        [--health meal|med|metric|lab|symptom|other] [--time HH:mm]
                        с --health запись попадает в дневник здоровья
                        --folder кладёт заметку в папку (заведёт, если её нет)
@@ -2282,6 +2331,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
   note edit "заголовок или id" [--title "..."] [--body "..."]
                                [--address "..."] [--city "..."] [--category "..."]
                                [--expires D] срок документа (виза, паспорт); none — снять
+                               [--file путь] приложить файл (PDF, скан); дописывает
+                               к тем вложениям, что уже есть
                                [--folder "Семья"] [--person "Лилия"] цепляет заметку
                                [--detach "Семья"] снимает связь с папкой/карточкой
   note rm   "заголовок или id"
