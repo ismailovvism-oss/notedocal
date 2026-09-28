@@ -1376,6 +1376,9 @@ async function noteAdd(db, uid, title, flags, bucket) {
   }
   const type = typeof flags.type === 'string' ? flags.type : 'note';
   const isLocation = type === 'location';
+  if ('expires' in flags && type !== 'document') {
+    throw new Error('--expires только у документов: добавь --type document');
+  }
   const category = typeof flags.category === 'string' ? flags.category : undefined;
   if (isLocation && category && !LOCATION_CATEGORIES.includes(category)) {
     throw new Error(`категория локации — одна из: ${LOCATION_CATEGORIES.join(', ')}`);
@@ -1395,6 +1398,9 @@ async function noteAdd(db, uid, title, flags, bucket) {
     // Город: по нему справочник группирует места (locationsByCity).
     city: typeof flags.city === 'string' ? flags.city : isLocation ? '' : undefined,
     category: category ?? (isLocation ? 'Другое' : undefined),
+    // Срок документа (виза, паспорт) — чтобы заводить карточку документа одной
+    // командой, а не «добавил, потом проставил срок».
+    expires: 'expires' in flags ? parseDate(flags.expires) : undefined,
     createdAt: now,
     updatedAt: now,
   });
@@ -2323,6 +2329,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
                        --folder кладёт заметку в папку (заведёт, если её нет)
                        --person "Хаммад" вешает заметку на карточку человека
                        (можно вместе с --folder: родителей бывает несколько)
+                       --type document [--expires D] документ со сроком
+                       (виза, паспорт) — сразу на карточку человека
                        --type location [--address "ссылка/адрес"] [--city "Город"]
                        [--category ...] заводит место в справочнике («Места»)
   note list [--limit N] [--folder "Семья"]   --folder: что лежит в папке
