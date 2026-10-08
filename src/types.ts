@@ -356,5 +356,6 @@ export type Tab =
   | 'notes'
   | 'finance'
   | 'directory'
+  | 'documents'
   | 'clipboard'
   | 'months';

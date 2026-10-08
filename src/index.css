@@ -3097,3 +3097,128 @@ button.chip {
 .pl-legend {
   margin-top: 12px;
 }
+
+/* Реестр документов: все документы всех людей в одном списке. */
+.docs-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.docs-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.docs-search {
+  flex: 1;
+  min-width: 0;
+}
+.docs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.docs-chips .chip {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.docs-chips .chip-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.docs-chips .chip-alarm {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.chip-count {
+  margin-left: 6px;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.docs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.doc-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.doc-card-soon {
+  border-left-color: var(--warn);
+}
+.doc-card-expired {
+  border-left-color: var(--danger);
+}
+.doc-main {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.doc-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.doc-owner {
+  font-size: 12px;
+  color: var(--muted);
+}
+.doc-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.doc-sub {
+  font-variant-numeric: tabular-nums;
+}
+.doc-exp {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.doc-exp-words {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.doc-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+.doc-file .btn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1379,6 +1379,9 @@ async function noteAdd(db, uid, title, flags, bucket) {
   if ('expires' in flags && type !== 'document') {
     throw new Error('--expires только у документов: добавь --type document');
   }
+  if ('number' in flags && type !== 'document') {
+    throw new Error('--number только у документов: добавь --type document');
+  }
   const category = typeof flags.category === 'string' ? flags.category : undefined;
   if (isLocation && category && !LOCATION_CATEGORIES.includes(category)) {
     throw new Error(`категория локации — одна из: ${LOCATION_CATEGORIES.join(', ')}`);
@@ -1401,6 +1404,9 @@ async function noteAdd(db, uid, title, flags, bucket) {
     // Срок документа (виза, паспорт) — чтобы заводить карточку документа одной
     // командой, а не «добавил, потом проставил срок».
     expires: 'expires' in flags ? parseDate(flags.expires) : undefined,
+    // Номер документа — отдельным полем, а не внутри описания: вкладка
+    // «Документы» показывает его строкой с кнопкой «копировать».
+    docNumber: typeof flags.number === 'string' ? flags.number.trim() : undefined,
     createdAt: now,
     updatedAt: now,
   });
@@ -2107,8 +2113,12 @@ async function main() {
         category,
         // Срок документа (виза, паспорт): --expires D; «none» снимает срок.
         expires: 'expires' in flags ? (flags.expires === 'none' ? '' : parseDate(flags.expires)) : undefined,
+        docNumber: typeof flags.number === 'string' ? flags.number.trim() : undefined,
         updatedAt: Date.now(),
       });
+      if (patch.docNumber !== undefined && note.type !== 'document') {
+        throw new Error(`--number только у документов, а «${note.title}» — ${note.type}`);
+      }
       if (patch.expires !== undefined && note.type !== 'document') {
         throw new Error(`--expires только у документов, а «${note.title}» — ${note.type}`);
       }
@@ -2125,14 +2135,28 @@ async function main() {
       }
       // --file дописывает вложение, а не заменяет: в карточке документа
       // копятся страницы и версии скана, старую терять нельзя.
+      // --unlink-file "имя" снимает вложение с карточки (точное имя или его кусок).
+      // Сам файл в хранилище не трогаем: он остаётся по старой ссылке и в зеркале
+      // Обсидиана — так замена скана на обработанный ничего не теряет.
+      let attachments = note.attachments ?? [];
+      if (typeof flags['unlink-file'] === 'string') {
+        const q = flags['unlink-file'];
+        const hit = attachments.filter(a => a.name === q);
+        const drop = hit.length ? hit : attachments.filter(a => a.name.includes(q));
+        if (!drop.length) throw new Error(`--unlink-file: на «${note.title}» нет вложения «${q}»`);
+        if (drop.length > 1) throw new Error(`--unlink-file: подходит несколько: ${drop.map(a => a.name).join(', ')}`);
+        attachments = attachments.filter(a => a !== drop[0]);
+        patch.attachments = attachments;
+        moves.push(`−файл ${drop[0].name}`);
+      }
       if (typeof flags.file === 'string') {
         if (!bucket) throw new Error('--file: нет доступа к хранилищу');
         const att = await uploadFile(bucket, uid, flags.file);
-        patch.attachments = [...(note.attachments ?? []), att];
+        patch.attachments = [...attachments, att];
         moves.push(`+файл ${att.name}`);
       }
       if (Object.keys(patch).length === 1 && !moves.length) {
-        throw new Error('нечего менять: укажи --title / --body / --file / --address / --city / --category / --expires / --folder / --person / --detach');
+        throw new Error('нечего менять: укажи --title / --body / --file / --unlink-file / --address / --city / --category / --number / --expires / --folder / --person / --detach');
       }
       if (Object.keys(patch).length > 1) await db.doc(`users/${uid}/notes/${note.id}`).set(patch, { merge: true });
       if (moves.length) console.log(`Связи: ${moves.join(' ')}`);
@@ -2329,8 +2353,9 @@ const HELP = `Секретарь notedocal — запись и чтение де
                        --folder кладёт заметку в папку (заведёт, если её нет)
                        --person "Хаммад" вешает заметку на карточку человека
                        (можно вместе с --folder: родителей бывает несколько)
-                       --type document [--expires D] документ со сроком
-                       (виза, паспорт) — сразу на карточку человека
+                       --type document [--expires D] [--number 4663759746]
+                       документ со сроком — сразу на карточку человека; номер
+                       хранится полем и копируется кнопкой во вкладке «Документы»
                        --type location [--address "ссылка/адрес"] [--city "Город"]
                        [--category ...] заводит место в справочнике («Места»)
   note list [--limit N] [--folder "Семья"]   --folder: что лежит в папке
@@ -2339,6 +2364,9 @@ const HELP = `Секретарь notedocal — запись и чтение де
   note edit "заголовок или id" [--title "..."] [--body "..."]
                                [--address "..."] [--city "..."] [--category "..."]
                                [--expires D] срок документа (виза, паспорт); none — снять
+                               [--number N] номер документа
+                               [--unlink-file "имя"] снять вложение с карточки (файл
+                               в хранилище и в зеркале Обсидиана остаётся)
                                [--file путь] приложить файл (PDF, скан); дописывает
                                к тем вложениям, что уже есть
                                [--folder "Семья"] [--person "Лилия"] цепляет заметку

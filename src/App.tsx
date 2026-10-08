@@ -28,6 +28,7 @@ import { TodayView } from './components/TodayView';
 import { PlannerView } from './components/PlannerView';
 import { FinanceView } from './components/FinanceView';
 import { DirectoryView } from './components/DirectoryView';
+import { DocumentsView } from './components/DocumentsView';
 import { ClipboardView } from './components/ClipboardView';
 import { PomodoroWidget } from './components/PomodoroWidget';
 
@@ -40,6 +41,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'notes', label: 'Заметки', icon: '📝' },
   { id: 'finance', label: 'Финансы', icon: '💰' },
   { id: 'directory', label: 'Справочник', icon: '📇' },
+  { id: 'documents', label: 'Документы', icon: '🪪' },
   { id: 'clipboard', label: 'Буфер', icon: '📋' },
   { id: 'months', label: 'Месяцы', icon: '🌙' },
 ];
@@ -323,6 +325,14 @@ export default function App() {
             events={visibleEvents}
             vault={vault}
             currency={currency}
+          />
+        )}
+        {tab === 'documents' && (
+          <DocumentsView
+            notes={visibleNotes}
+            setNotes={setNotes}
+            relations={visibleRelations}
+            setRelations={setRelations}
           />
         )}
         {tab === 'clipboard' && (

@@ -10,6 +10,7 @@ import { tasksLinkedToNote, toggleItemInList } from '../lib/checklistLinks';
 import { effectiveContacts } from '../lib/persons';
 import { mapLink, photosOf } from '../lib/locations';
 import { personCredentials, personDocuments, expiryStatus } from '../lib/docs';
+import { docLabel, docSubtitle } from '../lib/documents';
 import { decryptStr, type Vault } from '../lib/vault';
 import { AttachmentAdder, AttachmentList } from './Attachments';
 import { ContactLinks } from './ContactLinks';
@@ -329,8 +330,8 @@ export function ContactCard({
                     <li key={d.id}>
                       <button className="fin-person" onClick={() => setDocEditId(d.id)}>
                         <span className="fin-person-name">
-                          {d.category || 'Документ'}
-                          {d.docNumber ? <span className="muted small"> · {d.docNumber}</span> : null}
+                          {docLabel(d)}
+                          {docSubtitle(d) ? <span className="muted small"> · {docSubtitle(d)}</span> : null}
                         </span>
                         {d.attachments && d.attachments.length > 0 && (
                           <span className="muted small">📎 {d.attachments.length}</span>
