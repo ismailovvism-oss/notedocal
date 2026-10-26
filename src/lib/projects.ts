@@ -53,6 +53,18 @@ export function isStale(p: Project, today = todayKey()): number | null {
 
 export const openSteps = (p: Project) => p.next.filter((s) => !s.done);
 
+/** Наверх, крупно: в фокусе или главный приоритет. */
+export const isFocus = (p: Project) => p.focus || p.priority === 1;
+
+export const SPHERE_LABEL: Record<ProjectSphere, string> = Object.fromEntries(SPHERES) as Record<ProjectSphere, string>;
+
+/** Поиск по названию, цели, «сейчас» и шагам. */
+export function matchesQuery(p: Project, q: string): boolean {
+  const s = q.trim().toLowerCase();
+  if (!s) return true;
+  return [p.title, p.goal, p.now, p.what, ...p.next.map((x) => x.t)].some((t) => (t || '').toLowerCase().includes(s));
+}
+
 /** Тихий — живёт сам: без открытых шагов, не в работе и не в фокусе. */
 export function isQuiet(p: Project): boolean {
   return !p.focus && openSteps(p).length === 0 && ['live', 'paused', 'closed'].includes(p.stage);
