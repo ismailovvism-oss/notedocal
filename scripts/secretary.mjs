@@ -143,6 +143,27 @@ function parseTime(input) {
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 }
 
+/**
+ * --remind → remindAt (мс), как его ставит приложение.
+ * «2026-10-27 10:00», «завтра 9», «пт 18:30», «18:30» (сегодня, а прошло —
+ * завтра), «+2ч», «+30м»; none — снять (null).
+ */
+function parseRemind(input) {
+  if (input === undefined || input === true) return undefined;
+  const s = String(input).trim().toLowerCase();
+  if (isNone(s)) return null;
+  const rel = s.match(/^\+(\d+)\s*(м|мин|m|min|ч|час|h)$/);
+  if (rel) return Date.now() + Number(rel[1]) * (/^[чh]/.test(rel[2]) ? 3_600_000 : 60_000);
+  const parts = s.split(/\s+/);
+  const time = parseTime(parts.pop());
+  const day = parts.length ? parseDate(parts.join(' ')) : toKey(new Date());
+  const [y, mo, d] = day.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  let at = new Date(y, mo - 1, d, h, mi).getTime();
+  if (!parts.length && at <= Date.now()) at += 86_400_000;
+  return at;
+}
+
 // ---------- Подключение ----------
 
 /** Путь к ключу service account. */
@@ -464,6 +485,7 @@ async function taskAdd(db, uid, rawText, flags) {
     sizeMin: parseSize(flags.size),
     repeat: 'repeat' in flags ? parseRepeat(flags.repeat) : undefined,
     repeatUntil: 'until' in flags ? parseDate(flags.until) : undefined,
+    remindAt: parseRemind(flags.remind) ?? undefined,
   });
 
   return mutateList(db, uid, 'checklists', (lists) => {
@@ -694,12 +716,13 @@ async function taskSet(db, uid, query, flags) {
     sizeMin: 'size' in flags ? (parseSize(flags.size) ?? null) : undefined,
     repeat: 'repeat' in flags ? parseRepeat(flags.repeat) : undefined,
     repeatUntil: 'until' in flags ? parseDate(flags.until) : undefined,
+    remindAt: 'remind' in flags ? parseRemind(flags.remind) : undefined,
   });
   const tags = parseTags(flags.tag);
   const moveTo = typeof flags.list === 'string' ? flags.list.trim() : '';
   const under = typeof flags.under === 'string' ? flags.under.trim() : '';
   if (!Object.keys(patch).length && !tags.length && !moveTo && !under) {
-    throw new Error('нечего менять: --text / --date / --tag / --status / --priority / --size / --repeat / --list / --under');
+    throw new Error('нечего менять: --text / --date / --remind / --tag / --status / --priority / --size / --repeat / --list / --under');
   }
 
   return mutateList(db, uid, 'checklists', (lists) => {
@@ -1504,6 +1527,11 @@ function taskBadges(it) {
   if (it.status === 'someday') parts.push('💭');
   if (it.sizeMin) parts.push(it.sizeMin < 60 ? `${it.sizeMin}м` : `${Math.round(it.sizeMin / 60)}ч`);
   if (it.repeat && it.repeat !== 'none') parts.push('🔁');
+  if (it.remindAt) {
+    const d = new Date(it.remindAt);
+    const p2 = (n) => String(n).padStart(2, '0');
+    parts.push(`🔔${p2(d.getDate())}.${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`);
+  }
   for (const t of it.tags ?? []) parts.push(`#${t}`);
   return parts.length ? ` ${parts.join(' ')}` : '';
 }
@@ -2316,6 +2344,9 @@ const HELP = `Секретарь notedocal — запись и чтение де
                    [--tag купить,позвонить] [--status жду|когда-нибудь]
                    [--waiting-for "кого ждём"] [--priority важно|не-горит]
                    [--size 15] [--repeat weekly] [--until D]
+                   [--remind "завтра 10:00" | "18:30" | "+2ч"]
+                   --remind — когда напомнить (бот в группе «Напоминания»);
+                   ‼️ (--priority важно) — напоминает настойчиво, #срочно — до ответа.
                    --date ставит день самой задаче, список остаётся в своей
                    категории. Датировать список целиком — --list-date D.
                    Без --list список подбирается по ключевым словам, а что не
@@ -2328,6 +2359,7 @@ const HELP = `Секретарь notedocal — запись и чтение де
             [--size 15] [--list "Название"] [--all]
   task set  "текст или id" [--text ...] [--list ...] [--tag ...] [--date D]
             [--status ...] [--priority ...] [--size N] [--repeat ...] [--until D]
+            [--remind "завтра 10:00"] перенести напоминание; none — снять
             [--under "Вопросы"] подчинить задачу другой; none — вынуть в корень
   task triage                         показать «Входящие» для разбора
   task purge [--list "Название"] [--older N] [--yes]
@@ -2428,6 +2460,7 @@ export {
   parseArgs,
   parseDate,
   parseTime,
+  parseRemind,
   toKey,
   fromKey,
   flatten,

@@ -6,6 +6,7 @@ import {
   parseArgs,
   parseDate,
   parseTime,
+  parseRemind,
   toKey,
   fromKey,
   flatten,
@@ -91,6 +92,28 @@ test('parseTime нормализует и отбраковывает', () => {
   assert.equal(parseTime(undefined), undefined);
   assert.throws(() => parseTime('25:00'), /не понял время/);
   assert.throws(() => parseTime('вечером'), /не понял время/);
+});
+
+test('parseRemind: время напоминания в мс, как его ставит приложение', () => {
+  const at = (days, h, m) => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, h, m).getTime();
+  };
+  assert.equal(parseRemind('завтра 9'), at(1, 9, 0));
+  assert.equal(parseRemind('2026-11-05 08:15'), new Date(2026, 10, 5, 8, 15).getTime());
+  const near = parseRemind('+2ч') - Date.now();
+  assert.ok(near > 7_190_000 && near <= 7_200_000, 'относительное время от «сейчас»');
+  assert.equal(Math.round((parseRemind('+30м') - Date.now()) / 60_000), 30);
+  // Голое время, которое сегодня уже прошло, означает завтра.
+  const passed = new Date(Date.now() - 60_000);
+  const hhmm = `${passed.getHours()}:${String(passed.getMinutes()).padStart(2, '0')}`;
+  if (passed.getDate() === new Date().getDate()) {
+    // в первую минуту суток «минуту назад» — это вчера, проверять нечего
+    assert.equal(parseRemind(hhmm), at(1, passed.getHours(), passed.getMinutes()));
+  }
+  assert.equal(parseRemind('none'), null);
+  assert.equal(parseRemind(undefined), undefined);
+  assert.throws(() => parseRemind('вечером'), /не понял время/);
 });
 
 test('fromKey читает ключ как локальную дату', () => {
