@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CalEvent,
   Checklist,
@@ -35,8 +35,8 @@ import { PomodoroWidget } from './components/PomodoroWidget';
 import { ProjectsView } from './components/ProjectsView';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'today', label: 'Сегодня', icon: '⚡' },
   { id: 'projects', label: 'Проекты', icon: '🧭' },
+  { id: 'today', label: 'Сегодня', icon: '⚡' },
   { id: 'planner', label: 'Карта дел', icon: '🎯' },
   { id: 'dashboard', label: 'Обзор', icon: '📊' },
   { id: 'calendar', label: 'Календарь', icon: '📅' },
@@ -65,7 +65,8 @@ const initialTheme: Theme =
     : 'light';
 
 export default function App() {
-  const [tab, setTab] = useLocalStorage<Tab>('ndc.tab', 'calendar');
+  // Приложение всегда открывается на «Проектах» — главной вкладке (просьба хозяина 26.10.26).
+  const [tab, setTab] = useState<Tab>('projects');
   const [theme, setTheme] = useLocalStorage<Theme>('ndc.theme', initialTheme);
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
   const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
