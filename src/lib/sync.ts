@@ -31,6 +31,7 @@ import type {
   MoonSighting,
   Note,
   PomodoroSession,
+  Project,
   Relation,
   Task,
 } from '../types';
@@ -60,6 +61,9 @@ interface Params {
   /** Общий буфер обмена (подколлекция users/{uid}/clipboard). */
   clipboard: ClipItem[];
   setClipboard: React.Dispatch<React.SetStateAction<ClipItem[]>>;
+  /** Пульт проектов (подколлекция users/{uid}/projects). */
+  projects: Project[];
+  setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
   /** Официальный календарь наблюдений (общий документ). */
   adminSightings: MoonSighting[];
   setAdminSightings: React.Dispatch<React.SetStateAction<MoonSighting[]>>;
@@ -173,6 +177,39 @@ function cleanFinance(f: FinanceEntry): FinanceEntry {
     createdAt: f.createdAt,
     updatedAt: f.updatedAt ?? f.createdAt ?? 0,
     deleted: f.deleted ?? false,
+  };
+}
+
+function cleanProject(p: Project): Project {
+  return {
+    id: p.id,
+    title: p.title ?? p.id,
+    sphere: p.sphere ?? 'tools',
+    stage: p.stage ?? 'active',
+    focus: !!p.focus,
+    priority: p.priority ?? 0,
+    what: p.what ?? '',
+    goal: p.goal ?? '',
+    now: p.now ?? '',
+    next: (p.next ?? []).map((s) => ({
+      t: s.t,
+      who: s.who ?? 'me',
+      done: !!s.done,
+      ...(s.doneAt ? { doneAt: s.doneAt } : {}),
+      ...(s.addedAt ? { addedAt: s.addedAt } : {}),
+    })),
+    done: (p.done ?? []).map((d) => ({ t: d.t, d: d.d ?? '' })),
+    waiting: p.waiting ?? '',
+    path: p.path ?? '',
+    sessions: (p.sessions ?? []).map((s) => ({ id: s.id, t: s.t ?? '' })),
+    links: (p.links ?? []).map((l) => ({ t: l.t ?? l.u, u: l.u })),
+    lastActivity: p.lastActivity ?? '',
+    note: p.note ?? '',
+    noteAt: p.noteAt ?? null,
+    updatedBy: p.updatedBy ?? '',
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt ?? p.createdAt ?? 0,
+    deleted: p.deleted ?? false,
   };
 }
 
@@ -351,6 +388,8 @@ export function useCloudSync({
   setFinance,
   clipboard,
   setClipboard,
+  projects,
+  setProjects,
   adminSightings,
   setAdminSightings,
 }: Params): Result {
@@ -367,6 +406,7 @@ export function useCloudSync({
   useCollectionSync(user, 'pomodoros', pomodoros, setPomodoros, cleanPomodoro);
   useCollectionSync(user, 'finance', finance, setFinance, cleanFinance);
   useCollectionSync(user, 'clipboard', clipboard, setClipboard, cleanClip);
+  useCollectionSync(user, 'projects', projects, setProjects, cleanProject);
 
   // Свежие значения для использования внутри колбэков подписки без переподписки.
   const tasksRef = useRef(tasks);

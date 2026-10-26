@@ -8,6 +8,7 @@ import type {
   Note,
   PomodoroSession,
   PomodoroSettings,
+  Project,
   Relation,
   Tab,
   Task,
@@ -31,9 +32,11 @@ import { DirectoryView } from './components/DirectoryView';
 import { DocumentsView } from './components/DocumentsView';
 import { ClipboardView } from './components/ClipboardView';
 import { PomodoroWidget } from './components/PomodoroWidget';
+import { ProjectsView } from './components/ProjectsView';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'today', label: 'Сегодня', icon: '⚡' },
+  { id: 'projects', label: 'Проекты', icon: '🧭' },
   { id: 'planner', label: 'Карта дел', icon: '🎯' },
   { id: 'dashboard', label: 'Обзор', icon: '📊' },
   { id: 'calendar', label: 'Календарь', icon: '📅' },
@@ -72,6 +75,7 @@ export default function App() {
   const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
   const [finance, setFinance] = useLocalStorage<FinanceEntry[]>('ndc.finance', []);
   const [clipboard, setClipboard] = useLocalStorage<ClipItem[]>('ndc.clipboard', []);
+  const [projects, setProjects] = useLocalStorage<Project[]>('ndc.projects', []);
   const [currency, setCurrency] = useLocalStorage<string>('ndc.currency', '');
   const [mealGap, setMealGap] = useLocalStorage<number>('ndc.mealGapH', DEFAULT_MEAL_GAP_H);
   const [pomodoros, setPomodoros] = useLocalStorage<PomodoroSession[]>('ndc.pomodoros', []);
@@ -152,6 +156,8 @@ export default function App() {
     setFinance,
     clipboard,
     setClipboard,
+    projects,
+    setProjects,
     pomodoros,
     setPomodoros,
     adminSightings,
@@ -175,6 +181,7 @@ export default function App() {
   const visibleRelations = useMemo(() => visible(relations), [relations]);
   const visibleFinance = useMemo(() => visible(finance), [finance]);
   const visibleClipboard = useMemo(() => visible(clipboard), [clipboard]);
+  const visibleProjects = useMemo(() => visible(projects), [projects]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
   const visiblePomodoros = useMemo(() => visible(pomodoros), [pomodoros]);
 
@@ -242,6 +249,7 @@ export default function App() {
             events={visibleEvents}
           />
         )}
+        {tab === 'projects' && <ProjectsView projects={visibleProjects} setProjects={setProjects} />}
         {tab === 'planner' && (
           <PlannerView checklists={visibleChecklists} setChecklists={setChecklists} />
         )}

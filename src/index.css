@@ -3222,3 +3222,329 @@ button.chip {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Пульт проектов (вкладка «Проекты») ---------- */
+.pj {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pj .view-head {
+  margin-bottom: 0;
+}
+.pj-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.pj-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pj-tile b {
+  font-size: 26px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.pj-tile span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pj-tile-me b {
+  color: var(--warn);
+}
+.pj-tile-work b {
+  color: var(--accent);
+}
+.pj-tile-stale b {
+  color: var(--muted);
+}
+.pj-mine {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.pj h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.pj-mine-group + .pj-mine-group {
+  margin-top: 10px;
+}
+.pj-link,
+.pj-more {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  text-align: left;
+}
+.pj-more {
+  color: var(--accent);
+  font-weight: 500;
+  margin-top: 8px;
+}
+.pj-steps {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pj-steps label {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  font-size: 14px;
+  cursor: pointer;
+}
+.pj-steps input {
+  margin: 3px 0 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.pj-step-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pj-step-done .pj-step-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.pj-who {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  margin-top: 1px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.pj-who-me {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
+}
+.pj-who-claude {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pj-chips {
+  margin: 0;
+}
+.pj-sphere-head {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.pj-card {
+  scroll-margin-top: 140px; /* верхняя панель приложения липкая — не прятать под ней заголовок */
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pj-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.pj-title {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
+}
+.pj-arrow {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pj-stage,
+.pj-prio,
+.pj-focus {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.pj-st-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pj-st-polish {
+  background: color-mix(in srgb, var(--normal) 18%, transparent);
+  color: var(--normal);
+}
+.pj-st-idea {
+  background: color-mix(in srgb, var(--health) 16%, transparent);
+  color: var(--health);
+}
+.pj-st-live {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.pj-st-closed {
+  text-decoration: line-through;
+}
+.pj-prio-1 {
+  background: color-mix(in srgb, var(--high) 16%, transparent);
+  color: var(--high);
+}
+.pj-prio-2 {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+.pj-focus {
+  background: var(--text);
+  color: var(--bg);
+}
+.pj-when {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pj-when-stale {
+  color: var(--warn);
+}
+.pj-goal,
+.pj-now,
+.pj-wait {
+  margin: 0;
+  font-size: 14px;
+}
+.pj-now {
+  color: var(--muted);
+}
+.pj-wait {
+  color: var(--warn);
+  font-size: 13px;
+}
+.pj-details {
+  margin-top: 6px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+.pj-details dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 6px 12px;
+}
+.pj-details dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.pj-details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pj-details ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.pj-details a {
+  color: var(--accent);
+}
+.pj-date,
+.pj-mono {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+.pj-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.pj-row .input {
+  flex: 1 1 200px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+.pj-row .input-select {
+  flex: 0 0 auto;
+}
+.pj-row .btn {
+  padding: 8px 14px;
+}
+.pj-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pj-lbl-col {
+  flex-direction: column;
+  align-items: stretch;
+}
+.pj-lbl-col .input {
+  font-size: 14px;
+  padding: 8px 10px;
+}
+.pj-lbl-check input {
+  accent-color: var(--accent);
+}
+.pj-details > .btn {
+  align-self: flex-start;
+  padding: 8px 14px;
+}
+.pj-quiet {
+  padding-top: 8px;
+}
+.pj-qline {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+}
+.pj-foot {
+  margin: 0;
+}
+@media (max-width: 480px) {
+  .pj-details dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .pj-details dt {
+    margin-top: 6px;
+  }
+}

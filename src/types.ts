@@ -347,7 +347,58 @@ export interface ClipItem {
   deleted?: boolean;
 }
 
+/** Пульт проектов (подколлекция users/{uid}/projects). Пишут сюда и
+ *  приложение, и секретарь (`secretary project …`), и сессии Claude после
+ *  заметного шага; поля совпадают со scripts/projects.mjs. */
+export type ProjectSphere = 'uchet' | 'masail' | 'apps' | 'tools' | 'family';
+export type ProjectStage = 'active' | 'polish' | 'idea' | 'live' | 'paused' | 'closed';
+export type StepWho = 'me' | 'claude' | 'other';
+
+export interface ProjectStep {
+  t: string;
+  /** Кто делает: me — хозяин, claude, other — другие люди. */
+  who: StepWho;
+  done: boolean;
+  /** День, когда отмечен (YYYY-MM-DD); «Пульт» потом переносит в done. */
+  doneAt?: string;
+  /** День, когда шаг добавлен в приложении. */
+  addedAt?: string;
+}
+
+export interface Project {
+  id: string;
+  title: string;
+  sphere: ProjectSphere;
+  stage: ProjectStage;
+  /** В фокусе сейчас (короткий срок). */
+  focus: boolean;
+  /** 1 главное · 2 важное · 3 фоновое · 0 не задан. */
+  priority: 0 | 1 | 2 | 3;
+  what: string;
+  /** Чего хотим добиться. */
+  goal: string;
+  /** Где остановились. */
+  now: string;
+  next: ProjectStep[];
+  /** Сделанное, новое сверху: {t, d: YYYY-MM-DD}. */
+  done: { t: string; d: string }[];
+  waiting: string;
+  path: string;
+  sessions: { id: string; t: string }[];
+  links: { t: string; u: string }[];
+  /** День последней работы (YYYY-MM-DD). */
+  lastActivity: string;
+  /** Заметка хозяина для Claude; Claude очищает, когда исполнил. */
+  note: string;
+  noteAt: number | null;
+  updatedBy: string;
+  createdAt: number;
+  updatedAt: number;
+  deleted?: boolean;
+}
+
 export type Tab =
+  | 'projects'
   | 'today'
   | 'planner'
   | 'dashboard'

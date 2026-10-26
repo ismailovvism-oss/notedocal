@@ -30,6 +30,7 @@ import { cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import * as P from './projects.mjs';
 
 // ---------- Разбор аргументов ----------
 
@@ -2331,7 +2332,123 @@ async function main() {
     return;
   }
 
+  // ---------- Пульт проектов (вкладка «Проекты») ----------
+  if (group === 'project') {
+    await projectCommand(db, uid, action, rest, flags, json);
+    return;
+  }
+
   throw new Error(`не знаю команду "${group}". Подсказка: node scripts/secretary.mjs help`);
+}
+
+async function projectCommand(db, uid, action, rest, flags, json) {
+  const by = typeof flags.by === 'string' ? flags.by : 'секретарь';
+  const all = await P.allProjects(db, uid);
+  const say = (doc, text) => console.log(json ? JSON.stringify(doc, null, 2) : text);
+  const save = async (doc, text) => say(await P.saveProject(db, uid, doc, by), text);
+
+  if (action === 'list' || action === undefined) {
+    let list = P.sortProjects(all);
+    if (typeof flags.sphere === 'string') list = list.filter((p) => p.sphere === flags.sphere);
+    if (flags.mine) {
+      const rows = P.mine(list);
+      if (json) return say(rows.map((r) => ({ id: r.project.id, title: r.project.title, n: r.n, t: r.step.t })));
+      for (const r of rows) console.log(`  ${r.project.title}: ${r.n}. ${r.step.t}`);
+      if (!rows.length) console.log('Ничего не ждёт хозяина.');
+      return;
+    }
+    if (flags.notes) list = list.filter((p) => p.note);
+    if (json) return say(list);
+    for (const [k, label] of Object.entries(P.SPHERES)) {
+      const ps = list.filter((p) => p.sphere === k);
+      if (!ps.length) continue;
+      console.log(`${label}:`);
+      for (const p of ps) console.log(`  ${P.fmtProject(p)}${flags.notes ? `\n    ✉ ${p.note}` : ''}`);
+    }
+    if (!list.length) console.log('Проектов нет.');
+    return;
+  }
+  if (action === 'find') {
+    const dir = rest.join(' ').trim() || undefined;
+    const sess = typeof flags.session === 'string' ? flags.session : undefined;
+    if (!dir && !sess) {
+      for (const p of P.sortProjects(all)) console.log(`  ${p.id.padEnd(20)} ${p.title}  —  ${p.path}`);
+      return;
+    }
+    const hits = P.findByPlace(all, dir, sess);
+    if (json) return say(hits.map((h) => ({ id: h.p.id, title: h.p.title, why: h.why })));
+    for (const h of hits) console.log(`  ${h.p.id.padEnd(20)} ${h.p.title}  (${h.why})`);
+    if (!hits.length) console.log('Не нашёл. Все проекты: project find (без аргументов); выбери по смыслу или заведи новый.');
+    return;
+  }
+  if (action === 'import') {
+    const file = rest[0];
+    if (!file) throw new Error('нужен файл: project import проекты.json');
+    const data = JSON.parse(readFileSync(resolve(file), 'utf8'));
+    const ids = Object.keys(data);
+    for (let i = 0; i < ids.length; i += 400) {
+      const batch = db.batch();
+      for (const id of ids.slice(i, i + 400)) {
+        batch.set(db.doc(`users/${uid}/projects/${id}`), P.normalizeProject({ ...data[id], updatedBy: data[id].updatedBy || by }, id));
+      }
+      await batch.commit();
+    }
+    return say({ imported: ids.length }, `Перенёс проектов: ${ids.length}`);
+  }
+  if (action === 'tidy') {
+    const list = rest[0] ? [P.findProject(all, rest[0])] : all;
+    const changed = [];
+    for (const p of list) {
+      const t = P.tidy(p);
+      if (t) changed.push(await P.saveProject(db, uid, t, by));
+    }
+    return say(changed, changed.length ? `Отмеченное перенёс в «сделано»: ${changed.map((p) => p.title).join(', ')}` : 'Отмеченных шагов нет.');
+  }
+  if (action === 'add') {
+    const id = rest[0];
+    if (!id || !/^[a-z0-9-]+$/.test(id)) throw new Error('нужен id латиницей через дефис: project add my-project --title "…" --sphere tools');
+    if (all.some((p) => p.id === id)) throw new Error(`проект ${id} уже есть`);
+    const doc = P.normalizeProject({
+      id,
+      title: typeof flags.title === 'string' ? flags.title : id,
+      sphere: P.parseSphere(flags.sphere ?? 'tools'),
+      stage: P.parseStage(flags.stage ?? 'active'),
+      what: typeof flags.what === 'string' ? flags.what : '',
+      now: typeof flags.now === 'string' ? flags.now : '',
+      path: typeof flags.path === 'string' ? flags.path : '',
+    });
+    return save(doc, `Завёл проект: ${P.fmtProject(doc)}`);
+  }
+
+  const p = P.findProject(all, rest[0]);
+  const arg = rest.slice(1).join(' ').trim();
+  if (action === 'show') return say(p, P.fmtProject(p, true));
+  if (action === 'set') return save(P.applySet(p, flags), `Обновил: ${p.title}`);
+  if (action === 'step') {
+    const doc = P.addStep(p, arg, P.parseWho(flags.who));
+    return save(doc, `«${p.title}»: шаг ${doc.next.length}. ${arg}`);
+  }
+  if (action === 'done') {
+    const date = typeof flags.date === 'string' ? flags.date : undefined;
+    const doc = P.markDone(p, arg, date);
+    return save(doc, `«${p.title}»: сделано — ${doc.done[0].t}`);
+  }
+  if (action === 'step-rm') {
+    const i = P.stepIndex(p, arg);
+    return save({ ...p, next: p.next.filter((_, j) => j !== i) }, `«${p.title}»: убрал шаг «${p.next[i].t}»`);
+  }
+  if (action === 'session') {
+    const [sid, ...title] = rest.slice(1);
+    return save(P.addSession(p, sid, title.join(' ')), `«${p.title}»: сессия ${title.join(' ') || sid}`);
+  }
+  if (action === 'link') {
+    const url = rest[rest.length - 1];
+    const title = rest.slice(1, -1).join(' ');
+    if (!/^https?:\/\//.test(url ?? '')) throw new Error('ссылка последним аргументом: project link <id> "название" https://…');
+    return save({ ...p, links: [...p.links.filter((l) => l.u !== url), { t: title || url, u: url }] }, `«${p.title}»: ссылка ${title}`);
+  }
+  if (action === 'rm') return save({ ...p, deleted: true }, `Убрал проект «${p.title}» с пульта`);
+  throw new Error(`не знаю команду project ${action}`);
 }
 
 const fmtUser = (u) => `  ${u.email ?? '(без email)'}  uid=${u.uid}  вход: ${u.lastSignIn ?? '—'}`;
@@ -2446,6 +2563,9 @@ const HELP = `Секретарь notedocal — запись и чтение де
   batch файл.json                     пачка записей: kind = task | event |
                                       note | finance | person (перенос книги
                                       из чужой таблицы — десятками строк)
+
+  Пульт проектов (вкладка «Проекты»; порядок для сессий — ~/projects/work/pult/CLAUDE.md):
+${P.PROJECT_HELP}
 
 Даты (D): сегодня | завтра | послезавтра | пн…вс | +3 | 14.08 | 2026-08-14 | none
 Флаг --json у любой команды — машинный вывод.
