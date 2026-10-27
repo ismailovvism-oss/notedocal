@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Project, ProjectSphere, ProjectStage, StepWho } from '../types';
+import type { Project, ProjectSphere, ProjectStage, ProjectStep, StepWho } from '../types';
 import { useListActions } from '../lib/storage';
 import { todayKey } from '../lib/dates';
 import {
@@ -10,15 +10,18 @@ import {
   STAGE_ORDER,
   WHO,
   ago,
+  commentLabel,
   isFocus,
   isQuiet,
   isStale,
   matchesQuery,
   mineByProject,
+  openComments,
   openSteps,
   sessionLink,
   sortProjects,
   toggleStep,
+  withComment,
 } from '../lib/projects';
 
 type Filter = 'all' | 'mine' | 'focus' | 'work' | 'stale';
@@ -48,8 +51,26 @@ export function ProjectsView({
   const [query, setQuery] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
 
+  const [undo, setUndo] = useState<{ id: string; i: number; t: string } | null>(null);
+
   const edit = (id: string, patch: Partial<Project>) => actions.update(id, { ...patch, updatedBy: 'приложение' });
-  const toggle = (p: Project, i: number) => edit(p.id, { next: toggleStep(p, i, today) });
+  /** Галочка; после отметки несколько секунд висит «Отменить» — промахнуться легко. */
+  const toggle = (p: Project, i: number) => {
+    if (!p.next[i].done) setUndo({ id: p.id, i, t: p.next[i].t });
+    edit(p.id, { next: toggleStep(p, i, today) });
+  };
+  const comment = (p: Project, i: number, text: string) =>
+    edit(p.id, { next: p.next.map((s, j) => (j === i ? withComment(s, text) : s)) });
+  const undoTick = () => {
+    const p = undo && projects.find((x) => x.id === undo.id);
+    if (p && p.next[undo!.i]?.done) edit(p.id, { next: toggleStep(p, undo!.i, today) });
+    setUndo(null);
+  };
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => setUndo(null), 8000);
+    return () => clearTimeout(t);
+  }, [undo]);
 
   const mine = useMemo(() => mineByProject(projects), [projects]);
   const mineCount = mine.reduce((n, g) => n + g.steps.length, 0);
@@ -57,7 +78,7 @@ export function ProjectsView({
     () => sortProjects(projects.filter((p) => isStale(p, today) !== null)),
     [projects, today],
   );
-  const notes = projects.filter((p) => p.note);
+  const comments = useMemo(() => openComments(projects), [projects]);
   const counts = {
     mine: mineCount,
     focus: projects.filter(isFocus).length,
@@ -166,7 +187,7 @@ export function ProjectsView({
                 </button>
                 <ul className="pj-steps">
                   {g.steps.slice(0, MINE_PER_PROJECT).map(({ step, i }) => (
-                    <StepRow key={i} text={step.t} who={step.who} done={false} hideWho onToggle={() => toggle(g.project, i)} />
+                    <StepRow key={i} step={step} hideWho onToggle={() => toggle(g.project, i)} onComment={(c) => comment(g.project, i, c)} />
                   ))}
                 </ul>
                 {g.steps.length > MINE_PER_PROJECT && (
@@ -197,22 +218,25 @@ export function ProjectsView({
             </div>
           )}
 
-          {notes.length > 0 && (
+          {comments.length > 0 && (
             <div className="pj-box">
               <h3>
-                Заметки для Claude <span className="pj-n">{notes.length}</span>
+                Комментарии для сессий <span className="pj-n">{comments.length}</span>
               </h3>
               <ul className="pj-plain">
-                {notes.map((p) => (
-                  <li key={p.id}>
-                    <button className="pj-note-line" onClick={() => setOpenId(p.id)}>
-                      <b>{p.title}</b>
-                      <span>{p.note}</span>
+                {comments.map((c) => (
+                  <li key={`${c.project.id}-${c.i ?? 'note'}`}>
+                    <button className="pj-note-line" onClick={() => setOpenId(c.project.id)}>
+                      <b>{c.project.title}</b>
+                      <span>
+                        {c.i === null ? '' : `${c.step} — `}💬 {c.comment}
+                      </span>
+                      <span className={`pj-cmt-state pj-cmt-${c.state}`}>{commentLabel(c.state, c.to)}</span>
                     </button>
                   </li>
                 ))}
               </ul>
-              <p className="muted small">Забирает сессия «Пульт» при обновлении.</p>
+              <p className="muted small">Пульт передаёт их сессиям проектов сам.</p>
             </div>
           )}
         </aside>
@@ -227,7 +251,7 @@ export function ProjectsView({
               </h3>
               <div className="pj-grid pj-grid-big">
                 {focus.map((p) => (
-                  <Card key={p.id} p={p} big today={today} onOpen={() => setOpenId(p.id)} onToggle={(i) => toggle(p, i)} />
+                  <Card key={p.id} p={p} big today={today} onOpen={() => setOpenId(p.id)} onToggle={(i) => toggle(p, i)} onComment={(i, c) => comment(p, i, c)} />
                 ))}
               </div>
             </section>
@@ -247,7 +271,7 @@ export function ProjectsView({
                 {cards.length > 0 && (
                   <div className="pj-grid">
                     {cards.map((p) => (
-                      <Card key={p.id} p={p} today={today} onOpen={() => setOpenId(p.id)} onToggle={(i) => toggle(p, i)} />
+                      <Card key={p.id} p={p} today={today} onOpen={() => setOpenId(p.id)} onToggle={(i) => toggle(p, i)} onComment={(i, c) => comment(p, i, c)} />
                     ))}
                   </div>
                 )}
@@ -268,31 +292,98 @@ export function ProjectsView({
         </div>
       </div>
 
-      {open && <ProjectPanel key={open.id} p={open} today={today} onClose={() => setOpenId(null)} onEdit={(patch) => edit(open.id, patch)} />}
+      {open && (
+        <ProjectPanel
+          key={open.id}
+          p={open}
+          today={today}
+          onClose={() => setOpenId(null)}
+          onEdit={(patch) => edit(open.id, patch)}
+          onToggle={(i) => toggle(open, i)}
+          onComment={(i, c) => comment(open, i, c)}
+        />
+      )}
+
+      {undo && (
+        <div className="pj-toast" role="status">
+          <span>
+            Отмечено: <b>{undo.t}</b>
+          </span>
+          <button className="btn btn-small" onClick={undoTick}>
+            Отменить
+          </button>
+        </div>
+      )}
     </section>
   );
 }
 
 function StepRow({
-  text,
-  who,
-  done,
+  step,
   hideWho,
   onToggle,
+  onComment,
 }: {
-  text: string;
-  who: StepWho;
-  done: boolean;
+  step: ProjectStep;
   hideWho?: boolean;
   onToggle: () => void;
+  onComment?: (text: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(step.comment ?? '');
+  const send = () => {
+    onComment?.(draft);
+    setEditing(false);
+  };
   return (
-    <li className={done ? 'pj-step-done' : ''} onClick={(e) => e.stopPropagation()}>
-      <label>
-        <input type="checkbox" checked={done} onChange={onToggle} />
-        <span className="pj-step-text">{text}</span>
-        {!hideWho && <span className={`pj-who pj-who-${who}`}>{WHO[who] ?? who}</span>}
-      </label>
+    <li className={step.done ? 'pj-step-done' : ''} onClick={(e) => e.stopPropagation()}>
+      <div className="pj-step-line">
+        <label>
+          <input type="checkbox" checked={step.done} onChange={onToggle} />
+          <span className="pj-step-text">{step.t}</span>
+          {!hideWho && <span className={`pj-who pj-who-${step.who}`}>{WHO[step.who] ?? step.who}</span>}
+        </label>
+        {onComment && (
+          <button
+            className={`pj-cmt-btn ${step.comment ? 'pj-cmt-btn-on' : ''}`}
+            title="Указание к шагу — пульт передаст его сессии проекта"
+            aria-label="Комментарий к шагу"
+            onClick={() => {
+              setDraft(step.comment ?? '');
+              setEditing((v) => !v);
+            }}
+          >
+            💬
+          </button>
+        )}
+      </div>
+      {step.comment && !editing && (
+        <div className={`pj-cmt pj-cmt-${step.commentState ?? 'new'}`}>
+          <span>💬 {step.comment}</span>
+          <span className="pj-cmt-state">{commentLabel(step.commentState, step.commentTo, step.commentReply)}</span>
+        </div>
+      )}
+      {editing && (
+        <div className="pj-cmt-edit">
+          <textarea
+            className="input textarea"
+            rows={2}
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => (e.key === 'Enter' && (e.ctrlKey || e.metaKey) ? send() : undefined)}
+            placeholder="Что сделать с этим шагом: «сделай так-то», «уже не нужно», «сначала спроси …»"
+          />
+          <div className="pj-row">
+            <button className="btn btn-primary btn-small" onClick={send} disabled={!draft.trim() && !step.comment}>
+              {draft.trim() ? 'Отправить сессии' : 'Убрать комментарий'}
+            </button>
+            <button className="btn btn-small" onClick={() => setEditing(false)}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }
@@ -304,7 +395,11 @@ function Badges({ p, today }: { p: Project; today: string }) {
       <span className={`pj-stage pj-st-${p.stage}`}>{STAGES[p.stage] ?? p.stage}</span>
       {p.priority > 0 && <span className={`pj-prio pj-prio-${p.priority}`}>{PRIORITIES[p.priority as 1 | 2 | 3]}</span>}
       {p.focus && <span className="pj-focus">★ фокус</span>}
-      {p.note && <span className="pj-flag" title="Заметка для Claude">✉</span>}
+      {(p.note && p.noteState !== 'done') || p.next.some((s) => s.comment && s.commentState !== 'done') ? (
+        <span className="pj-flag" title="Есть указание для сессии">
+          💬
+        </span>
+      ) : null}
       <span className={`pj-when ${stale !== null ? 'pj-when-stale' : ''}`}>
         {stale !== null ? `тихо ${stale} дн.` : ago(p.lastActivity, today)}
       </span>
@@ -318,16 +413,19 @@ function Card({
   today,
   onOpen,
   onToggle,
+  onComment,
 }: {
   p: Project;
   big?: boolean;
   today: string;
   onOpen: () => void;
   onToggle: (i: number) => void;
+  onComment: (i: number, text: string) => void;
 }) {
   const steps = p.next.map((s, i) => ({ s, i })).filter((x) => !x.s.done);
+  const tickedSteps = p.next.map((s, i) => ({ s, i })).filter((x) => x.s.done);
   const limit = big ? 4 : 2;
-  const ticked = p.next.length - steps.length;
+  const ticked = tickedSteps.length;
   return (
     <article
       className={`pj-card sp-${p.sphere} ${big ? 'pj-card-big' : ''}`}
@@ -348,15 +446,22 @@ function Card({
       {steps.length > 0 && (
         <ul className="pj-steps">
           {steps.slice(0, limit).map(({ s, i }) => (
-            <StepRow key={i} text={s.t} who={s.who} done={false} onToggle={() => onToggle(i)} />
+            <StepRow key={i} step={s} onToggle={() => onToggle(i)} onComment={(c) => onComment(i, c)} />
           ))}
         </ul>
       )}
-      {(steps.length > limit || ticked > 0) && (
+      {ticked > 0 && (
+        <ul className="pj-steps pj-steps-ticked">
+          {tickedSteps.slice(0, 2).map(({ s, i }) => (
+            <StepRow key={i} step={s} onToggle={() => onToggle(i)} />
+          ))}
+        </ul>
+      )}
+      {(steps.length > limit || ticked > 2) && (
         <p className="pj-more-line">
           {steps.length > limit && `ещё ${steps.length - limit} ${steps.length - limit === 1 ? 'шаг' : 'шагов'}`}
-          {steps.length > limit && ticked > 0 && ' · '}
-          {ticked > 0 && `отмечено ${ticked}`}
+          {steps.length > limit && ticked > 2 && ' · '}
+          {ticked > 2 && `отмечено ещё ${ticked - 2}`}
         </p>
       )}
     </article>
@@ -368,11 +473,15 @@ function ProjectPanel({
   today,
   onClose,
   onEdit,
+  onToggle,
+  onComment,
 }: {
   p: Project;
   today: string;
   onClose: () => void;
   onEdit: (patch: Partial<Project>) => void;
+  onToggle: (i: number) => void;
+  onComment: (i: number, text: string) => void;
 }) {
   const [step, setStep] = useState('');
   const [who, setWho] = useState<StepWho>('me');
@@ -392,7 +501,6 @@ function ProjectPanel({
     onEdit({ next: [...p.next, { t, who, done: false, addedAt: today }] });
     setStep('');
   };
-  const toggle = (i: number) => onEdit({ next: toggleStep(p, i, today) });
 
   return (
     <>
@@ -469,7 +577,7 @@ function ProjectPanel({
             {p.next.length > 0 && (
               <ul className="pj-steps">
                 {p.next.map((s, i) => (
-                  <StepRow key={i} text={s.t} who={s.who} done={s.done} onToggle={() => toggle(i)} />
+                  <StepRow key={i} step={s} onToggle={() => onToggle(i)} onComment={(c) => onComment(i, c)} />
                 ))}
               </ul>
             )}
@@ -509,17 +617,31 @@ function ProjectPanel({
           )}
 
           <div className="pj-field">
-            <h4>Заметка для Claude{p.noteAt ? ` · ${new Date(p.noteAt).toLocaleDateString('ru-RU')}` : ''}</h4>
+            <h4>Указание ко всему проекту{p.noteAt ? ` · ${new Date(p.noteAt).toLocaleDateString('ru-RU')}` : ''}</h4>
+            {p.note && note === p.note && (
+              <span className={`pj-cmt-state pj-cmt-${p.noteState ?? 'new'}`}>{commentLabel(p.noteState, p.noteTo, p.noteReply)}</span>
+            )}
             <textarea
               className="input textarea"
               rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="«это закрыто», «сначала сделай…», «поменяй этап»"
+              placeholder="«это закрыто», «сначала сделай…», «поменяй этап» — пульт передаст сессии проекта"
             />
             {note !== p.note && (
-              <button className="btn btn-small" onClick={() => onEdit({ note: note.trim(), noteAt: note.trim() ? Date.now() : null })}>
-                Сохранить заметку
+              <button
+                className="btn btn-small"
+                onClick={() =>
+                  onEdit({
+                    note: note.trim(),
+                    noteAt: note.trim() ? Date.now() : null,
+                    noteState: 'new',
+                    noteTo: '',
+                    noteReply: '',
+                  })
+                }
+              >
+                {note.trim() ? 'Отправить сессии' : 'Убрать указание'}
               </button>
             )}
           </div>

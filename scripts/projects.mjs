@@ -88,6 +88,9 @@ export function normalizeProject(p, id = p.id) {
       done: !!s.done,
       ...(s.doneAt ? { doneAt: s.doneAt } : {}),
       ...(s.addedAt ? { addedAt: s.addedAt } : {}),
+      ...(s.comment ? { comment: s.comment, commentAt: s.commentAt ?? '', commentState: s.commentState ?? 'new' } : {}),
+      ...(s.comment && s.commentTo ? { commentTo: s.commentTo } : {}),
+      ...(s.comment && s.commentReply ? { commentReply: s.commentReply } : {}),
     })),
     done: (p.done ?? []).map((d) => ({ t: d.t, d: d.d ?? '' })),
     waiting: p.waiting ?? '',
@@ -97,6 +100,9 @@ export function normalizeProject(p, id = p.id) {
     lastActivity: p.lastActivity ?? todayKey(),
     note: p.note ?? '',
     noteAt: p.noteAt ? ts(p.noteAt) : null,
+    ...(p.note && p.noteState ? { noteState: p.noteState } : p.note ? { noteState: 'new' } : {}),
+    ...(p.note && p.noteTo ? { noteTo: p.noteTo } : {}),
+    ...(p.note && p.noteReply ? { noteReply: p.noteReply } : {}),
     updatedBy: p.updatedBy ?? '',
     createdAt: p.createdAt ? ts(p.createdAt) : now,
     updatedAt: p.updatedAt ? ts(p.updatedAt) : now,
@@ -194,6 +200,70 @@ export function markDone(p, text, date = todayKey()) {
     done: [{ t: label, d: date }, ...p.done].slice(0, ДОНЕ_ДЕРЖАТЬ),
     lastActivity: date > p.lastActivity ? date : p.lastActivity,
   };
+}
+
+// ---------- Комментарии хозяина: к шагу (номер) или ко всему проекту ('note') ----------
+// new — ждёт «Пульт», sent — передано сессии проекта, done — сессия сделала (reply — что именно).
+
+export function comments(projects, { pending = false } = {}) {
+  const out = [];
+  for (const p of projects) {
+    if (p.note) {
+      out.push({ id: p.id, title: p.title, n: 'note', step: '(весь проект)', comment: p.note,
+        state: p.noteState ?? 'new', at: p.noteAt ? new Date(p.noteAt).toISOString() : '', to: p.noteTo ?? '',
+        reply: p.noteReply ?? '', sessions: p.sessions });
+    }
+    p.next.forEach((s, i) => {
+      if (s.comment) {
+        out.push({ id: p.id, title: p.title, n: i + 1, step: s.t, comment: s.comment, state: s.commentState ?? 'new',
+          at: s.commentAt ?? '', to: s.commentTo ?? '', reply: s.commentReply ?? '', sessions: p.sessions });
+      }
+    });
+  }
+  return pending ? out.filter((c) => c.state === 'new') : out;
+}
+
+/** Поставить комментарию состояние: sent (+to) или done (+reply); n — номер шага или 'note'. */
+export function markComment(p, n, state, { to, reply } = {}) {
+  if (!['new', 'sent', 'done'].includes(state)) throw new Error('состояние: new, sent, done');
+  if (n === 'note') {
+    if (!p.note) throw new Error(`у «${p.title}» нет заметки`);
+    return { ...p, noteState: state, ...(to ? { noteTo: to } : {}), ...(reply ? { noteReply: reply } : {}) };
+  }
+  const i = stepIndex(p, String(n));
+  if (!p.next[i].comment) throw new Error(`у шага ${i + 1} нет комментария`);
+  return {
+    ...p,
+    next: p.next.map((s, j) =>
+      j === i ? { ...s, commentState: state, ...(to ? { commentTo: to } : {}), ...(reply ? { commentReply: reply } : {}) } : s,
+    ),
+  };
+}
+
+/** Комментарий хозяина из командной строки (тот же, что кнопка 💬 в приложении). */
+export function setComment(p, n, text) {
+  const comment = String(text ?? '').trim();
+  if (n === 'note') return { ...p, note: comment, noteAt: comment ? Date.now() : null, noteState: 'new', noteTo: '', noteReply: '' };
+  const i = stepIndex(p, String(n));
+  return {
+    ...p,
+    next: p.next.map((s, j) => {
+      if (j !== i) return s;
+      const { commentTo: _t, commentReply: _r, ...rest } = s;
+      return comment ? { ...rest, comment, commentAt: new Date().toISOString(), commentState: 'new' } : (({ comment: _c, commentAt: _a, commentState: _s, ...r }) => r)(rest);
+    }),
+  };
+}
+
+/** Снять отметку с шага (нажал по ошибке): шаг снова открыт. */
+export function reopenStep(p, query) {
+  const i = stepIndex(p, query);
+  const next = p.next.map((s, j) => {
+    if (j !== i) return s;
+    const { doneAt: _d, ...rest } = s;
+    return { ...rest, done: false };
+  });
+  return { ...p, next };
 }
 
 /** Отмеченные галочкой шаги (хозяин в приложении) → в done, из next убрать. */
@@ -303,6 +373,11 @@ export const PROJECT_HELP = `
   project step-rm <id> <номер или текст>
   project session <id> <local_…> "название сессии"
   project link <id> "название" <url>
+  project comments [--pending]  комментарии хозяина (💬 к шагу или ко всему проекту)
+  project comment <id> <n|note> "текст"        записать комментарий (пусто — снять)
+  project comment-sent <id> <n|note> --to "сессия «…»"   «Пульт» передал сессии
+  project comment-done <id> <n|note> --reply "что сделано"  сессия сделала
+  project reopen <id> <n>      снять отметку с шага (нажал по ошибке)
   project tidy [<id>]          отмеченные хозяином шаги → в «сделано»
   project import файл.json     {id: проект, …} — перенос пачкой (заменяет целиком)
   project rm <id>

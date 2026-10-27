@@ -1,7 +1,7 @@
 // Пульт проектов: подписи и чистая логика вкладки «Проекты».
 // Те же поля и подписи — в scripts/projects.mjs (команды секретаря).
 
-import type { Project, ProjectSphere, ProjectStage, ProjectStep, StepWho } from '../types';
+import type { CommentState, Project, ProjectSphere, ProjectStage, ProjectStep, StepWho } from '../types';
 import { todayKey } from './dates';
 
 export const SPHERES: [ProjectSphere, string][] = [
@@ -103,6 +103,35 @@ export function toggleStep(p: Project, i: number, today = todayKey()): ProjectSt
     }
     return { ...s, done: true, doneAt: today };
   });
+}
+
+/** Комментарии хозяина (к шагам и заметки к проектам), которые ещё не сделаны. */
+export function openComments(list: Project[]) {
+  const out: { project: Project; i: number | null; step: string; comment: string; state: CommentState; to: string }[] = [];
+  for (const p of sortProjects(list)) {
+    if (p.note && p.noteState !== 'done') {
+      out.push({ project: p, i: null, step: 'весь проект', comment: p.note, state: p.noteState ?? 'new', to: p.noteTo ?? '' });
+    }
+    p.next.forEach((s, i) => {
+      if (s.comment && s.commentState !== 'done') {
+        out.push({ project: p, i, step: s.t, comment: s.comment, state: s.commentState ?? 'new', to: s.commentTo ?? '' });
+      }
+    });
+  }
+  return out;
+}
+
+export function commentLabel(state: CommentState | undefined, to?: string, reply?: string): string {
+  if (state === 'sent') return to ? `передано ${to}` : 'передано сессии';
+  if (state === 'done') return reply ? `сделано: ${reply}` : 'сделано';
+  return 'ждёт отправки';
+}
+
+/** Новый комментарий к шагу (пусто — убрать). */
+export function withComment(s: ProjectStep, text: string): ProjectStep {
+  const { comment: _c, commentAt: _a, commentState: _s, commentTo: _t, commentReply: _r, ...rest } = s;
+  const t = text.trim();
+  return t ? { ...rest, comment: t, commentAt: new Date().toISOString(), commentState: 'new' } : rest;
 }
 
 export function sessionLink(id: string): string {

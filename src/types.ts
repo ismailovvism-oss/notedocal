@@ -363,7 +363,18 @@ export interface ProjectStep {
   doneAt?: string;
   /** День, когда шаг добавлен в приложении. */
   addedAt?: string;
+  /** Указание хозяина к шагу — «Пульт» передаёт его сессии проекта. */
+  comment?: string;
+  commentAt?: string;
+  /** new — ждёт пульта, sent — передано сессии, done — сессия сделала. */
+  commentState?: CommentState;
+  /** Какой сессии передано. */
+  commentTo?: string;
+  /** Что сессия ответила, когда сделала. */
+  commentReply?: string;
 }
+
+export type CommentState = 'new' | 'sent' | 'done';
 
 export interface Project {
   id: string;
@@ -391,6 +402,10 @@ export interface Project {
   /** Заметка хозяина для Claude; Claude очищает, когда исполнил. */
   note: string;
   noteAt: number | null;
+  /** Судьба заметки — как у комментария к шагу. */
+  noteState?: CommentState;
+  noteTo?: string;
+  noteReply?: string;
   updatedBy: string;
   createdAt: number;
   updatedAt: number;

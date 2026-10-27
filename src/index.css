@@ -3779,3 +3779,98 @@ button.chip {
   .pj-grid-big { grid-template-columns: minmax(0, 1fr); }
   .pj-backdrop { display: none; }
 }
+
+/* пульт: комментарии к шагам и «Отменить» */
+.pj-step-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.pj-step-line label {
+  flex: 1;
+  min-width: 0;
+}
+.pj-cmt-btn {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.35;
+  cursor: pointer;
+}
+.pj-steps li:hover .pj-cmt-btn,
+.pj-cmt-btn:focus-visible,
+.pj-cmt-btn-on {
+  opacity: 1;
+}
+@media (hover: none) {
+  .pj-cmt-btn { opacity: 0.7; }
+}
+.pj-cmt {
+  margin: 3px 0 2px 25px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pj-cmt-state {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.pj-cmt-new .pj-cmt-state,
+.pj-cmt-state.pj-cmt-new { color: var(--warn); }
+.pj-cmt-sent .pj-cmt-state,
+.pj-cmt-state.pj-cmt-sent { color: var(--normal); }
+.pj-cmt-done .pj-cmt-state,
+.pj-cmt-state.pj-cmt-done { color: var(--accent); }
+.pj-cmt-edit {
+  margin: 4px 0 4px 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pj-cmt-edit .textarea {
+  font-size: 13.5px;
+  padding: 7px 9px;
+}
+.pj-steps-ticked {
+  opacity: 0.75;
+}
+.pj-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px 10px 16px;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: var(--shadow);
+  font-size: 13.5px;
+}
+.pj-toast span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pj-toast .btn {
+  flex: none;
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--bg);
+}
+@media (min-width: 760px) {
+  .pj-toast { bottom: 24px; margin-left: 42px; }
+}

@@ -2395,6 +2395,17 @@ async function projectCommand(db, uid, action, rest, flags, json) {
     }
     return say({ imported: ids.length }, `Перенёс проектов: ${ids.length}`);
   }
+  if (action === 'comments') {
+    const list = P.comments(P.sortProjects(all), { pending: !!flags.pending });
+    if (json) return say(list);
+    for (const c of list) {
+      const where = c.n === 'note' ? 'весь проект' : `шаг ${c.n}: ${c.step}`;
+      const state = { new: 'ждёт', sent: `передано ${c.to}`, done: `сделано${c.reply ? ` — ${c.reply}` : ''}` }[c.state];
+      console.log(`  ${c.id} (${where})\n    💬 ${c.comment}\n    [${state}]`);
+    }
+    if (!list.length) console.log(flags.pending ? 'Новых комментариев нет.' : 'Комментариев нет.');
+    return;
+  }
   if (action === 'tidy') {
     const list = rest[0] ? [P.findProject(all, rest[0])] : all;
     const changed = [];
@@ -2432,6 +2443,24 @@ async function projectCommand(db, uid, action, rest, flags, json) {
     const date = typeof flags.date === 'string' ? flags.date : undefined;
     const doc = P.markDone(p, arg, date);
     return save(doc, `«${p.title}»: сделано — ${doc.done[0].t}`);
+  }
+  if (action === 'comment' || action === 'comment-sent' || action === 'comment-done') {
+    const n = rest[1] === 'note' ? 'note' : rest[1];
+    if (!n) throw new Error(`нужен номер шага или note: project ${action} <id> <n|note>`);
+    if (action === 'comment') {
+      const doc = P.setComment(p, n, rest.slice(2).join(' '));
+      return save(doc, `«${p.title}»: комментарий ${n === 'note' ? 'к проекту' : `к шагу ${n}`} записан`);
+    }
+    const state = action === 'comment-sent' ? 'sent' : 'done';
+    const doc = P.markComment(p, n, state, {
+      to: typeof flags.to === 'string' ? flags.to : undefined,
+      reply: typeof flags.reply === 'string' ? flags.reply : undefined,
+    });
+    return save(doc, `«${p.title}»: комментарий ${n === 'note' ? 'к проекту' : `к шагу ${n}`} — ${state === 'sent' ? 'передан' : 'сделан'}`);
+  }
+  if (action === 'reopen') {
+    const doc = P.reopenStep(p, arg);
+    return save(doc, `«${p.title}»: шаг снова открыт — ${doc.next[P.stepIndex(doc, arg)].t}`);
   }
   if (action === 'step-rm') {
     const i = P.stepIndex(p, arg);
