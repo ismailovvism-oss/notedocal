@@ -1514,6 +1514,104 @@ async function noteList(db, uid, limit, parent) {
   return pool.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, limit);
 }
 
+// ---------- Мост для окна «Быстрые заметки» ----------
+
+const QUICK_FOLDER = 'Быстрые заметки';
+const VOICE_FOLDER = 'Голосом';
+
+/**
+ * Постоянная связь для окна ~/projects/apps/zametki: оно запускает `bridge` один раз
+ * и держит открытым — запуск секретаря стоит ~5 с, на каждую заметку столько не ждать.
+ * Вход — JSON-строки на stdin: {op:'put', ref, id, folder:'quick'|'voice', fields}
+ * (слить поля в заметку, новую — повесить в папку), {op:'delete', ref, id} (надгробие),
+ * {op:'download', ref, path, to} (файл из хранилища — запись голоса с телефона — в файл `to`)
+ * и {op:'rmfile', ref, path} (стереть файл из хранилища: звук после распознавания не храним).
+ * Выход — JSON-строки: {event:'ready'}, {event:'ok', ref}, {event:'fail', ref, message},
+ * {event:'notes', notes:[…, folder]} — весь список обеих папок при каждом его изменении,
+ * в том числе после правки с телефона.
+ */
+async function notesBridge(db, uid, bucket) {
+  const say = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
+  const quick = await ensureFolder(db, uid, QUICK_FOLDER);
+  const voice = await ensureFolder(db, uid, VOICE_FOLDER);
+  await linkChild(db, uid, quick, voice);
+  const folderId = { quick, voice };
+
+  let notes = null;
+  let rels = null;
+  let last = '';
+  const publish = () => {
+    if (!notes || !rels) return;
+    const where = new Map();
+    for (const r of rels) {
+      if (r.deleted || r.type !== 'child' || r.to === voice) continue;
+      if (r.from === voice) where.set(r.to, 'voice');
+      else if (r.from === quick && !where.has(r.to)) where.set(r.to, 'quick');
+    }
+    const list = [];
+    for (const [id, folder] of where) {
+      const n = notes.get(id);
+      if (n && !n.deleted) list.push({ ...n, folder });
+    }
+    const text = JSON.stringify(list);
+    if (text === last) return;
+    last = text;
+    say({ event: 'notes', notes: list });
+  };
+  const fail = (err) => say({ event: 'error', message: String(err?.message ?? err) });
+  db.collection(`users/${uid}/notes`).onSnapshot((snap) => {
+    notes = new Map(snap.docs.map((d) => [d.id, d.data()]));
+    publish();
+  }, fail);
+  db.collection(`users/${uid}/relations`).onSnapshot((snap) => {
+    rels = snap.docs.map((d) => d.data());
+    publish();
+  }, fail);
+  say({ event: 'ready' });
+
+  const { createInterface } = await import('node:readline');
+  const lines = createInterface({ input: process.stdin });
+  for await (const line of lines) {
+    if (!line.trim()) continue;
+    let cmd;
+    try {
+      cmd = JSON.parse(line);
+      const ref = db.doc(`users/${uid}/notes/${cmd.id}`);
+      if (cmd.op === 'put') {
+        const was = await ref.get();
+        const now = Date.now();
+        await ref.set(
+          clean({
+            id: cmd.id,
+            type: 'note',
+            date: null,
+            createdAt: was.exists ? undefined : now,
+            ...cmd.fields,
+            deleted: false,
+            updatedAt: cmd.fields.updatedAt ?? now,
+          }),
+          { merge: true },
+        );
+        if (!was.exists || was.data().deleted) await linkChild(db, uid, folderId[cmd.folder] ?? quick, cmd.id);
+      } else if (cmd.op === 'delete') {
+        await ref.set({ deleted: true, updatedAt: cmd.updatedAt ?? Date.now() }, { merge: true });
+      } else if (cmd.op === 'download' || cmd.op === 'rmfile') {
+        // только свои файлы: путь из заметки, а заметку мог прислать кто угодно с доступом к базе
+        if (!bucket) throw new Error('нет доступа к хранилищу файлов');
+        if (!String(cmd.path ?? '').startsWith(`users/${uid}/files/`)) throw new Error(`чужой путь: ${cmd.path}`);
+        if (cmd.op === 'download') await bucket.file(cmd.path).download({ destination: cmd.to });
+        else await bucket.file(cmd.path).delete({ ignoreNotFound: true });
+      } else {
+        throw new Error(`неизвестная команда: ${cmd.op}`);
+      }
+      say({ event: 'ok', ref: cmd.ref });
+    } catch (err) {
+      say({ event: 'fail', ref: cmd?.ref, message: String(err?.message ?? err) });
+    }
+  }
+  process.exit(0);
+}
+
 // ---------- Вывод ----------
 
 const RU_DAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
@@ -1610,6 +1708,11 @@ async function main() {
   }
 
   const uid = await resolveUid(auth);
+
+  if (group === 'bridge') {
+    await notesBridge(db, uid, bucket);
+    return;
+  }
 
   if (group === 'task') {
     if (action === 'add') {
@@ -2570,6 +2673,10 @@ const HELP = `Секретарь notedocal — запись и чтение де
                                [--folder "Семья"] [--person "Лилия"] цепляет заметку
                                [--detach "Семья"] снимает связь с папкой/карточкой
   note rm   "заголовок или id"
+
+  bridge                               постоянная связь для окна «Быстрые заметки»
+                                       (~/projects/apps/zametki): JSON-строки на
+                                       stdin/stdout, папки «Быстрые заметки» и «Голосом»
 
   health metric <код> <значение> [<второе>] [--date D] [--time HH:mm] [--note ...]
                        замер: вес, пульс, давление (два числа), сахар

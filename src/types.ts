@@ -110,10 +110,30 @@ export interface Note {
   secret?: string;
   /** Прикреплённые файлы (Firebase Storage). */
   attachments?: Attachment[];
+  /** Быстрые заметки (вкладка «Быстрые» и окно zametki): версии текста по имени
+   *  («оригинал», «очищено», «связно», «склеено», «перевод-ru»…). body — текущая версия. */
+  versions?: Record<string, string>;
+  currentVersion?: string;
+  /** Язык быстрой заметки: ru, ar, ar-dia, en. */
+  lang?: string;
+  /** Заказ окну на компьютере: очистить, собрать, перевести, распознать звук.
+   *  Окно выполняет, кладёт новую версию и ставит null. */
+  request?: QuickRequest | null;
+  /** Почему последний заказ не удался — показывается в приложении. */
+  requestError?: string;
   createdAt: number;
   updatedAt: number;
   /** Мягкое удаление (надгробие) — чтобы удаление доезжало до других устройств. */
   deleted?: boolean;
+}
+
+/** Что заказано окну «Быстрые заметки» на компьютере (там Claude и движки распознавания). */
+export interface QuickRequest {
+  kind: 'clean' | 'connect' | 'translate' | 'transcribe';
+  /** Для translate — на какой язык: ru, ar, en. */
+  to?: string;
+  /** Когда заказано, мс. */
+  at: number;
 }
 
 /** Тип связи между заметками:

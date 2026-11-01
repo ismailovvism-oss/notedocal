@@ -124,8 +124,19 @@ function cleanAttachment(a: Attachment): Attachment {
   };
 }
 
+/** Убрать поля со значением undefined (Firestore их не принимает); null оставляем. */
+function withoutUndefined<T extends object>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+}
+
+/** Заметка к записи. Начинаем со всех полей, а не с перечня: запись идёт целиком
+ *  (`set` без слияния), и поле, о котором здесь не знают, стёрлось бы. Так терялись
+ *  версии быстрых заметок (`versions`, окно ~/projects/apps/zametki), `usedIn` у номеров,
+ *  числа замеров здоровья (исправлено 02.11.2026). */
 function cleanNote(n: Note): Note {
   return {
+    ...withoutUndefined(n),
+    ...(n.request ? { request: withoutUndefined(n.request) } : {}),
     id: n.id,
     title: n.title,
     body: n.body,
