@@ -13,7 +13,10 @@ import type {
   Tab,
   Task,
 } from './types';
-import { uid, useLocalStorage, visible } from './lib/storage';
+import { uid, useListActions, useLocalStorage, visible } from './lib/storage';
+import { buildIndex, planRename } from './lib/kb/index';
+import { KbContext, type KbApi, type KbTarget } from './lib/kb/ui';
+import { NoteModal } from './components/NotesView';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { useDocReminder, useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
@@ -186,12 +189,55 @@ export default function App() {
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
   const visiblePomodoros = useMemo(() => visible(pomodoros), [pomodoros]);
 
+  // База знаний: указатель связей из текстов всех заметок (src/lib/kb, docs/ЗАМЕТКИ.md).
+  // Строится в памяти заново при каждом изменении заметок — сотни заметок за миллисекунды.
+  const kbIndex = useMemo(() => buildIndex(visibleNotes), [visibleNotes]);
+  const noteActions = useListActions(setNotes);
+  // Заметки, открытые переходом по ссылке, — стопкой поверх любой вкладки: закрыл — вернулся.
+  const [opened, setOpened] = useState<KbTarget[]>([]);
+  const kb = useMemo<KbApi>(
+    () => ({
+      index: kbIndex,
+      open: (t) => {
+        let id = t.id;
+        if (!id && t.name) {
+          const hit = kbIndex.byName.get(t.name.trim().toLowerCase());
+          id = hit?.[0]?.id;
+          if (!id) {
+            if (!confirm(`Заметки «${t.name}» нет. Создать?`)) return;
+            const now = Date.now();
+            id = uid();
+            noteActions.add({ id, title: t.name.trim(), body: '', type: 'note', date: null, createdAt: now, updatedAt: now });
+          }
+        }
+        if (id) setOpened((st) => [...st, { ...t, id }]);
+      },
+      renamed: (id, oldTitle, newTitle) => {
+        const patches = planRename(kbIndex, id, oldTitle, newTitle);
+        if (!patches.length) return;
+        const byId = new Map(patches.map((p) => [p.id, p]));
+        const now = Date.now();
+        setNotes((list) =>
+          list.map((n) => {
+            const p = byId.get(n.id);
+            if (!p) return n;
+            return { ...n, ...(p.body !== undefined ? { body: p.body } : {}), ...(p.props ? { props: p.props } : {}), updatedAt: now };
+          }),
+        );
+      },
+    }),
+    [kbIndex, noteActions, setNotes],
+  );
+  const top = opened[opened.length - 1];
+  const topNote = top ? visibleNotes.find((n) => n.id === top.id) : undefined;
+
   // Админ показывает официальный календарь всегда; остальные — по переключателю.
   const effectiveUseAdmin = isAdmin || useAdmin;
 
   const today = new Date();
 
   return (
+    <KbContext.Provider value={kb}>
     <div className="app">
       <header className="topbar">
         <div className="brand">
@@ -375,6 +421,24 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      {topNote && (
+        <NoteModal
+          key={`${topNote.id}-${opened.length}`}
+          note={topNote}
+          allNotes={visibleNotes}
+          relations={visibleRelations}
+          setRelations={setRelations}
+          focus={top.anchor || top.heading ? { anchor: top.anchor, heading: top.heading } : undefined}
+          onSave={(patch) => noteActions.update(topNote.id, patch)}
+          onDelete={() => {
+            noteActions.remove(topNote.id);
+            setOpened((st) => st.slice(0, -1));
+          }}
+          onClose={() => setOpened((st) => st.slice(0, -1))}
+        />
+      )}
     </div>
+    </KbContext.Provider>
   );
 }

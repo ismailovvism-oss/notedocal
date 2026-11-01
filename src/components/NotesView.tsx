@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Attachment, ContactMethod, ContactType, Note, NoteType, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { fromKey } from '../lib/dates';
@@ -18,6 +18,8 @@ import {
   wouldCreateCycle,
 } from '../lib/relations';
 import { TYPE_BADGE, TYPE_LABELS } from '../lib/noteTypes';
+import { Backlinks } from './Backlinks';
+import { focusFragment, handleKbClick, handleKbHover, useKb } from '../lib/kb/ui';
 
 interface Props {
   notes: Note[];
@@ -161,6 +163,7 @@ export function NoteModal({
   relations,
   setRelations,
   initialMode,
+  focus,
   onSave,
   onDelete,
   onClose,
@@ -172,6 +175,8 @@ export function NoteModal({
   setRelations?: React.Dispatch<React.SetStateAction<Relation[]>>;
   /** С какого режима открыть (по умолчанию: существующая — чтение, новая — правка). */
   initialMode?: 'view' | 'edit';
+  /** Перейти к фрагменту после открытия: метка (`^k3f9`) или заголовок — так открывают по ссылке. */
+  focus?: { anchor?: string; heading?: string };
   onSave: (
     patch: Pick<
       Note,
@@ -209,6 +214,16 @@ export function NoteModal({
   // Существующая заметка открывается отрендеренной; новая — сразу в правке.
   const [mode, setMode] = useState<'view' | 'edit'>(initialMode ?? (note ? 'view' : 'edit'));
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const kb = useKb();
+  const readRef = useRef<HTMLDivElement>(null);
+  // «Ссылаются сюда» только на этот фрагмент — щелчок по помеченным словам
+  const [anchorFilter, setAnchorFilter] = useState(focus?.anchor ?? '');
+  useEffect(() => {
+    if (focus && mode === 'view') focusFragment(readRef.current, focus);
+    // только при открытии: переход по ссылке ведёт к фрагменту один раз
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const tags = note && kb ? (kb.index.noteTags.get(note.id) ?? []) : [];
 
   const isPerson = type === 'person';
   const isLocation = type === 'location';
@@ -242,7 +257,11 @@ export function NoteModal({
     };
   }
   function handleSave() {
-    onSave(patchOf());
+    const patch = patchOf();
+    // переименовали — ссылки на старое название в других заметках переписать (до сохранения:
+    // указатель ещё знает старое название)
+    if (note && kb && patch.title !== note.title) kb.renamed(note.id, note.title, patch.title);
+    onSave(patch);
     // Существующую оставляем открытой в режиме отображения; новую закрываем.
     if (note) setMode('view');
     else onClose();
@@ -396,16 +415,37 @@ export function NoteModal({
             </div>
           )}
 
+          {tags.length > 0 && (
+            <div className="kb-tags">
+              {tags.map((t) => (
+                <span key={t} className="kb-tag">
+                  #{t}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div
+            ref={readRef}
             className="md note-read-body note-read-tap"
-            onClick={() => setMode('edit')}
+            onClick={(e) => {
+              if (handleKbClick(e, kb, note.id, setAnchorFilter)) return;
+              setMode('edit');
+            }}
+            onMouseOver={(e) => handleKbHover(e, true)}
+            onMouseLeave={(e) => handleKbHover(e, false)}
             title="Нажмите, чтобы редактировать"
             dangerouslySetInnerHTML={{
-              __html: renderMarkdown(body.trim() || '_Пусто. Нажмите, чтобы добавить текст…_'),
+              __html: renderMarkdown(
+                body.trim() || '_Пусто. Нажмите, чтобы добавить текст…_',
+                kb ? { index: kb.index, noteId: note.id } : undefined,
+              ),
             }}
           />
 
           <AttachmentList items={attachments} />
+
+          <Backlinks noteId={note.id} anchor={anchorFilter} setAnchor={setAnchorFilter} />
         </div>
       </div>
     );

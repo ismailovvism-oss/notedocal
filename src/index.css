@@ -3874,3 +3874,141 @@ button.chip {
 @media (min-width: 760px) {
   .pj-toast { bottom: 24px; margin-left: 42px; }
 }
+
+/* ---------- База знаний: ссылки, теги, фрагменты (src/lib/kb, docs/ЗАМЕТКИ.md 3.1) ---------- */
+
+.md a.kb-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  cursor: pointer;
+}
+.md a.kb-link:hover {
+  border-bottom-color: var(--accent);
+}
+/* ссылка на заметку, которой нет: щелчок предложит создать */
+.md a.kb-link.kb-missing {
+  color: var(--muted);
+  border-bottom: 1px dashed var(--muted);
+}
+.kb-tag {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.85em;
+  line-height: 1.5;
+  cursor: default;
+}
+.kb-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 8px;
+}
+.md mark {
+  background: color-mix(in srgb, var(--warn) 35%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+/* фрагмент на словах: видно всегда (решение хозяина), тонко — чтобы не мешал читать */
+.md .kb-a {
+  border-bottom: 1px dotted var(--accent);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.15s;
+}
+.md .kb-a.kb-commented {
+  background: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.md .kb-a.kb-lit {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+/* счётчики: ↩ — сколько ссылок ведёт сюда, 💬 — сколько комментариев */
+.md .kb-a[data-n]::after,
+.md .kb-blk[data-n]::after {
+  content: '↩' attr(data-n);
+  font-size: 0.68em;
+  color: var(--accent);
+  vertical-align: super;
+  margin-left: 1px;
+}
+.md .kb-a[data-c]::before,
+.md .kb-blk[data-c]::before {
+  content: '💬' attr(data-c);
+  font-size: 0.68em;
+  vertical-align: super;
+  margin-right: 1px;
+}
+.md .kb-blk {
+  cursor: pointer;
+}
+.md .kb-embed {
+  margin: 0.6em 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 0 8px 8px 0;
+}
+.md .kb-embed-head {
+  font-size: 0.85em;
+}
+.md .kb-embed-gone {
+  color: var(--muted);
+  font-style: italic;
+}
+@keyframes kb-flash {
+  0%, 40% { background: color-mix(in srgb, var(--warn) 55%, transparent); }
+  100% { background: transparent; }
+}
+.md .kb-flash {
+  animation: kb-flash 2.2s ease-out;
+}
+
+.kb-backlinks {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.kb-bl-head {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--muted);
+}
+.kb-bl-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.kb-bl-src {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.kb-bl-frag {
+  color: var(--text);
+}
+.kb-bl-ctx {
+  color: var(--muted);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.kb-bl-group {
+  margin-top: 8px;
+  color: var(--muted);
+}
+.kb-bl-filter {
+  margin: 6px 0;
+  color: var(--muted);
+}

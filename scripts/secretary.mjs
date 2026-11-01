@@ -30,6 +30,8 @@ import { cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+// Ядро базы знаний — те же исходники, что у приложения (Node 26 запускает .ts сам).
+import { backlinks, buildIndex, planRename } from '../src/lib/kb/index.ts';
 import * as P from './projects.mjs';
 
 // ---------- Разбор аргументов ----------
@@ -1514,6 +1516,27 @@ async function noteList(db, uid, limit, parent) {
   return pool.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, limit);
 }
 
+// ---------- База знаний: ссылки между заметками (docs/ЗАМЕТКИ.md) ----------
+
+/** Заметку переименовали — переписать ссылки на старое название во всех заметках,
+ *  как делает приложение. `all` — заметки до переименования (Map id → заметка или массив). */
+async function rewriteLinks(db, uid, all, noteId, oldTitle, newTitle) {
+  const list = Array.isArray(all) ? all : [...all.values()];
+  const patches = planRename(buildIndex(list.filter((n) => !n.deleted)), noteId, oldTitle, newTitle);
+  if (!patches.length) return 0;
+  const batch = db.batch();
+  const now = Date.now();
+  for (const p of patches) {
+    batch.set(db.doc(`users/${uid}/notes/${p.id}`), clean({ body: p.body, props: p.props, updatedAt: now }), { merge: true });
+  }
+  await batch.commit();
+  return patches.length;
+}
+
+async function allNotes(db, uid) {
+  return (await db.collection(`users/${uid}/notes`).get()).docs.map((d) => d.data()).filter((n) => !n.deleted);
+}
+
 // ---------- Мост для окна «Быстрые заметки» ----------
 
 const QUICK_FOLDER = 'Быстрые заметки';
@@ -1593,6 +1616,11 @@ async function notesBridge(db, uid, bucket) {
           { merge: true },
         );
         if (!was.exists || was.data().deleted) await linkChild(db, uid, folderId[cmd.folder] ?? quick, cmd.id);
+        // заголовок быстрой заметки — её первая строка: поправили её — ссылки на старый переписать
+        const oldTitle = was.exists ? was.data().title : '';
+        if (oldTitle && cmd.fields.title && oldTitle !== cmd.fields.title && notes) {
+          await rewriteLinks(db, uid, notes, cmd.id, oldTitle, cmd.fields.title);
+        }
       } else if (cmd.op === 'delete') {
         await ref.set({ deleted: true, updatedAt: cmd.updatedAt ?? Date.now() }, { merge: true });
       } else if (cmd.op === 'download' || cmd.op === 'rmfile') {
@@ -2308,9 +2336,34 @@ async function main() {
       if (Object.keys(patch).length === 1 && !moves.length) {
         throw new Error('нечего менять: укажи --title / --body / --file / --unlink-file / --address / --city / --category / --number / --expires / --folder / --person / --detach');
       }
+      if (patch.title && patch.title !== note.title) {
+        const n = await rewriteLinks(db, uid, await allNotes(db, uid), note.id, note.title, patch.title);
+        if (n) moves.push(`ссылки переписаны в ${n} заметк.`);
+      }
       if (Object.keys(patch).length > 1) await db.doc(`users/${uid}/notes/${note.id}`).set(patch, { merge: true });
       if (moves.length) console.log(`Связи: ${moves.join(' ')}`);
       console.log(json ? JSON.stringify({ ...note, ...patch }) : `Заметка обновлена: ${patch.title ?? note.title}`);
+      return;
+    }
+    // Ссылки заметки: куда ведёт она и кто ведёт к ней (с текстом вокруг ссылки), теги.
+    if (action === 'links') {
+      const note = await oneNote(db, uid, rest.join(' ').trim());
+      const index = buildIndex(await allNotes(db, uid));
+      const title = (id) => index.byId.get(id)?.title ?? '(нет такой)';
+      const where = (r) => (r.anchor ? `#^${r.anchor}` : r.heading ? `#${r.heading}` : '');
+      const out = (index.outgoing.get(note.id) ?? []).map((r) => ({ ...r, toTitle: r.to ? title(r.to) : null }));
+      const inc = backlinks(index, note.id).map((r) => ({ ...r, fromTitle: title(r.from) }));
+      if (json) {
+        console.log(JSON.stringify({ tags: index.noteTags.get(note.id) ?? [], outgoing: out, incoming: inc }, null, 2));
+        return;
+      }
+      console.log(`«${note.title}»`);
+      const tags = index.noteTags.get(note.id) ?? [];
+      if (tags.length) console.log(`теги: ${tags.map((t) => '#' + t).join(' ')}`);
+      console.log(`→ ссылается (${out.length}):`);
+      for (const r of out) console.log(`  [${r.kind}] ${r.toTitle ?? `«${r.target}» — нет такой`}${where(r)}`);
+      console.log(`← ссылаются сюда (${inc.length}):`);
+      for (const r of inc) console.log(`  [${r.kind}] ${r.fromTitle}${where(r)}\n      ${r.context}`);
       return;
     }
     if (action === 'rm') {
@@ -2660,6 +2713,7 @@ const HELP = `Секретарь notedocal — запись и чтение де
   note list [--limit N] [--folder "Семья"]   --folder: что лежит в папке
                                             или на карточке человека
   note show "заголовок или id"
+  note links "заголовок или id"         ссылки заметки: куда ведёт, кто ссылается сюда, теги
   note edit "заголовок или id" [--title "..."] [--body "..."]
                                [--address "..."] [--city "..."] [--category "..."]
                                [--expires D] срок документа (виза, паспорт); none — снять

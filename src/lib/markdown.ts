@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { prepareMarkdown, type RenderCtx } from './kb/render';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -37,8 +38,11 @@ function escapeHtml(s: string): string {
  *  - подчёркивания через <u>…</u> (как в Obsidian);
  *  - коллаутов Obsidian: `> [!type] Заголовок` + строки `> …`.
  */
-export function renderMarkdown(src: string): string {
-  const lines = (src ?? '').split('\n');
+export function renderMarkdown(src: string, kb?: RenderCtx): string {
+  // Разметка базы знаний (ссылки, теги, метки, встраивания) — src/lib/kb/render.ts.
+  // Без kb ссылки тоже рисуются, но без проверки, есть ли цель, и без встраиваний.
+  const { markdown, embeds } = prepareMarkdown(src ?? '', kb, renderMarkdown);
+  const lines = markdown.split('\n');
   const segments: string[] = [];
   let mdBuf: string[] = [];
 
@@ -76,8 +80,13 @@ export function renderMarkdown(src: string): string {
   }
   flush();
 
-  return DOMPurify.sanitize(segments.join('\n'), {
-    ADD_TAGS: ['u'],
+  let html = segments.join('\n');
+  // встраивание стоит отдельным абзацем — заменяем абзац целиком, иначе <div> внутри <p>
+  for (const [token, embed] of embeds) {
+    html = html.replace(`<p>${token}</p>`, embed).replace(token, embed);
+  }
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['u', 'mark'],
     ADD_ATTR: ['class', 'target', 'rel'],
   });
 }
