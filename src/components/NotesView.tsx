@@ -6,7 +6,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { deleteAttachment } from '../lib/attachments';
 import { CONTACT_META, CONTACT_TYPES, effectiveContacts } from '../lib/persons';
 import { listLocations, mapLink } from '../lib/locations';
-import { DOC_KINDS } from '../lib/docs';
+import { DOC_KINDS, splitUsedIn } from '../lib/docs';
 import { AttachmentAdder, AttachmentList } from './Attachments';
 import { ContactLinks } from './ContactLinks';
 import {
@@ -55,6 +55,7 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
       | 'category'
       | 'docNumber'
       | 'expires'
+      | 'usedIn'
     >,
   ) {
     const now = Date.now();
@@ -186,6 +187,7 @@ export function NoteModal({
       | 'category'
       | 'docNumber'
       | 'expires'
+      | 'usedIn'
     >,
   ) => void;
   onDelete?: () => void;
@@ -202,6 +204,8 @@ export function NoteModal({
   const [category, setCategory] = useState(note?.category ?? '');
   const [docNumber, setDocNumber] = useState(note?.docNumber ?? '');
   const [expires, setExpires] = useState(note?.expires ?? '');
+  // «Где задействован» правится текстом: по строке на сервис.
+  const [usedIn, setUsedIn] = useState((note?.usedIn ?? []).join('\n'));
   // Существующая заметка открывается отрендеренной; новая — сразу в правке.
   const [mode, setMode] = useState<'view' | 'edit'>(initialMode ?? (note ? 'view' : 'edit'));
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -232,6 +236,8 @@ export function NoteModal({
       category: category.trim(),
       docNumber: docNumber.trim(),
       expires: expires || '',
+      // Поле только у документов: остальным заметкам пустой массив ни к чему.
+      ...(isDocument ? { usedIn: splitUsedIn(usedIn) } : {}),
       ...over,
     };
   }
@@ -266,6 +272,7 @@ export function NoteModal({
     setCategory(note?.category ?? '');
     setDocNumber(note?.docNumber ?? '');
     setExpires(note?.expires ?? '');
+    setUsedIn((note?.usedIn ?? []).join('\n'));
     setMode('view');
   }
 
@@ -381,6 +388,11 @@ export function NoteModal({
                   <span className="muted small">До</span> {fromKey(expires).toLocaleDateString('ru-RU')}
                 </span>
               )}
+              {splitUsedIn(usedIn).length > 0 && (
+                <span className="doc-fact">
+                  <span className="muted small">Задействован</span> {splitUsedIn(usedIn).join(' · ')}
+                </span>
+              )}
             </div>
           )}
 
@@ -491,6 +503,16 @@ export function NoteModal({
                   />
                 </label>
               </div>
+              <label className="field">
+                <span className="field-label">Где задействован</span>
+                <textarea
+                  className="input"
+                  rows={3}
+                  placeholder={'WhatsApp\nTelegram\nБанк…'}
+                  value={usedIn}
+                  onChange={(e) => setUsedIn(e.target.value)}
+                />
+              </label>
             </>
           )}
 

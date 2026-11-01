@@ -13,6 +13,7 @@ export const DOC_KINDS = [
   'Свидетельство о рождении',
   'Полис',
   'Виза',
+  'Номер телефона',
   'Другое',
 ];
 
@@ -49,4 +50,12 @@ function addDays(key: string, n: number): string {
   const dt = new Date(y, m - 1, d + n);
   const p = (x: number) => String(x).padStart(2, '0');
   return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+
+/** «Где задействован»: по строке (или через «;») на сервис, пустые выкидываем. */
+export function splitUsedIn(text: string): string[] {
+  return text
+    .split(/[\n;]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }

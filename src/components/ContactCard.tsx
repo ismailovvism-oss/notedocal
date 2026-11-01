@@ -332,6 +332,9 @@ export function ContactCard({
                         <span className="fin-person-name">
                           {docLabel(d)}
                           {docSubtitle(d) ? <span className="muted small"> · {docSubtitle(d)}</span> : null}
+                          {d.usedIn && d.usedIn.length > 0 ? (
+                            <span className="muted small"> · 🔗 {d.usedIn.join(', ')}</span>
+                          ) : null}
                         </span>
                         {d.attachments && d.attachments.length > 0 && (
                           <span className="muted small">📎 {d.attachments.length}</span>

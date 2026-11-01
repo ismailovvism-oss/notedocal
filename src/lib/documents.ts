@@ -95,6 +95,7 @@ export function matchesDoc(e: DocEntry, filter: DocFilter, query: string): boole
     e.doc.category ?? '',
     e.doc.docNumber ?? '',
     e.doc.body ?? '',
+    ...(e.doc.usedIn ?? []),
     ...e.owners.map((o) => o.title),
     ...(e.doc.attachments ?? []).map((a) => a.name),
   ]

@@ -1431,6 +1431,8 @@ async function noteAdd(db, uid, title, flags, bucket) {
     // Номер документа — отдельным полем, а не внутри описания: вкладка
     // «Документы» показывает его строкой с кнопкой «копировать».
     docNumber: typeof flags.number === 'string' ? flags.number.trim() : undefined,
+    // Где задействован номер телефона: «WhatsApp; Telegram; Ziraat».
+    usedIn: typeof flags.used === 'string' ? splitUsed(flags.used) : undefined,
     createdAt: now,
     updatedAt: now,
   });
@@ -1485,6 +1487,11 @@ async function oneNote(db, uid, query) {
  * (связь 'child'), чтобы можно было спросить «что есть по Хаммаду» и не
  * вычитывать всю базу глазами.
  */
+/** «WhatsApp; Telegram» или по строке → список, пустые выкидываем. */
+function splitUsed(text) {
+  return text.split(/[\n;]/).map(s => s.trim()).filter(Boolean);
+}
+
 async function noteList(db, uid, limit, parent) {
   const snap = await db.collection(`users/${uid}/notes`).get();
   const notes = snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
@@ -2143,8 +2150,19 @@ async function main() {
         // Срок документа (виза, паспорт): --expires D; «none» снимает срок.
         expires: 'expires' in flags ? (flags.expires === 'none' ? '' : parseDate(flags.expires)) : undefined,
         docNumber: typeof flags.number === 'string' ? flags.number.trim() : undefined,
+        // --used заменяет список «где задействован», --used-add дописывает к нему.
+        usedIn: typeof flags.used === 'string' || typeof flags['used-add'] === 'string'
+          ? [...new Set([
+              ...(typeof flags.used === 'string' ? [] : note.usedIn ?? []),
+              ...splitUsed(typeof flags.used === 'string' ? flags.used : ''),
+              ...splitUsed(typeof flags['used-add'] === 'string' ? flags['used-add'] : ''),
+            ])]
+          : undefined,
         updatedAt: Date.now(),
       });
+      if (patch.usedIn !== undefined && note.type !== 'document') {
+        throw new Error(`--used только у документов, а «${note.title}» — ${note.type}`);
+      }
       if (patch.docNumber !== undefined && note.type !== 'document') {
         throw new Error(`--number только у документов, а «${note.title}» — ${note.type}`);
       }
@@ -2543,6 +2561,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
                                [--address "..."] [--city "..."] [--category "..."]
                                [--expires D] срок документа (виза, паспорт); none — снять
                                [--number N] номер документа
+                               [--used "WhatsApp; Telegram"] где задействован (номер
+                               телефона); --used-add "Банк" — дописать к списку
                                [--unlink-file "имя"] снять вложение с карточки (файл
                                в хранилище и в зеркале Обсидиана остаётся)
                                [--file путь] приложить файл (PDF, скан); дописывает

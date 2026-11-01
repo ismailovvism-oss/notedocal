@@ -220,6 +220,9 @@ function DocRow({
           <span className="doc-owner">{owners.map((o) => o.title).join(' · ')}</span>
           <span className="doc-name">{docLabel(doc)}</span>
           {подпись && <span className="doc-sub muted small">{подпись}</span>}
+          {doc.usedIn && doc.usedIn.length > 0 && (
+            <span className="doc-sub muted small">🔗 {doc.usedIn.join(' · ')}</span>
+          )}
         </button>
         {doc.expires && (
           <span className={`doc-exp doc-exp-${status}`}>

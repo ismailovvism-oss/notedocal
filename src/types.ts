@@ -99,8 +99,11 @@ export interface Note {
   category?: string;
   /** Номер документа. */
   docNumber?: string;
-  /** Срок действия документа (YYYY-MM-DD). */
+  /** Срок действия документа (YYYY-MM-DD). У номера телефона — когда линия
+   *  закроется без пополнения. */
   expires?: string;
+  /** Где задействован (у документа «Номер телефона»): WhatsApp, Telegram, банки… */
+  usedIn?: string[];
   /** Логин (для типа credential — пароля). */
   login?: string;
   /** Секрет: для credential — ЗАШИФРОВАННЫЙ пароль (мастер-паролем, E2E). */

@@ -126,6 +126,7 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
       | 'category'
       | 'docNumber'
       | 'expires'
+      | 'usedIn'
     >,
   ) {
     if (!editing) return;
