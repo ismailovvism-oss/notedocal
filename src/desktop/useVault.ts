@@ -24,12 +24,17 @@ export interface Vault {
   notes: Note[];
   relations: Relation[];
   loading: boolean;
+  /** Список и тексты открытого хранилища прочитаны: до этого сверять с телефоном нельзя —
+   *  пустой список выглядел бы как «все файлы удалены». */
+  loaded: boolean;
   error: string;
   choose: () => Promise<void>;
   open: (path: string) => Promise<void>;
   /** Новая заметка в папке хранилища (dir — путь, '' — корень); id новой. */
   create: (dir: string, fields: Partial<Note>) => Promise<string>;
   update: (id: string, patch: Partial<Note>) => Promise<void>;
+  /** Дописать в конец текста — к тексту, какой он сейчас на диске, а не в прошлой отрисовке. */
+  append: (id: string, text: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   mkdir: (dir: string, name: string) => Promise<void>;
   /** Перечитать список файлов (после скачивания в `_файлы/` — не ждать опроса). */
@@ -43,6 +48,7 @@ export interface Vault {
 export function useVault(onRenamed: (from: string, to: string) => void): Vault {
   const [info, setInfo] = useState<VaultInfo | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
   const entries = useRef(new Map<string, VaultEntry>());
   const texts = useRef(new Map<string, string>());
@@ -51,6 +57,22 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
   const [version, setVersion] = useState(0);
   const renamedRef = useRef(onRenamed);
   renamedRef.current = onRenamed;
+  // старый id → новый: правка, посланная под прежним именем (заметку переименовали, пока
+  // в ней печатали), идёт в новый файл, а не пропадает
+  const renames = useRef(new Map<string, string>());
+  const resolve = (id: string) => {
+    for (let i = 0; i < 20 && renames.current.has(id); i++) id = renames.current.get(id)!;
+    return id;
+  };
+  // своя запись по пути: чтение правки со стороны, начатое до неё, её не затирает
+  const stamps = useRef(new Map<string, number>());
+  // правки идут по одной: правка во время переименования пишет уже в новый файл
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  const queued = <T,>(job: () => Promise<T>): Promise<T> => {
+    const next = chain.current.then(job, job);
+    chain.current = next.catch(() => {});
+    return next;
+  };
 
   const built = useMemo(() => {
     void version;
@@ -79,6 +101,7 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoaded(false);
     setError('');
     try {
       const list = await vaultApi.scan();
@@ -91,6 +114,7 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
         for (const [p, t] of Object.entries(got)) texts.current.set(p, t);
       }
       bump();
+      setLoaded(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -133,8 +157,9 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
           if (e.kind === 'md') md.push(e.path);
         }
         if (md.length) {
+          const before = new Map(md.map((p) => [p, stamps.current.get(p) ?? 0]));
           const got = await vaultApi.read(md).catch(() => ({}) as Record<string, string>);
-          for (const [p, t] of Object.entries(got)) texts.current.set(p, t);
+          for (const [p, t] of Object.entries(got)) if ((stamps.current.get(p) ?? 0) === before.get(p)) texts.current.set(p, t);
         }
         bump();
       }),
@@ -157,6 +182,7 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
 
   const taken = (p: string) => entries.current.has(p);
   const write = async (path: string, text: string) => {
+    stamps.current.set(path, (stamps.current.get(path) ?? 0) + 1);
     texts.current.set(path, text);
     const { mtime } = await vaultApi.write(path, text);
     entries.current.set(path, { path, kind: 'md', mtime, size: text.length });
@@ -179,6 +205,8 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
         texts.current.set(np, t);
       }
       const prefix = e.kind === 'md' ? 'v:' : e.kind === 'dir' ? 'd:' : 'f:';
+      renames.current.set(prefix + p, prefix + np);
+      renames.current.delete(prefix + np);
       renamedRef.current(prefix + p, prefix + np);
     }
     void kind;
@@ -208,7 +236,26 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const update = async (id: string, patch: Partial<Note>) => {
+  /** Текст файла ещё не читали (новый со стороны, пришёл со списком) — прочитать: иначе запись
+   *  заменила бы настоящий текст пустым. */
+  const ensureText = async (path: string) => {
+    if (texts.current.has(path) || !entries.current.has(path)) return;
+    const got = await vaultApi.read([path]);
+    if (got[path] === undefined) throw new Error(`не прочитать ${path}`);
+    if (!texts.current.has(path)) texts.current.set(path, got[path]);
+  };
+
+  const update = (id: string, patch: Partial<Note>) => queued(() => doUpdate(resolve(id), patch));
+  const append = (id: string, text: string) =>
+    queued(async () => {
+      const rid = resolve(id);
+      if (!rid.startsWith('v:')) return;
+      await ensureText(pathOfId(rid));
+      const b = (byId(rid)?.body ?? '').trimEnd();
+      await doUpdate(rid, { body: `${b}${b ? '\n\n' : ''}${text}` });
+    });
+  const doUpdate = async (id: string, patch: Partial<Note>) => {
+    if (id.startsWith('v:')) await ensureText(pathOfId(id));
     const n = byId(id);
     if (!n?.vault) return;
     let path = n.vault.path;
@@ -235,7 +282,8 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     await write(path, vaultMarkdown({ ...fresh, ...rest, vault: { ...n.vault, path } }));
   };
 
-  const remove = async (id: string) => {
+  const remove = (id: string) => queued(() => doRemove(resolve(id)));
+  const doRemove = async (id: string) => {
     const path = pathOfId(id);
     await vaultApi.remove(path);
     for (const p of [...entries.current.keys()]) if (p === path || p.startsWith(path + '/')) entries.current.delete(p);
@@ -248,47 +296,65 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     entries.current.set(path, { path, kind: 'dir' });
     bump();
   };
-  const move = async (id: string, toDir: string) => {
+  const move = (id: string, toDir: string) => queued(() => doMove(resolve(id), toDir));
+  const doMove = async (id: string, toDir: string) => {
     const path = pathOfId(id);
     const target = (toDir ? toDir + '/' : '') + baseName(path);
     if (target === path || toDir === path || toDir.startsWith(path + '/')) return;
     const kind: VaultEntry['kind'] = id.startsWith('v:') ? 'md' : id.startsWith('d:') ? 'dir' : 'file';
     await relocate(path, target, kind);
   };
-  const refresh = async () => {
+  /** Перечитать список; новые и изменённые .md — вместе с текстом (иначе были бы пустыми,
+   *  а у изменённых — новое время при старом тексте). */
+  const rescan = async () => {
     const list = await vaultApi.scan();
-    for (const e of list) if (!entries.current.has(e.path) || e.kind !== 'md') entries.current.set(e.path, e);
+    const md = new Set(list.filter((e) => e.kind === 'md' && (!texts.current.has(e.path) || entries.current.get(e.path)?.mtime !== e.mtime)).map((e) => e.path));
+    const before = new Map([...md].map((p) => [p, stamps.current.get(p) ?? 0]));
+    const got = md.size ? await vaultApi.read([...md]).catch(() => ({}) as Record<string, string>) : {};
+    const next = new Map<string, VaultEntry>();
+    for (const e of list) {
+      if (e.kind === 'md' && md.has(e.path)) {
+        // текст не прочитался или его только что переписали здесь — оставить, что было
+        if (got[e.path] === undefined || (stamps.current.get(e.path) ?? 0) !== before.get(e.path)) {
+          next.set(e.path, entries.current.get(e.path) ?? e);
+          continue;
+        }
+        texts.current.set(e.path, got[e.path]);
+      }
+      next.set(e.path, e);
+    }
+    for (const p of [...texts.current.keys()]) if (!next.has(p)) texts.current.delete(p);
+    entries.current = next;
     bump();
   };
+  const refresh = () => rescan();
   const importFiles = async () => {
     const got = await vaultApi.importFiles();
-    const list = await vaultApi.scan();
-    entries.current = new Map(list.map((e) => [e.path, e]));
-    bump();
+    await rescan();
     return got;
   };
   const importData = async (f: File) => {
     const got = await vaultApi.importData(f);
-    const list = await vaultApi.scan();
-    entries.current = new Map(list.map((e) => [e.path, e]));
-    bump();
+    await rescan();
     return got;
   };
 
   // один объект, пока данные те же: окно строит от него правки и указатель — без лишних пересчётов
-  const fns = useRef({ create, update, remove, mkdir, move, importFiles, importData, refresh });
-  fns.current = { create, update, remove, mkdir, move, importFiles, importData, refresh };
+  const fns = useRef({ create, update, append, remove, mkdir, move, importFiles, importData, refresh });
+  fns.current = { create, update, append, remove, mkdir, move, importFiles, importData, refresh };
   return useMemo(
     () => ({
       info,
       notes: built.notes,
       relations: built.relations,
       loading,
+      loaded,
       error,
       choose,
       open,
       create: (dir: string, f: Partial<Note>) => fns.current.create(dir, f),
       update: (id: string, p: Partial<Note>) => fns.current.update(id, p),
+      append: (id: string, t: string) => fns.current.append(id, t),
       remove: (id: string) => fns.current.remove(id),
       mkdir: (dir: string, name: string) => fns.current.mkdir(dir, name),
       move: (id: string, to: string) => fns.current.move(id, to),
@@ -296,6 +362,6 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
       importData: (f: File) => fns.current.importData(f),
       refresh: () => fns.current.refresh(),
     }),
-    [info, built, loading, error, choose, open],
+    [info, built, loading, loaded, error, choose, open],
   );
 }

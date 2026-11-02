@@ -469,6 +469,7 @@ function Desktop() {
     if (!vault.info) return setVaultErr('Сначала выберите хранилище (🗄 вверху слева)');
     const list = ids.map((id) => index.byId.get(id)).filter((n): n is Note => !!n && !inVault(n.id) && n.type !== 'folder');
     let done = 0;
+    const failed: string[] = [];
     for (const n of list) {
       setVaultErr(`Забираю в хранилище: ${++done} из ${list.length} — ${n.title || 'Без названия'}`);
       const embeds: string[] = [];
@@ -502,11 +503,14 @@ function Desktop() {
         if (keep) {
           // облачная — теперь копия: сверка возьмёт новое время файла за точку отсчёта
           const t = Date.now();
-          const sync: VaultSync = { vault: vault.info.name, path: pathOfId(vid), at: -1, cloudAt: t, mode };
+          const sync: VaultSync = { vault: vault.info.path, path: pathOfId(vid), at: -1, cloudAt: t, mode };
           setNotes((l) => l.map((x) => (x.id === n.id ? { ...x, attachments: [...marked, ...(x.attachments ?? []).filter((a) => a.local)], vaultSync: sync, updatedAt: t } : x)));
-        } else {
+        } else if (marked.every((a) => a.vaultFile)) {
           for (const a of atts) sendBridge({ op: 'rmfile', path: a.path });
           actions.remove(n.id);
+        } else {
+          // какой-то файл не скачался — облачную заметку с её файлами не трогаем
+          failed.push(n.title || 'Без названия');
         }
       } catch (e) {
         setVaultErr(`«${n.title}» не забрана: ${(e as Error).message}`);
@@ -514,7 +518,8 @@ function Desktop() {
       }
     }
     await vault.refresh().catch(() => {});
-    setVaultErr(list.length ? `Забрано в хранилище: ${list.length}${keep ? ' — на телефоне остаются (📱)' : ' — из облака убраны'}` : '');
+    if (failed.length) return setVaultErr(`Не все файлы скачались — в облаке оставлены как были: ${failed.join(', ')}`);
+    setVaultErr(list.length ?`Забрано в хранилище: ${list.length}${keep ? ' — на телефоне остаются (📱)' : ' — из облака убраны'}` : '');
   }
   /** Все заметки облачной папки (с подпапками) — с путями от неё. */
   function cloudFolderNotes(fid: string): string[] {

@@ -17,6 +17,8 @@ import { sendBridge } from './bridge';
 import type { Vault } from './useVault';
 
 const FLAGS = '.zametki/телефон.json';
+/** Файл пропал — копию убирать не сразу: редактор мог сохранить его «удалить и создать заново». */
+const DROP_AFTER = 10_000;
 
 export interface PhoneSync {
   /** Отметки папок: путь → режим (`''` — всё хранилище). */
@@ -38,14 +40,7 @@ export function usePhoneSync(
   const [busy, setBusy] = useState('');
   const inflight = useRef(new Set<string>());
 
-  // отметки папок — файл в хранилище
-  useEffect(() => {
-    if (!vault.info) return;
-    vaultApi
-      .read([FLAGS])
-      .then((r) => setFolders(r[FLAGS] ? JSON.parse(r[FLAGS]) : {}))
-      .catch(() => setFolders({}));
-  }, [vault.info]);
+  // отметки папок — файл в хранилище (читаются ниже, рядом со сверкой)
   const setFolder = (dir: string, mode: PhoneMode | 'off' | null) => {
     const next = { ...folders };
     if (mode) next[dir] = mode;
@@ -62,43 +57,91 @@ export function usePhoneSync(
   };
 
   // папка «🗄 <хранилище>» в облаке — туда кладутся копии, телефон видит их там
-  const folderId = useRef<string | null>(null);
+  // у каждого хранилища своя: запомненная — пока облако не принесло созданную
+  const folderIds = useRef(new Map<string, string>());
   const ensureFolder = (name: string, list: Note[]) => {
     const title = `🗄 ${name}`;
     const f = list.find((n) => !n.deleted && n.type === 'folder' && n.title === title);
-    if (f) return (folderId.current = f.id);
-    if (folderId.current) return folderId.current;
+    if (f) {
+      folderIds.current.set(title, f.id);
+      return f.id;
+    }
+    const known = folderIds.current.get(title);
+    if (known) return known;
     const id = uid();
     const now = Date.now();
     setCloud((l) => [{ id, title, body: '', type: 'folder', date: null, createdAt: now, updatedAt: now }, ...l]);
-    return (folderId.current = id);
+    folderIds.current.set(title, id);
+    return id;
   };
+  // с какого времени копии больше нечего отражать
+  const gone = useRef(new Map<string, number>());
+  const running = useRef(false);
 
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // сверка — только когда хранилище прочитано целиком и отметки папок загружены: пустой или
+  // прошлый список (запуск, смена хранилища) выглядел бы как «все файлы удалены»
+  const [flagsFor, setFlagsFor] = useState('');
   useEffect(() => {
-    if (!vault.info || !ready) return;
+    if (!vault.info) return;
+    const path = vault.info.path;
+    vaultApi
+      .read([FLAGS])
+      .then((r) => setFolders(r[FLAGS] ? JSON.parse(r[FLAGS]) : {}))
+      .catch(() => setFolders({}))
+      .finally(() => setFlagsFor(path));
+  }, [vault.info]);
+  const canRun = !!vault.info && vault.loaded && !vault.loading && flagsFor === vault.info.path && ready;
+  useEffect(() => {
+    if (!canRun) return;
     clearTimeout(timer.current);
     timer.current = setTimeout(() => void run(), 1000);
     return () => clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vault.notes, cloud, folders, ready, vault.info]);
+  }, [vault.notes, cloud, folders, canRun]);
 
   async function run() {
-    const name = vault.info!.name;
-    const plan = planPhoneSync(name, vault.notes, cloud, folders, uid);
-    if (!plan.assign.length && !plan.push.length && !plan.pull.length && !plan.baseline.length && !plan.drop.length) {
+    if (running.current) return;
+    running.current = true;
+    try {
+      await step();
+    } finally {
+      running.current = false;
+    }
+  }
+
+  async function step() {
+    const { name, path: vaultId } = vault.info!;
+    const plan = planPhoneSync(vaultId, vault.notes, cloud, folders, uid);
+    const skipped = plan.skip.map((x) => `«${x.note.title}» ${x.reason}`).join('; ');
+    // копии без файла: убрать, только если файла нет дольше DROP_AFTER
+    const now = Date.now();
+    const dropIds = new Set(plan.drop.map((c) => c.id));
+    for (const id of [...gone.current.keys()]) if (!dropIds.has(id)) gone.current.delete(id);
+    for (const id of dropIds) if (!gone.current.has(id)) gone.current.set(id, now);
+    const drop = plan.drop.filter((c) => now - gone.current.get(c.id)! >= DROP_AFTER);
+    if (drop.length < plan.drop.length) {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => void run(), DROP_AFTER + 500);
+    }
+    if (!plan.assign.length && !plan.push.length && !plan.pull.length && !plan.baseline.length && !drop.length) {
       // файлы с телефона к копиям — скачать (каждую сверку: вдруг прикрепили)
-      void fetchPhoneFiles();
-      return setBusy('');
+      await fetchPhoneFiles();
+      return setBusy(skipped ? `не на телефон: ${skipped}` : '');
     }
     setBusy('сверяю с телефоном…');
+    const errors: string[] = [];
     // постоянный id — в заголовок файла; отправка — на следующем круге (время файла сменится)
-    for (const a of plan.assign) await vault.update(a.id, { cloud: a.cloud }).catch(() => {});
+    for (const a of plan.assign) await vault.update(a.id, { cloud: a.cloud }).catch((e) => errors.push((e as Error).message));
     for (const b of plan.baseline) putCopy(b.copy, { ...(b.copy.vaultSync as VaultSync), at: b.at });
     for (const { note, copy } of plan.pull) {
       const { title, body, tags, props, aliases } = copy;
-      await vault.update(note.id, { title, body, tags, props, aliases }).catch(() => {});
-      putCopy(copy, { ...(copy.vaultSync as VaultSync), at: -1 });
+      // не записалось в файл — копию не отмечать сверенной: попробуется на следующем круге
+      const ok = await vault.update(note.id, { title, body, tags, props, aliases }).then(
+        () => true,
+        (e) => (errors.push(`«${note.title}»: ${(e as Error).message}`), false),
+      );
+      if (ok) putCopy(copy, { ...(copy.vaultSync as VaultSync), at: -1 });
     }
     const fid = plan.push.length ? ensureFolder(name, cloud) : null;
     for (const { note, cloud: cid, mode } of plan.push) {
@@ -127,18 +170,26 @@ export function usePhoneSync(
         updatedAt: 0,
         attachments: [...attachments, ...(prev?.attachments ?? []).filter((a) => !a.vaultFile)],
       };
-      putCopy(copy, { vault: name, path: note.vault!.path, at: note.updatedAt, mode });
+      putCopy(copy, { vault: vaultId, path: note.vault!.path, at: note.updatedAt, mode });
       // в папку «🗄 хранилище» — если копия ещё ни в какой папке (забранная из облака остаётся в своей)
       if (fid && !relations.some((r) => !r.deleted && r.type === 'child' && r.to === cid)) {
         addRelation({ id: uid(), from: fid, to: cid, type: 'child', position: 0, createdAt: Date.now(), updatedAt: Date.now() });
       }
       if (mode === 'files') for (const n of names) if (!keep.some((a) => a.vaultFile === n)) void uploadFile(cid, n);
     }
-    for (const c of plan.drop) {
+    for (const c of drop) {
+      gone.current.delete(c.id);
+      // на телефоне к ней прикрепили файл, а скачать его не успели — не стирать: заметка
+      // остаётся в облаке обычной (не копией), с файлом
+      if ((c.attachments ?? []).some((a) => !a.local && !a.vaultFile && a.path)) {
+        setCloud((list) => list.map((n) => (n.id === c.id ? { ...n, vaultSync: undefined, updatedAt: Date.now() } : n)));
+        continue;
+      }
       for (const a of c.attachments ?? []) if (!a.local && a.path) sendBridge({ op: 'rmfile', path: a.path });
       setCloud((list) => list.map((n) => (n.id === c.id ? { ...n, deleted: true, updatedAt: Date.now() } : n)));
     }
-    setBusy('');
+    if (errors.length) setBusy(`не сверено с телефоном: ${errors.join('; ')}`);
+    else setBusy(skipped ? `не на телефон: ${skipped}` : '');
   }
 
   /** Путь файла в хранилище по имени из `![[имя]]` (сначала в `_файлы/`). */
@@ -172,7 +223,7 @@ export function usePhoneSync(
   async function fetchPhoneFiles() {
     for (const c of cloud) {
       const s = c.vaultSync as VaultSync | undefined;
-      if (!s || c.deleted || s.vault !== vault.info?.name) continue;
+      if (!s || c.deleted || s.vault !== vault.info?.path) continue;
       for (const a of c.attachments ?? []) {
         if (a.vaultFile || a.local || !a.path) continue;
         const key = `dl:${c.id}:${a.id}`;
@@ -186,11 +237,9 @@ export function usePhoneSync(
           inflight.current.delete(key);
           continue;
         }
+        // дописать к тексту, какой он на диске сейчас: пока качалось, его могли поправить
         const note = vault.notes.find((n) => n.cloud === c.id);
-        if (note) {
-          const b = (note.body ?? '').trimEnd();
-          await vault.update(note.id, { body: `${b}${b ? '\n\n' : ''}![[${baseName(rel)}]]` }).catch(() => {});
-        }
+        if (note) await vault.append(note.id, `![[${baseName(rel)}]]`).catch(() => {});
         setCloud((list) =>
           list.map((x) => {
             if (x.id !== c.id) return x;

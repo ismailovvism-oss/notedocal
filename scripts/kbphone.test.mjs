@@ -54,3 +54,31 @@ test('после записи правки с телефона — только 
   assert.deepEqual(p.baseline.map((b) => b.at), [50]);
   assert.deepEqual([p.push.length, p.pull.length], [0, 0]);
 });
+
+test('правка с телефона пришла, пока ждали записи прошлой, — тоже в файл, а не «сверено»', () => {
+  const p = planPhoneSync('Заметки', [v('a.md', { toPhone: 'text', cloud: 'A' }, 50)], [copy('A', { at: -1, cloudAt: 30 }, 40)], {}, mk);
+  assert.equal(p.pull.length, 1);
+  assert.equal(p.baseline.length, 0);
+});
+
+test('один id у двух файлов — хозяин тот, с чьего пути копия; второму новый id, без метаний', () => {
+  const a = v('a.md', { toPhone: 'text', cloud: 'A' }, 10);
+  const b = v('Копия a.md', { toPhone: 'text', cloud: 'A' }, 10);
+  const p = planPhoneSync('Заметки', [b, a], [copy('A', {}, 10)], {}, mk);
+  assert.deepEqual(p.assign.map((x) => x.id), ['v:Копия a.md']);
+  assert.deepEqual([p.push.length, p.pull.length, p.drop.length], [0, 0, 0]);
+});
+
+test('файл из другого хранилища со своим id — не перехватывает чужую копию', () => {
+  const p = planPhoneSync('Второе', [v('a.md', { toPhone: 'text', cloud: 'A' }, 99)], [copy('A', {}, 10)], {}, mk);
+  assert.deepEqual(p.assign.map((x) => x.id), ['v:a.md']);
+  assert.equal(p.push.length, 0);
+});
+
+test('не влезет в облако — пропустить с причиной, копию не трогать', () => {
+  const big = v('книга.md', { toPhone: 'text', cloud: 'K', body: 'ب'.repeat(500_000) }, 20);
+  const nested = v('n.md', { toPhone: 'text', cloud: 'N', props: { x: [[1, 2]] } }, 20);
+  const p = planPhoneSync('Заметки', [big, nested], [copy('K', {}, 10)], {}, mk);
+  assert.equal(p.skip.length, 2);
+  assert.deepEqual([p.push.length, p.drop.length], [0, 0]);
+});
