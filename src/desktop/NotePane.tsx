@@ -118,10 +118,15 @@ export function NotePane({
   const [lang, setLang] = useLocalStorage<string>('dk.voiceLang', 'ru');
   const [msg, setMsg] = useState('');
   const mark = (id: string) => `%%🎤:${id}%%`;
+  // идёт ли запись прямо сейчас — в ref: кнопка на микрофоне зовёт toggleVoice из подписки,
+  // созданной при открытии заметки, и состояние из её замыкания было бы устаревшим
+  // (02.11.2026 второе нажатие слало «продолжить» вместо «пауза»)
+  const voiceState = useRef('');
+  voiceState.current = voice?.state ?? '';
   function toggleVoice() {
     if (!native.available()) return setMsg('Голос — только в окне на компьютере');
     const v = voiceId.current;
-    if (v) return native.voice({ op: voice?.state === 'rec' ? 'pause' : 'resume' });
+    if (v) return native.voice({ op: voiceState.current === 'rec' ? 'pause' : 'resume' });
     const h = editor.current;
     if (!h) return;
     const id = Math.random().toString(36).slice(2, 8);
@@ -131,6 +136,8 @@ export function NotePane({
     setMsg('');
     native.voice({ op: 'start', id, lang, mic });
   }
+  const toggleRef = useRef(toggleVoice);
+  toggleRef.current = toggleVoice;
   const stopVoice = () => voiceId.current && native.voice({ op: 'stop' });
   useEffect(
     () =>
@@ -166,8 +173,8 @@ export function NotePane({
   );
   // ★ с кнопки на микрофоне: новая заметка — и сразу запись; повторное нажатие — пауза
   useEffect(() => {
-    if (autoRecord) setTimeout(toggleVoice, 150);
-    const onRecord = () => toggleVoice();
+    if (autoRecord) setTimeout(() => toggleRef.current(), 150);
+    const onRecord = () => toggleRef.current();
     window.addEventListener('dk-record', onRecord);
     return () => window.removeEventListener('dk-record', onRecord);
     // eslint-disable-next-line react-hooks/exhaustive-deps
