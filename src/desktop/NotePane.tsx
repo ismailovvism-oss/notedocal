@@ -2,10 +2,11 @@
 // как в Obsidian. Текст сохраняется сам (через 0,7 с после правки, Ctrl+S — сразу).
 // Сверху — название, роль, теги и свойства; ниже — текст в редакторе «как видишь».
 
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Note, NoteType } from '../types';
 import LiveEditor from '../components/LiveEditor';
 import { PropsView, SchemaView, ViewResult } from '../components/Props';
+import { PropsEditor, SchemaEditor, ViewEditor } from '../components/PropsEdit';
 import { TYPE_LABELS } from '../lib/noteTypes';
 import { useKb } from '../lib/kb/ui';
 import { dropEmptyAnchors } from '../lib/kb/edit';
@@ -13,9 +14,8 @@ import { checkNewTag, tagCards } from '../lib/kb/tags';
 import { OWN_KEYS, fieldsOf, schemas } from '../lib/kb/schema';
 import type { ScopeWhy } from '../lib/kb/scope';
 
-const PropsEditor = lazy(() => import('../components/PropsEdit').then((m) => ({ default: m.PropsEditor })));
-const SchemaEditor = lazy(() => import('../components/PropsEdit').then((m) => ({ default: m.SchemaEditor })));
-const ViewEditor = lazy(() => import('../components/PropsEdit').then((m) => ({ default: m.ViewEditor })));
+// не лениво: окно держит страницу открытой часами, а пересборка стирает старые куски —
+// догружаемый потом файл мог бы уже исчезнуть (так 02.11.2026 «Свойства» роняли страницу)
 
 export interface PaneFocus {
   anchor?: string;
@@ -228,7 +228,7 @@ export function NotePane({
       </div>
 
       {propsOpen ? (
-        <Suspense fallback={<div className="muted small">Загружаю свойства…</div>}>
+        <>
           {type === 'schema' && <SchemaEditor props={note.props ?? {}} setProps={setProps} />}
           {type === 'view' && <ViewEditor props={note.props ?? {}} setProps={setProps} />}
           <PropsEditor
@@ -239,7 +239,7 @@ export function NotePane({
             hidden={OWN_KEYS[type] ?? []}
             titles={allNotes.map((n) => n.title).filter(Boolean)}
           />
-        </Suspense>
+        </>
       ) : (
         type !== 'schema' && type !== 'view' && <PropsView note={note} />
       )}

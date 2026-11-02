@@ -10,7 +10,8 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: join(homedir(), '.local/share/zametki/baza'),
-    emptyOutDir: true,
+    // старое не стирать: открытое окно может ещё обратиться к файлам прежней сборки
+    emptyOutDir: false,
     rollupOptions: { input: 'desktop.html' },
   },
 })

@@ -193,3 +193,6 @@
 .dk-comment:hover { background: var(--surface-2); }
 .dk-comment { display: flex; flex-direction: column; gap: 2px; border-inline-start: 3px solid var(--note); padding-inline-start: 8px; margin-bottom: 6px; }
 .dk-comment-frag { color: var(--muted); font-size: 12px; }
+
+.dk-crash { max-width: 560px; margin: 20vh auto 0; text-align: center; }
+.dk-crash p { overflow-wrap: anywhere; }

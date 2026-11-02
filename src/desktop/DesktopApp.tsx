@@ -23,6 +23,7 @@ import { Backlinks } from '../components/Backlinks';
 import { CommentComposer, LinkPicker, SetPicker } from '../components/KbDialogs';
 import { NotePane, type PaneFocus } from './NotePane';
 import { useBridgeSync, type BridgeStatus } from './bridge';
+import { Guard } from './Guard';
 
 interface Target extends PaneFocus {
   id: string;
@@ -297,8 +298,8 @@ export default function DesktopApp() {
           </div>
           <div className="dk-page">
             {note ? (
+              <Guard key={`${cur!.key}-${note.id}-${target!.n}`}>
               <NotePane
-                key={`${cur!.key}-${note.id}-${target!.n}`}
                 note={note}
                 focus={target}
                 allNotes={live}
@@ -310,6 +311,7 @@ export default function DesktopApp() {
                   else closeTab(cur!.key);
                 }}
               />
+              </Guard>
             ) : (
               <div className="dk-empty">
                 <p>{loaded ? 'Откройте заметку слева или создайте новую.' : 'Поднимаю заметки…'}</p>
