@@ -5,6 +5,7 @@
 // текста, как в быстрых заметках: оригинал, очищено, связно, перевод (./native.ts).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Note, NoteType } from '../types';
 import LiveEditor from '../components/LiveEditor';
 import type { LiveEditorHandle } from '../components/liveEditorTypes';
@@ -35,6 +36,7 @@ export function NotePane({
   picking,
   autoRecord,
   onVoiceLeft,
+  toolsSlot,
   onDelete,
 }: {
   note: Note;
@@ -48,6 +50,8 @@ export function NotePane({
   autoRecord?: boolean;
   /** Ушли с заметки посреди диктовки: дораспознанное вставит окно в текст заметки. */
   onVoiceLeft: (voiceId: string, noteId: string) => void;
+  /** Место в правой колонке для панели инструментов этой заметки (./desktop.css, .dk-tools). */
+  toolsSlot?: HTMLElement | null;
   onDelete: () => void;
 }) {
   const kb = useKb()!;
@@ -270,78 +274,7 @@ export function NotePane({
             служебная{scope.why !== 'отметка' ? ` · ${scope.why}` : ''}
           </span>
         )}
-        {versionNames.length > 1 && (
-          <select className="dk-type" title="Версия текста" value={note.currentVersion ?? 'оригинал'} onChange={(e) => pickVersion(e.target.value)}>
-            {versionNames.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-        )}
-        {native.available() && (
-          <span className="dk-claude">
-            <button disabled={!!busy} title="Claude: исправить ослышки и пунктуацию — новая версия" onClick={() => claude('clean', 'чищу…')}>
-              ✨ Очистить
-            </button>
-            <button disabled={!!busy} title="Claude: свести надиктованное в связный текст" onClick={() => claude('connect', 'собираю…')}>
-              ≡ Связно
-            </button>
-            <select
-              disabled={!!busy}
-              value=""
-              title="Claude: перевести — новая версия"
-              onChange={(e) => e.target.value && claude('translate', 'перевожу…', e.target.value)}
-            >
-              <option value="">🌐 Перевод</option>
-              <option value="ru">на русский</option>
-              <option value="ar">на арабский</option>
-              <option value="en">на английский</option>
-            </select>
-            {busy && <span className="dk-busy">{busy}</span>}
-          </span>
-        )}
         <span className="dk-spacer" />
-        {native.available() && (
-          <span className={`dk-voice ${voice ? 'on ' + voice.state : ''}`}>
-            {voice ? (
-              <>
-                <span className="dk-voice-dot" style={{ opacity: voice.state === 'rec' ? 0.4 + Math.min(1, voice.level * 6) : 1 }} />
-                <span className="dk-voice-time">
-                  {voice.state === 'rec'
-                    ? `${Math.floor(voice.seconds / 60)}:${String(voice.seconds % 60).padStart(2, '0')}`
-                    : voice.state === 'pause'
-                      ? 'пауза · жду голос'
-                      : `распознаю… ${voice.waiting || ''}`}
-                </span>
-                {(voice.state === 'rec' || voice.state === 'pause') && (
-                  <>
-                    <MicSelect value={mic} mics={mics} title={micTitle} onFocus={loadMics} onChange={pickMic} current={voice.mic} />
-                    <button title="Пауза / дальше (Ctrl+Пробел)" onClick={toggleVoice}>
-                      {voice.state === 'rec' ? '⏸' : '●'}
-                    </button>
-                    <button title="Готово — дораспознать и закончить" onClick={stopVoice}>
-                      ✓
-                    </button>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <button title="Диктовать с места курсора (Ctrl+Пробел)" onClick={toggleVoice}>
-                  🎤
-                </button>
-                <MicSelect value={mic} mics={mics} title={micTitle} onFocus={loadMics} onChange={pickMic} />
-                <select value={lang} onChange={(e) => setLang(e.target.value)} title="Язык диктовки">
-                  <option value="ru">рус</option>
-                  <option value="ar">араб</option>
-                  <option value="ar-dia">диалект</option>
-                  <option value="en">англ</option>
-                </select>
-              </>
-            )}
-          </span>
-        )}
         {scope?.why === 'отметка' && (
           <button
             className="dk-icon"
@@ -474,6 +407,29 @@ export function NotePane({
           },
         ]}
       />
+      {toolsSlot &&
+        createPortal(
+          <Tools
+            editor={editor}
+            voice={voice}
+            toggleVoice={toggleVoice}
+            stopVoice={stopVoice}
+            mic={mic}
+            mics={mics}
+            micTitle={micTitle}
+            loadMics={loadMics}
+            pickMic={pickMic}
+            lang={lang}
+            setLang={setLang}
+            busy={busy}
+            claude={claude}
+            versions={versionNames}
+            version={note.currentVersion ?? 'оригинал'}
+            pickVersion={pickVersion}
+            setMsg={setMsg}
+          />,
+          toolsSlot,
+        )}
     </div>
   );
 }
@@ -512,5 +468,185 @@ function MicSelect({
       ))}
       {value !== 'mic' && !mics.list.some((m) => m.name === value) && <option value={value}>🎙 {title(value)}</option>}
     </select>
+  );
+}
+
+const LANGS: [string, string][] = [
+  ['ru', 'рус'],
+  ['ar', 'араб'],
+  ['ar-dia', 'диалект'],
+  ['en', 'англ'],
+];
+
+const keep = (e: React.MouseEvent) => e.preventDefault();
+
+/** Кнопка панели: не отнимает фокус у текста — выделение в редакторе остаётся. Отдельным
+ *  компонентом, а не внутри Tools: панель перерисовывается 5 раз в секунду во время записи,
+ *  и кнопка, объявленная внутри, пересоздавалась бы между нажатием и отпусканием. */
+function B({ t, title, on, wide }: { t: React.ReactNode; title: string; on: () => void; wide?: boolean }) {
+  return (
+    <button className={`dk-tool ${wide ? 'wide' : ''}`} title={title} onMouseDown={keep} onClick={on}>
+      {t}
+    </button>
+  );
+}
+
+/** Блок панели инструментов: заголовок сворачивает; что свёрнуто — запоминается. */
+function Block({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+  const [shut, setShut] = useLocalStorage<boolean>(`dk.tools.${id}`, false);
+  return (
+    <section className={`dk-block ${shut ? 'shut' : ''}`}>
+      <button className="dk-block-head" onClick={() => setShut(!shut)}>
+        <span>{title}</span>
+        <span className="dk-caret">{shut ? '▸' : '▾'}</span>
+      </button>
+      {!shut && <div className="dk-block-body">{children}</div>}
+    </section>
+  );
+}
+
+/** Панель инструментов справа: голос, оформление, метки и ссылки, Claude. Кнопки не отнимают
+ *  фокус у текста (mousedown без действия) — выделение в редакторе остаётся. */
+function Tools({
+  editor,
+  voice,
+  toggleVoice,
+  stopVoice,
+  mic,
+  mics,
+  micTitle,
+  loadMics,
+  pickMic,
+  lang,
+  setLang,
+  busy,
+  claude,
+  versions,
+  version,
+  pickVersion,
+  setMsg,
+}: {
+  editor: React.MutableRefObject<LiveEditorHandle | null>;
+  voice: { id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null;
+  toggleVoice: () => void;
+  stopVoice: () => void;
+  mic: string;
+  mics: Mics;
+  micTitle: (name: string) => string;
+  loadMics: () => void;
+  pickMic: (name: string) => void;
+  lang: string;
+  setLang: (l: string) => void;
+  busy: string;
+  claude: (kind: 'clean' | 'connect' | 'translate', label: string, to?: string) => void;
+  versions: string[];
+  version: string;
+  pickVersion: (name: string) => void;
+  setMsg: (m: string) => void;
+}) {
+  const h = () => editor.current;
+  /** Действие над словами — только когда они выделены. */
+  const onWords = (a: Parameters<LiveEditorHandle['run']>[0]) => () => {
+    if (!h()?.selected()) return setMsg('Сначала выделите слова в тексте');
+    setMsg('');
+    h()?.run(a);
+  };
+  const time = voice ? `${Math.floor(voice.seconds / 60)}:${String(voice.seconds % 60).padStart(2, '0')}` : '';
+  const native_ = native.available();
+  return (
+    <div className="dk-tools">
+      {native_ && (
+        <Block id="voice" title="🎤 Голос">
+          <div className={`dk-rec ${voice ? voice.state : ''}`}>
+            {!voice ? (
+              <B wide t={<>● Записать <span className="muted small">Ctrl+Пробел</span></>} title="Диктовать с места курсора" on={toggleVoice} />
+            ) : voice.state === 'wait' ? (
+              <div className="dk-rec-wait">распознаю… {voice.waiting || ''}</div>
+            ) : (
+              <>
+                <B wide t={voice.state === 'rec' ? `⏸ Пауза · ${time}` : `● Дальше · ${time}`} title="Пауза / дальше (Ctrl+Пробел, кнопка на микрофоне)" on={toggleVoice} />
+                <B t="✓" title="Готово — дораспознать и закончить" on={stopVoice} />
+              </>
+            )}
+          </div>
+          {voice?.state === 'rec' && (
+            <div className="dk-level">
+              <span style={{ width: `${Math.min(100, voice.level * 400)}%` }} />
+            </div>
+          )}
+          {voice?.state === 'pause' && <div className="muted small">пауза — заговорите, и запись продолжится сама</div>}
+          <MicSelect value={mic} mics={mics} title={micTitle} onFocus={loadMics} onChange={pickMic} current={voice?.mic} />
+          <div className="dk-seg">
+            {LANGS.map(([k, t]) => (
+              <button key={k} className={lang === k ? 'on' : ''} onMouseDown={keep} onClick={() => setLang(k)} title="Язык диктовки">
+                {t}
+              </button>
+            ))}
+          </div>
+        </Block>
+      )}
+
+      <Block id="format" title="Оформление">
+        <div className="dk-grid">
+          <B t={<b>Ж</b>} title="Жирный (Ctrl+B)" on={() => h()?.wrap('**')} />
+          <B t={<i>К</i>} title="Курсив (Ctrl+I)" on={() => h()?.wrap('*')} />
+          <B t={<u>Ч</u>} title="Подчёркнутый (Ctrl+U)" on={() => h()?.wrap('<u>', '</u>')} />
+          <B t={<s>З</s>} title="Зачёркнутый" on={() => h()?.wrap('~~')} />
+          <B t={<mark>М</mark>} title="Маркер" on={() => h()?.wrap('==')} />
+          <B t={<code>{'<>'}</code>} title="Код" on={() => h()?.wrap('`')} />
+          <B t="H1" title="Заголовок 1" on={() => h()?.prefixLine('# ')} />
+          <B t="H2" title="Заголовок 2" on={() => h()?.prefixLine('## ')} />
+          <B t="H3" title="Заголовок 3" on={() => h()?.prefixLine('### ')} />
+          <B t="•" title="Список" on={() => h()?.prefixLine('- ')} />
+          <B t="1." title="Нумерованный список" on={() => h()?.prefixLine('1. ')} />
+          <B t="☐" title="Задача" on={() => h()?.prefixLine('- [ ] ')} />
+          <B t="❝" title="Цитата" on={() => h()?.prefixLine('> ')} />
+          <B t="💡" title="Выноска (callout)" on={() => h()?.replaceSelection((sel) => `> [!note] Заметка\n> ${sel || 'текст'}\n`)} />
+          <B t="—" title="Черта-разделитель" on={() => h()?.insertAtCursor('\n\n---\n\n')} />
+          <B t="%%" title="Скрытый текст (виден только в правке)" on={() => h()?.wrap('%%')} />
+        </div>
+      </Block>
+
+      <Block id="links" title="Метки и ссылки">
+        <div className="dk-list-tools">
+          <B wide t="[[ Ссылка" title="Вставить [[ и выбрать заметку из подсказки" on={() => h()?.startLink()} />
+          <B wide t="🔗 Сослаться" title="Выделенные слова — ссылкой на заметку или её фрагмент" on={onWords('link')} />
+          <B wide t="⚓ Метка" title="Поставить метку: на выделенные слова можно будет сослаться" on={onWords('anchor')} />
+          <B wide t="💬 Коммент." title="Прокомментировать выделенные слова — заметка на полях" on={onWords('comment')} />
+          <B wide t="📚 В набор" title="Добавить выделенные слова в набор (сборку кусков разных заметок)" on={onWords('set')} />
+          <B wide t="＋ Кусок" title="Отложить этот кусок и выделить следующий: метка ляжет на все куски" on={onWords('piece')} />
+          <B wide t="✕ Снять" title="Убрать метку с выделенных слов" on={onWords('unanchor')} />
+          <B wide t="# Тег" title="Вставить # и выбрать тег" on={() => h()?.insertAtCursor('#')} />
+        </div>
+      </Block>
+
+      {native_ && (
+        <Block id="claude" title="✨ Claude">
+          <div className="dk-list-tools">
+            <B wide t="✨ Очистить" title="Исправить ослышки и пунктуацию — новая версия" on={() => !busy && claude('clean', 'чищу…')} />
+            <B wide t="≡ Связно" title="Свести надиктованное в связный текст — новая версия" on={() => !busy && claude('connect', 'собираю…')} />
+          </div>
+          <div className="dk-seg">
+            <span className="muted small">перевод:</span>
+            <button onMouseDown={keep} onClick={() => !busy && claude('translate', 'перевожу…', 'ru')}>рус</button>
+            <button onMouseDown={keep} onClick={() => !busy && claude('translate', 'перевожу…', 'ar')}>араб</button>
+            <button onMouseDown={keep} onClick={() => !busy && claude('translate', 'перевожу…', 'en')}>англ</button>
+          </div>
+          {busy && <div className="dk-busy">{busy}</div>}
+          {versions.length > 1 && (
+            <>
+              <div className="muted small">версии текста:</div>
+              <div className="dk-seg dk-versions">
+                {versions.map((v) => (
+                  <button key={v} className={v === version ? 'on' : ''} onMouseDown={keep} onClick={() => pickVersion(v)}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </Block>
+      )}
+    </div>
   );
 }

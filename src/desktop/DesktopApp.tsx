@@ -276,6 +276,7 @@ export default function DesktopApp() {
 
   // --- быстрые заметки: ★ и кнопка на микрофоне (команды окна, ./native.ts) ---
   const [recordNew, setRecordNew] = useState<string | null>(null);
+  const [toolsSlot, setToolsSlot] = useState<HTMLElement | null>(null);
   /** Новая заметка в папке «Быстрые заметки» (нет такой — завести). */
   function quickNote(record: boolean) {
     const folder = live.find((n) => n.type === 'folder' && n.title.trim().toLowerCase() === 'быстрые заметки');
@@ -458,6 +459,7 @@ export default function DesktopApp() {
                 scope={scope.get(note.id)}
                 autoRecord={recordNew === note.id}
                 onVoiceLeft={(vid, nid) => leftVoice.current.set(vid, nid)}
+                toolsSlot={toolsSlot}
                 picking={!!picking && picking.tab === cur?.key}
                 onDelete={() => {
                   actions.remove(note.id);
@@ -476,6 +478,8 @@ export default function DesktopApp() {
         </main>
 
         <aside className="dk-right">
+          {/* панель инструментов открытой заметки: её рисует NotePane (createPortal) */}
+          <div className="dk-tools-slot" ref={setToolsSlot} />
           <div className="dk-right-tabs">
             <button className={rightTab === 'note' ? 'on' : ''} onClick={() => setRightTab('note')}>
               Заметка

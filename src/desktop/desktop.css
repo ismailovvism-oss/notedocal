@@ -10,8 +10,11 @@
   height: 100vh;
   background: var(--bg);
 }
-@media (max-width: 1100px) {
-  .dk { grid-template-columns: 260px minmax(0, 1fr); }
+@media (max-width: 1150px) {
+  .dk { grid-template-columns: 240px minmax(0, 1fr) 250px; }
+}
+@media (max-width: 860px) {
+  .dk { grid-template-columns: 220px minmax(0, 1fr); }
   .dk-right { display: none; }
 }
 
@@ -276,3 +279,67 @@
 .dk-voice-time { font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0 4px; }
 .dk-msg { color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 4px 10px; margin-bottom: 8px; }
 .dk-mic { max-width: 220px; }
+
+/* --- панель инструментов справа (NotePane → Tools) --- */
+.dk-tools { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.dk-block { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.dk-block-head {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 6px 10px;
+}
+.dk-block-body { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; }
+.dk-tool {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  min-height: 30px;
+  border-radius: 7px;
+  padding: 3px 6px;
+}
+.dk-tool:hover { border-color: var(--accent); }
+.dk-tool.wide { text-align: start; padding: 4px 10px; }
+.dk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 4px; }
+.dk-list-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.dk-list-tools .dk-tool.wide { padding: 4px 8px; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dk-rec { display: flex; gap: 4px; }
+.dk-rec .dk-tool.wide { flex: 1; font-weight: 600; }
+.dk-rec.rec .dk-tool.wide { background: #c0392b; border-color: #c0392b; color: #fff; }
+.dk-rec.pause .dk-tool.wide { background: #e67e22; border-color: #e67e22; color: #fff; }
+.dk-rec-wait { color: var(--accent); font-size: 13px; padding: 6px 2px; }
+.dk-level { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+.dk-level span { display: block; height: 100%; background: #c0392b; transition: width 0.15s; }
+.dk-seg { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.dk-seg button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.dk-seg button.on { background: var(--accent-soft); color: var(--text); border-color: var(--accent); }
+.dk-tools .dk-mic {
+  width: 100%;
+  max-width: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 6px;
+}

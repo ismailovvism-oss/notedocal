@@ -2,6 +2,7 @@
 // (src/components/LiveEditor.tsx грузится лениво через LazyLiveEditor.tsx).
 
 import type { KeyBinding } from '@codemirror/view';
+import type { FragmentAction } from '../lib/kb/fragmentActions';
 
 /** Что карточка может сделать с полем правки: кнопки оформления над ним. */
 export interface LiveEditorHandle {
@@ -17,6 +18,13 @@ export interface LiveEditorHandle {
   replaceText: (find: string, replace: string) => boolean;
   /** Текст вокруг строки: знак перед ней и после (для пробелов при вставке). */
   around: (find: string) => { before: string; after: string } | null;
+  /** Действие над выделенными словами (метка, ссылка, комментарий, набор, кусок) — как с панели
+   *  над выделением; для панели инструментов окна «База». */
+  run: (action: FragmentAction | 'piece') => void;
+  /** Вставить `[[` у курсора и открыть подсказку названий. */
+  startLink: () => void;
+  /** Выделенный текст (пусто — ничего не выделено). */
+  selected: () => string;
 }
 
 export interface LiveEditorProps {

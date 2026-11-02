@@ -8,7 +8,7 @@ import { EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
-import { autocompletion, completionKeymap, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import TurndownService from 'turndown';
 import { renderMarkdown } from '../lib/markdown';
 import { addPiece, clearPieces, deleteSkippingTags, livePreview, pendingPieces, setLiveCtx } from '../lib/kb/livePreview';
@@ -212,6 +212,14 @@ export default function LiveEditor({
           view.dispatch({ changes: { from: at, to: at + find.length, insert: replace }, filter: false });
           return true;
         },
+        run: (action) => void actRef.current(action),
+        selected: () => view.state.selection.ranges.map((r) => view.state.sliceDoc(r.from, r.to)).join(' ').trim(),
+        startLink: () => {
+          const at = view.state.selection.main.to;
+          view.dispatch({ changes: { from: at, insert: '[[' }, selection: { anchor: at + 2 } });
+          view.focus();
+          startCompletion(view);
+        },
         around: (find) => {
           const doc = view.state.doc.toString();
           const at = doc.indexOf(find);
@@ -345,6 +353,8 @@ export default function LiveEditor({
     });
   }
 
+  const actRef = useRef<(a: FragmentAction | 'piece') => Promise<void>>(async () => {});
+  actRef.current = act;
   async function act(action: FragmentAction | 'piece') {
     const view = viewRef.current;
     if (!view) return;
