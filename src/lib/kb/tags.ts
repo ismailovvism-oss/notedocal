@@ -150,8 +150,15 @@ export interface Facets {
 }
 
 /** Счётчики фасетов и подходящие заметки — всё за один проход по заметкам. */
-export function computeFacets(index: KbIndex, cards: Map<string, TagCard>, sel: Selection): Facets {
+export function computeFacets(
+  index: KbIndex,
+  cards: Map<string, TagCard>,
+  sel: Selection,
+  /** Только эти заметки (окно «База» прячет хозяйство — src/lib/kb/scope.ts). */
+  only?: Set<string>,
+): Facets {
   const byNote = tagsByNote(index, cards);
+  if (only) for (const id of [...byNote.keys()]) if (!only.has(id)) byNote.delete(id);
   const all = new Map<string, string>(); // тег → как пишется (вместе с предками по пути)
   const addPath = (t: string) => {
     const parts = t.split('/');

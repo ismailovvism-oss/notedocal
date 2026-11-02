@@ -139,6 +139,9 @@ export interface Note {
   dictations?: { id: string; path: string; type: string; lang: string; at: number }[];
   /** Что распознано по диктовкам (id → текст): поле правки, открытое со старым текстом, подставит сам. */
   voiceResults?: Record<string, string>;
+  /** Показывать ли в базе знаний (окно «База»): true/false — решение хозяина, сильнее правил
+   *  по роли и папке; нет поля — по правилам (src/lib/kb/scope.ts). */
+  inBase?: boolean;
   createdAt: number;
   updatedAt: number;
   /** Мягкое удаление (надгробие) — чтобы удаление доезжало до других устройств. */

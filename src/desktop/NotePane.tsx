@@ -11,6 +11,7 @@ import { useKb } from '../lib/kb/ui';
 import { dropEmptyAnchors } from '../lib/kb/edit';
 import { checkNewTag, tagCards } from '../lib/kb/tags';
 import { OWN_KEYS, fieldsOf, schemas } from '../lib/kb/schema';
+import type { ScopeWhy } from '../lib/kb/scope';
 
 const PropsEditor = lazy(() => import('../components/PropsEdit').then((m) => ({ default: m.PropsEditor })));
 const SchemaEditor = lazy(() => import('../components/PropsEdit').then((m) => ({ default: m.SchemaEditor })));
@@ -25,12 +26,15 @@ export function NotePane({
   note,
   focus,
   allNotes,
+  scope,
   picking,
   onDelete,
 }: {
   note: Note;
   focus?: PaneFocus;
   allNotes: Note[];
+  /** Видна ли заметка в Базе и почему (src/lib/kb/scope.ts). */
+  scope?: ScopeWhy;
   /** Эта заметка открыта, чтобы выделить в ней слова для ссылки из другой. */
   picking: boolean;
   onDelete: () => void;
@@ -81,12 +85,14 @@ export function NotePane({
   );
 
   function commitTitle() {
-    const t = title.trim() || 'Без названия';
-    if (t === note.title) return setTitle(t);
+    // пустое так и остаётся пустым: «Без названия» в базе мешало бы ссылкам и поиску
+    const t = title.trim();
+    if (t === (note.title ?? '').trim()) return setTitle(note.title);
     // ссылки на старое название переписать до сохранения: указатель ещё знает его
-    kb.renamed(note.id, note.title, t);
+    // стёрли название — ссылки на заметку не трогаем: на пустое имя сослаться нельзя
+    if (t && note.title) kb.renamed(note.id, note.title, t);
     kb.updateNote(note.id, { title: t });
-    if (note.type === 'tag') kb.renameTag(note.title, t);
+    if (t && note.type === 'tag') kb.renameTag(note.title, t);
   }
 
   const tags = useMemo(() => note.tags ?? [], [note.tags]);
@@ -135,7 +141,28 @@ export function NotePane({
             </option>
           ))}
         </select>
+        {scope && !scope.shown && (
+          <span className="dk-hidden-note small" title="В списке, поиске и тегах Базы её не видно">
+            служебная{scope.why !== 'отметка' ? ` · ${scope.why}` : ''}
+          </span>
+        )}
         <span className="dk-spacer" />
+        {scope?.why === 'отметка' && (
+          <button
+            className="dk-icon"
+            title="Вернуть как по правилам (по роли и папке)"
+            onClick={() => kb.updateNote(note.id, { inBase: undefined })}
+          >
+            ↺
+          </button>
+        )}
+        <button
+          className={`dk-icon ${scope && !scope.shown ? '' : 'on'}`}
+          title={scope && !scope.shown ? 'Показывать в Базе' : 'Спрятать из Базы (останется в notedocal, ссылки работают)'}
+          onClick={() => kb.updateNote(note.id, { inBase: !(scope?.shown ?? true) })}
+        >
+          {scope && !scope.shown ? '🙈' : '👁'}
+        </button>
         <button className={`dk-icon ${propsOpen ? 'on' : ''}`} title="Свойства" onClick={() => setPropsOpen((v) => !v)}>
           ⚙
         </button>

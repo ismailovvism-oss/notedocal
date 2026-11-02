@@ -16,6 +16,7 @@ import { planTagRename, computeFacets, searchTags, tagCards, toggleTag, type Sel
 import { normTag } from '../lib/kb/syntax';
 import { linkText } from '../lib/kb/edit';
 import { searchNotes } from '../lib/kb/search';
+import { SERVICE_FOLDERS, folderTitles, scopeOf, type ScopeWhy } from '../lib/kb/scope';
 import { TYPE_BADGE } from '../lib/noteTypes';
 import { FacetBar } from '../components/Facets';
 import { Backlinks } from '../components/Backlinks';
@@ -49,6 +50,23 @@ export default function DesktopApp() {
     return () => clearTimeout(t);
   }, [index]);
   const actions = useListActions(setNotes);
+
+  // Рабочее и служебное (src/lib/kb/scope.ts): хозяйство — здоровье, документы, контакты —
+  // в списке, поиске и тегах не видно, пока не включено «показать служебное»
+  const [hiddenFolders, setHiddenFolders] = useLocalStorage<string[]>('dk.hiddenFolders', SERVICE_FOLDERS);
+  const [showAll, setShowAll] = useLocalStorage<boolean>('dk.showAll', false);
+  const folders = useMemo(() => folderTitles(relations, index.byId), [relations, index]);
+  const scope = useMemo(() => {
+    const why = new Map<string, ScopeWhy>();
+    for (const n of live) why.set(n.id, scopeOf(n, folders.get(n.id), hiddenFolders));
+    return why;
+  }, [live, folders, hiddenFolders]);
+  const shown = useMemo(() => new Set([...scope].filter(([, w]) => w.shown).map(([id]) => id)), [scope]);
+  // папки верхнего уровня — их можно прятать и показывать
+  const topFolders = useMemo(() => {
+    const hasParent = new Set(relations.filter((r) => !r.deleted && r.type === 'child').map((r) => r.to));
+    return live.filter((n) => n.type === 'folder' && !hasParent.has(n.id)).map((n) => n.title).filter(Boolean).sort();
+  }, [live, relations]);
 
   // --- вкладки ---
   const [tabs, setTabs] = useLocalStorage<Tab[]>('dk.tabs', []);
@@ -225,6 +243,13 @@ export default function DesktopApp() {
       <div className="dk">
         <Sidebar
           notes={live}
+          scope={showAll ? null : shown}
+          hiddenCount={live.length - shown.size}
+          showAll={showAll}
+          setShowAll={setShowAll}
+          topFolders={topFolders}
+          hiddenFolders={hiddenFolders}
+          setHiddenFolders={setHiddenFolders}
           status={status}
           activeId={target?.id}
           searchRef={searchRef}
@@ -277,6 +302,7 @@ export default function DesktopApp() {
                 note={note}
                 focus={target}
                 allNotes={live}
+                scope={scope.get(note.id)}
                 picking={!!picking && picking.tab === cur?.key}
                 onDelete={() => {
                   actions.remove(note.id);
@@ -337,6 +363,13 @@ const STATUS: Record<BridgeStatus, string> = {
 /** Левая колонка: поиск, отбор по тегам, список. */
 function Sidebar({
   notes,
+  scope,
+  hiddenCount,
+  showAll,
+  setShowAll,
+  topFolders,
+  hiddenFolders,
+  setHiddenFolders,
   status,
   activeId,
   searchRef,
@@ -345,6 +378,14 @@ function Sidebar({
   onCreate,
 }: {
   notes: Note[];
+  /** Видимые заметки; null — показывать всё. */
+  scope: Set<string> | null;
+  hiddenCount: number;
+  showAll: boolean;
+  setShowAll: (v: boolean) => void;
+  topFolders: string[];
+  hiddenFolders: string[];
+  setHiddenFolders: (v: string[]) => void;
   status: BridgeStatus;
   activeId?: string;
   searchRef: React.RefObject<HTMLInputElement | null>;
@@ -364,12 +405,22 @@ function Sidebar({
   useEffect(() => {
     if (focusTag) setSel(toggleTag(new Map(), normTag(focusTag.tag)));
   }, [focusTag]);
-  const facets = useMemo(() => computeFacets(kb.index, cards, sel), [kb.index, cards, sel]);
+  const facets = useMemo(() => computeFacets(kb.index, cards, sel, scope ?? undefined), [kb.index, cards, sel, scope]);
+  const [foldersOpen, setFoldersOpen] = useState(false);
+  const isHidden = (f: string) => hiddenFolders.some((x) => x.toLowerCase() === f.toLowerCase());
   const filtering = [...sel.values()].some((s) => s.size);
   const [shown, setShown] = useState(PAGE);
   useEffect(() => setShown(PAGE), [query, sel]);
 
-  const pool = useMemo(() => (filtering ? facets.matching.map((id) => kb.index.byId.get(id)).filter((n): n is Note => !!n) : notes), [filtering, facets, notes, kb.index]);
+  const pool = useMemo(
+    () =>
+      filtering
+        ? facets.matching.map((id) => kb.index.byId.get(id)).filter((n): n is Note => !!n)
+        : scope
+          ? notes.filter((n) => scope.has(n.id))
+          : notes,
+    [filtering, facets, notes, kb.index, scope],
+  );
   const found = useMemo(() => (query ? searchNotes(pool, query, shown) : null), [query, pool, shown]);
   const list = useMemo(
     () => (found ? found.hits.map((h) => h.note) : [...pool].filter((n) => n.type !== 'folder').sort((a, b) => b.updatedAt - a.updatedAt)),
@@ -431,6 +482,33 @@ function Sidebar({
           </button>
         )}
       </div>
+      <div className="dk-scope small">
+        <label title="Здоровье, документы, контакты, места, пароли — то, что заводит секретарь">
+          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> показать служебное
+          {!showAll && hiddenCount > 0 ? <span className="muted"> · скрыто {hiddenCount}</span> : null}
+        </label>
+        <button className={`dk-icon ${foldersOpen ? 'on' : ''}`} title="Какие папки — служебные" onClick={() => setFoldersOpen((v) => !v)}>
+          ⚙
+        </button>
+      </div>
+      {foldersOpen && (
+        <div className="dk-folders small">
+          <div className="muted">Служебные папки — их заметки не видны в Базе:</div>
+          {topFolders.map((f) => (
+            <label key={f}>
+              <input
+                type="checkbox"
+                checked={isHidden(f)}
+                onChange={(e) =>
+                  setHiddenFolders(e.target.checked ? [...hiddenFolders, f] : hiddenFolders.filter((x) => x.toLowerCase() !== f.toLowerCase()))
+                }
+              />{' '}
+              {f}
+            </label>
+          ))}
+          <div className="muted">Отдельную заметку можно показать или спрятать кнопкой 👁 у неё самой.</div>
+        </div>
+      )}
       <div className="dk-status small muted">{STATUS[status]}</div>
     </aside>
   );
