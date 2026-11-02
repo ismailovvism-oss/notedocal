@@ -1,9 +1,9 @@
 // Окно «База» — база знаний на компьютере (docs/ЗАМЕТКИ.md, раздел 10). Живёт внутри настольной
 // программы ~/projects/apps/zametki (baza.py), данные — через мост секретаря (./bridge.ts).
 //
-// Раскладка как в Obsidian, без всплывающих окон: слева поиск, отбор по тегам и список; в середине
+// Раскладка как в Obsidian, без всплывающих окон: слева поиск и дерево папок (./Tree.tsx); в середине
 // вкладки с открытыми заметками (у каждой — история «назад/вперёд»), заметка сразу правится;
-// справа — оглавление, кто ссылается сюда и комментарии. Ядро (src/lib/kb) и редактор — те же,
+// справа две вкладки — «Заметка» (оглавление, комментарии, кто ссылается сюда) и «Теги» (отбор). Ядро (src/lib/kb) и редактор — те же,
 // что у приложения на телефоне.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -12,13 +12,14 @@ import { uid, useListActions, useLocalStorage, visible } from '../lib/storage';
 import { persistParse, useNotesStore } from '../lib/notesStore';
 import { buildIndex, planRename } from '../lib/kb/index';
 import { KbContext, useCommentRefs, useKb, type KbApi, type KbFragment, type KbPicked } from '../lib/kb/ui';
-import { planTagRename, computeFacets, searchTags, tagCards, toggleTag, type Selection } from '../lib/kb/tags';
+import { OTHER, planTagRename, computeFacets, searchTags, selectedTags, tagCards, toggleTag, type Facets, type Selection } from '../lib/kb/tags';
 import { normTag } from '../lib/kb/syntax';
 import { linkText } from '../lib/kb/edit';
 import { searchNotes } from '../lib/kb/search';
 import { SERVICE_FOLDERS, folderTitles, scopeOf, type ScopeWhy } from '../lib/kb/scope';
 import { TYPE_BADGE } from '../lib/noteTypes';
-import { FacetBar } from '../components/Facets';
+import { TagTree } from '../components/Facets';
+import { FolderTree } from './Tree';
 import { Backlinks } from '../components/Backlinks';
 import { CommentComposer, LinkPicker, SetPicker } from '../components/KbDialogs';
 import { NotePane, type PaneFocus } from './NotePane';
@@ -69,6 +70,22 @@ export default function DesktopApp() {
     return live.filter((n) => n.type === 'folder' && !hasParent.has(n.id)).map((n) => n.title).filter(Boolean).sort();
   }, [live, relations]);
 
+  const isService = useCallback(
+    (fid: string) => {
+      const hidden = new Set(hiddenFolders.map((x) => x.trim().toLowerCase()));
+      return [index.byId.get(fid)?.title ?? '', ...(folders.get(fid) ?? [])].some((t) => hidden.has(t.trim().toLowerCase()));
+    },
+    [index, folders, hiddenFolders],
+  );
+  const relActions = useListActions(setRelations);
+  const [open, setOpen] = useLocalStorage<string[]>('dk.open', []);
+
+  // Отбор по тегам — во вкладке «Теги» справа; отобранное — слева вместо дерева
+  const cards = useMemo(() => tagCards(live), [live]);
+  const [sel, setSel] = useState<Selection>(new Map());
+  const facets = useMemo(() => computeFacets(index, cards, sel, showAll ? undefined : shown), [index, cards, sel, showAll, shown]);
+  const [rightTab, setRightTab] = useLocalStorage<'note' | 'tags'>('dk.right', 'note');
+
   // --- вкладки ---
   const [tabs, setTabs] = useLocalStorage<Tab[]>('dk.tabs', []);
   const [active, setActive] = useLocalStorage<string>('dk.active', '');
@@ -108,7 +125,6 @@ export default function DesktopApp() {
     | null
   >(null);
   const [picking, setPicking] = useState<{ tab: string; id: string; resolve: (t: KbPicked | null) => void } | null>(null);
-  const [focusTag, setFocusTag] = useState<{ tag: string; n: number } | null>(null);
 
   const kb = useMemo<KbApi>(
     () => ({
@@ -168,11 +184,14 @@ export default function DesktopApp() {
         );
         return patches.length;
       },
-      openTag: (tag) => setFocusTag((f) => ({ tag, n: (f?.n ?? 0) + 1 })),
+      openTag: (tag) => {
+        setSel(toggleTag(new Map(), normTag(tag)));
+        setRightTab('tags');
+      },
       updateNote: (id, patch) => actions.update(id, patch),
       removeNote: (id) => actions.remove(id),
     }),
-    [index, actions, setNotes, picking, live, go, setTabs, setActive],
+    [index, actions, setNotes, picking, live, go, setTabs, setActive, setRightTab],
   );
 
   function freeTitle(base: string) {
@@ -206,12 +225,51 @@ export default function DesktopApp() {
     }
     setDialog(null);
   }
-  function createNote(inNew = false) {
+  /** Положить в папку (null — никуда). */
+  function linkTo(parent: string | null, id: string, now: number) {
+    if (!parent) return;
+    relActions.add({ id: uid(), from: parent, to: id, type: 'child', position: 0, createdAt: now, updatedAt: now });
+    setOpenFolder(parent);
+  }
+  /** Раскрыть папку в дереве (новое в ней должно быть видно). */
+  const setOpenFolder = (id: string) => setOpen((o) => (o.includes(id) ? o : [...o, id]));
+  function createNote(inNew = false, parent: string | null = null) {
     const now = Date.now();
     const id = uid();
     actions.add({ id, title: '', body: '', type: 'note', date: null, createdAt: now, updatedAt: now });
+    linkTo(parent, id, now);
     go({ id }, inNew);
     setTimeout(() => document.querySelector<HTMLInputElement>('.dk-title')?.focus(), 50);
+  }
+  function createFolder(parent: string | null) {
+    const name = prompt('Название папки')?.trim();
+    if (!name) return;
+    const now = Date.now();
+    const id = uid();
+    actions.add({ id, title: name, body: '', type: 'folder', date: null, createdAt: now, updatedAt: now });
+    linkTo(parent, id, now);
+  }
+  /** Перенести заметку или папку из папки from в to (null — корень). */
+  function move(id: string, from: string | null, to: string | null) {
+    if (from === to) return;
+    const live = relations.filter((r) => !r.deleted && r.type === 'child');
+    // папку нельзя положить в саму себя или в свою подпапку
+    if (to) {
+      const up = new Map<string, string[]>();
+      for (const r of live) up.set(r.to, [...(up.get(r.to) ?? []), r.from]);
+      const stack = [to];
+      const seen = new Set<string>();
+      while (stack.length) {
+        const x = stack.pop()!;
+        if (x === id) return;
+        if (seen.has(x)) continue;
+        seen.add(x);
+        stack.push(...(up.get(x) ?? []));
+      }
+    }
+    const old = from ? live.find((r) => r.from === from && r.to === id) : undefined;
+    if (old) relActions.remove(old.id);
+    if (to && !live.some((r) => r.from === to && r.to === id)) linkTo(to, id, Date.now());
   }
 
   // --- клавиши: как в Obsidian ---
@@ -254,9 +312,16 @@ export default function DesktopApp() {
           status={status}
           activeId={target?.id}
           searchRef={searchRef}
-          focusTag={focusTag}
+          relations={relations}
+          isService={isService}
+          sel={sel}
+          setSel={setSel}
+          facets={facets}
           onOpen={(id, inNew) => go({ id }, inNew)}
-          onCreate={() => createNote()}
+          onCreate={(parent, kind) => (kind === 'folder' ? createFolder(parent) : createNote(false, parent))}
+          onMove={move}
+          open={open}
+          setOpen={setOpen}
         />
 
         <main className="dk-main">
@@ -321,7 +386,28 @@ export default function DesktopApp() {
           </div>
         </main>
 
-        <aside className="dk-right">{note && <Context note={note} />}</aside>
+        <aside className="dk-right">
+          <div className="dk-right-tabs">
+            <button className={rightTab === 'note' ? 'on' : ''} onClick={() => setRightTab('note')}>
+              Заметка
+            </button>
+            <button className={rightTab === 'tags' ? 'on' : ''} onClick={() => setRightTab('tags')}>
+              Теги{selectedTags(sel).length ? ` · ${selectedTags(sel).length}` : ''}
+            </button>
+          </div>
+          {rightTab === 'note' ? (
+            note && <Context note={note} />
+          ) : (
+            <TagsPanel facets={facets} sel={sel} setSel={setSel} cards={cards} onCard={(tag) => {
+              const c = cards.get(tag.toLowerCase());
+              if (c) return go({ id: c.note.id });
+              const now = Date.now();
+              const id = uid();
+              actions.add({ id, type: 'tag', title: tag, body: '', date: null, createdAt: now, updatedAt: now });
+              go({ id });
+            }} />
+          )}
+        </aside>
       </div>
 
       {dialog?.kind === 'link' && (
@@ -375,9 +461,16 @@ function Sidebar({
   status,
   activeId,
   searchRef,
-  focusTag,
+  relations,
+  isService,
+  sel,
+  setSel,
+  facets,
   onOpen,
   onCreate,
+  onMove,
+  open,
+  setOpen,
 }: {
   notes: Note[];
   /** Видимые заметки; null — показывать всё. */
@@ -391,9 +484,16 @@ function Sidebar({
   status: BridgeStatus;
   activeId?: string;
   searchRef: React.RefObject<HTMLInputElement | null>;
-  focusTag: { tag: string; n: number } | null;
+  relations: Relation[];
+  isService: (folderId: string) => boolean;
+  sel: Selection;
+  setSel: (s: Selection) => void;
+  facets: Facets;
   onOpen: (id: string, inNew: boolean) => void;
-  onCreate: () => void;
+  onCreate: (parent: string | null, kind: 'note' | 'folder') => void;
+  onMove: (id: string, from: string | null, to: string | null) => void;
+  open: string[];
+  setOpen: React.Dispatch<React.SetStateAction<string[]>>;
 }) {
   const kb = useKb()!;
   const [q, setQ] = useState('');
@@ -402,15 +502,10 @@ function Sidebar({
     const t = setTimeout(() => setQuery(q.trim()), 200);
     return () => clearTimeout(t);
   }, [q]);
-  const cards = useMemo(() => tagCards(notes), [notes]);
-  const [sel, setSel] = useState<Selection>(new Map());
-  useEffect(() => {
-    if (focusTag) setSel(toggleTag(new Map(), normTag(focusTag.tag)));
-  }, [focusTag]);
-  const facets = useMemo(() => computeFacets(kb.index, cards, sel, scope ?? undefined), [kb.index, cards, sel, scope]);
   const [foldersOpen, setFoldersOpen] = useState(false);
   const isHidden = (f: string) => hiddenFolders.some((x) => x.toLowerCase() === f.toLowerCase());
-  const filtering = [...sel.values()].some((s) => s.size);
+  const chosen = selectedTags(sel);
+  const filtering = chosen.length > 0;
   const [shown, setShown] = useState(PAGE);
   useEffect(() => setShown(PAGE), [query, sel]);
 
@@ -424,6 +519,8 @@ function Sidebar({
     [filtering, facets, notes, kb.index, scope],
   );
   const found = useMemo(() => (query ? searchNotes(pool, query, shown) : null), [query, pool, shown]);
+  // поиск или отбор по тегам — плоский список; иначе дерево папок
+  const flat = found || filtering;
   const list = useMemo(
     () => (found ? found.hits.map((h) => h.note) : [...pool].filter((n) => n.type !== 'folder').sort((a, b) => b.updatedAt - a.updatedAt)),
     [found, pool],
@@ -443,47 +540,74 @@ function Sidebar({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && list[0]) onOpen(list[0].id, e.ctrlKey);
+            if (e.key === 'Enter' && found && list[0]) onOpen(list[0].id, e.ctrlKey);
+            if (e.key === 'Escape') setQ('');
           }}
         />
-        <button className="dk-icon" title="Новая заметка (Ctrl+N)" onClick={onCreate}>
+        <button className="dk-icon" title="Новая заметка (Ctrl+N)" onClick={() => onCreate(null, 'note')}>
           ✎
         </button>
       </div>
-      <FacetBar facets={facets.facets} sel={sel} setSel={setSel} search={(s) => searchTags(kb.index, cards, s)} />
-      <div className="dk-count muted small">
-        {found ? `найдено: ${total}` : filtering ? `по тегам: ${total}` : `заметок: ${total}`}
-      </div>
-      <div className="dk-list">
-        {list.slice(0, shown).map((n) => {
-          const h = hit.get(n.id);
-          const t = n.type ?? 'note';
-          return (
-            <button
-              key={n.id}
-              className={`dk-row ${n.id === activeId ? 'on' : ''}`}
-              onClick={(e) => onOpen(n.id, e.ctrlKey || e.metaKey)}
-              onAuxClick={(e) => e.button === 1 && onOpen(n.id, true)}
-              dir="auto"
-            >
-              <span className="dk-row-title">
-                {t !== 'note' && <span className={`type-badge type-${t}`}>{TYPE_BADGE[t]}</span>}
-                {n.title || 'Без названия'}
-              </span>
-              {h?.snippet && (
-                <span className="dk-snippet">
-                  <Marked text={h.snippet} marks={h.marks} />
-                </span>
-              )}
+      {filtering && (
+        <div className="dk-chosen">
+          {chosen.map((t) => (
+            <button key={t} className="kb-tag" title="Убрать из отбора" onClick={() => setSel(toggleTag(sel, t))}>
+              #{t} ×
             </button>
-          );
-        })}
-        {total > shown && (
-          <button className="btn btn-small dk-more" onClick={() => setShown((x) => x + PAGE)}>
-            Ещё {total - shown}
+          ))}
+          <button className="link-btn small" onClick={() => setSel(new Map())}>
+            сбросить
           </button>
-        )}
-      </div>
+        </div>
+      )}
+      {flat ? (
+        <>
+          <div className="dk-count muted small">{found ? `найдено: ${total}` : `по тегам: ${total}`}</div>
+          <div className="dk-list">
+            {list.slice(0, shown).map((n) => {
+              const h = hit.get(n.id);
+              const t = n.type ?? 'note';
+              return (
+                <button
+                  key={n.id}
+                  className={`dk-row ${n.id === activeId ? 'on' : ''}`}
+                  onClick={(e) => onOpen(n.id, e.ctrlKey || e.metaKey)}
+                  onAuxClick={(e) => e.button === 1 && onOpen(n.id, true)}
+                  dir="auto"
+                >
+                  <span className="dk-row-title">
+                    {t !== 'note' && <span className={`type-badge type-${t}`}>{TYPE_BADGE[t]}</span>}
+                    {n.title || 'Без названия'}
+                  </span>
+                  {h?.snippet && (
+                    <span className="dk-snippet">
+                      <Marked text={h.snippet} marks={h.marks} />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            {total > shown && (
+              <button className="btn btn-small dk-more" onClick={() => setShown((x) => x + PAGE)}>
+                Ещё {total - shown}
+              </button>
+            )}
+          </div>
+        </>
+      ) : (
+        <FolderTree
+          notes={notes}
+          relations={relations}
+          visible={scope}
+          isService={isService}
+          activeId={activeId}
+          onOpen={onOpen}
+          onCreate={onCreate}
+          onMove={onMove}
+          open={open}
+          setOpen={setOpen}
+        />
+      )}
       <div className="dk-scope small">
         <label title="Здоровье, документы, контакты, места, пароли — то, что заводит секретарь">
           <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> показать служебное
@@ -513,6 +637,57 @@ function Sidebar({
       )}
       <div className="dk-status small muted">{STATUS[status]}</div>
     </aside>
+  );
+}
+
+/** Вкладка «Теги» справа: дерево по фасетам с числами; галочка — в отбор (список — слева). */
+function TagsPanel({
+  facets,
+  sel,
+  setSel,
+  cards,
+  onCard,
+}: {
+  facets: Facets;
+  sel: Selection;
+  setSel: (s: Selection) => void;
+  cards: ReturnType<typeof tagCards>;
+  onCard: (tag: string) => void;
+}) {
+  const kb = useKb()!;
+  const [q, setQ] = useState('');
+  const found = q.trim() ? searchTags(kb.index, cards, q) : [];
+  const rename = (tag: string) => {
+    const next = prompt(`Новое имя тега «${tag}».\nЕсли такой тег уже есть — теги сольются.`, tag);
+    if (next && normTag(next).toLowerCase() !== tag.toLowerCase()) kb.renameTag(tag, normTag(next));
+  };
+  return (
+    <div className="dk-tags-panel">
+      <input className="dk-search" placeholder="🔍 тег или синоним…" value={q} onChange={(e) => setQ(e.target.value)} dir="auto" />
+      {found.length > 0 && (
+        <div className="dk-chosen">
+          {found.map((t) => (
+            <button
+              key={t}
+              className="kb-tag"
+              onClick={() => {
+                setSel(toggleTag(sel, t));
+                setQ('');
+              }}
+            >
+              #{t}
+            </button>
+          ))}
+        </div>
+      )}
+      {facets.facets.length === 0 && <p className="muted small">Тегов пока нет. Тег ставится в шапке заметки или в тексте: #тема/фикх</p>}
+      {facets.facets.map(({ facet, values }) => (
+        <section key={facet || '—'}>
+          <h4>{facet === OTHER ? 'прочее' : facet}</h4>
+          <TagTree nodes={values} sel={sel} onToggle={(t) => setSel(toggleTag(sel, t))} onCard={onCard} onRename={rename} />
+        </section>
+      ))}
+    </div>
   );
 }
 
