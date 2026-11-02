@@ -15,8 +15,10 @@ import type {
 } from './types';
 import { uid, useListActions, useLocalStorage, visible } from './lib/storage';
 import { buildIndex, planRename } from './lib/kb/index';
-import { KbContext, type KbApi, type KbTarget } from './lib/kb/ui';
+import { KbContext, type KbApi, type KbFragment, type KbPicked, type KbTarget } from './lib/kb/ui';
 import { NoteModal } from './components/NotesView';
+import { CommentComposer, LinkPicker, SetPicker } from './components/KbDialogs';
+import { linkText } from './lib/kb/edit';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { useDocReminder, useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
@@ -36,6 +38,7 @@ import { DocumentsView } from './components/DocumentsView';
 import { ClipboardView } from './components/ClipboardView';
 import { PomodoroWidget } from './components/PomodoroWidget';
 import { ProjectsView } from './components/ProjectsView';
+import { QuickView } from './components/QuickView';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'projects', label: 'Проекты', icon: '🧭' },
@@ -45,6 +48,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'calendar', label: 'Календарь', icon: '📅' },
   { id: 'tasks', label: 'Задачи', icon: '✓' },
   { id: 'notes', label: 'Заметки', icon: '📝' },
+  { id: 'quick', label: 'Быстрые', icon: '✎' },
   { id: 'finance', label: 'Финансы', icon: '💰' },
   { id: 'directory', label: 'Справочник', icon: '📇' },
   { id: 'documents', label: 'Документы', icon: '🪪' },
@@ -195,6 +199,22 @@ export default function App() {
   const noteActions = useListActions(setNotes);
   // Заметки, открытые переходом по ссылке, — стопкой поверх любой вкладки: закрыл — вернулся.
   const [opened, setOpened] = useState<KbTarget[]>([]);
+  // Окна базы знаний: «Сослаться», комментарий, набор (src/components/KbDialogs.tsx)
+  const [dialog, setDialog] = useState<
+    | { kind: 'link'; fromId?: string; resolve: (t: KbPicked | null) => void }
+    | { kind: 'comment'; frag: KbFragment }
+    | { kind: 'set'; frag: KbFragment }
+    | null
+  >(null);
+  // Выбор слов для ссылки в другой заметке: она открыта в стопке на глубине depth
+  const [picking, setPicking] = useState<{ depth: number; resolve: (t: KbPicked | null) => void } | null>(null);
+  useEffect(() => {
+    // заметку, где выбирали слова, закрыли, не выбрав, — ссылки не будет
+    if (picking && opened.length < picking.depth) {
+      picking.resolve(null);
+      setPicking(null);
+    }
+  }, [opened.length, picking]);
   const kb = useMemo<KbApi>(
     () => ({
       index: kbIndex,
@@ -225,11 +245,54 @@ export default function App() {
           }),
         );
       },
+      pickLink: (fromId) => new Promise((resolve) => setDialog({ kind: 'link', fromId, resolve })),
+      picking: !!picking,
+      pickHere: (f) => {
+        if (!picking) return;
+        picking.resolve({ id: f.noteId, title: f.title, anchor: f.anchor });
+        setPicking(null);
+        setOpened((st) => st.slice(0, picking.depth - 1));
+      },
+      comment: (frag) => setDialog({ kind: 'comment', frag }),
+      addToSet: (frag) => setDialog({ kind: 'set', frag }),
+      updateNote: (id, patch) => noteActions.update(id, patch),
+      removeNote: (id) => noteActions.remove(id),
     }),
-    [kbIndex, noteActions, setNotes],
+    [kbIndex, noteActions, setNotes, picking],
   );
-  const top = opened[opened.length - 1];
-  const topNote = top ? visibleNotes.find((n) => n.id === top.id) : undefined;
+
+  /** Название, которого ещё нет: «Комментарий: слова», «Комментарий: слова (2)»… */
+  function freeTitle(base: string) {
+    let t = base;
+    for (let i = 2; kbIndex.byName.has(t.toLowerCase()); i++) t = `${base} (${i})`;
+    return t;
+  }
+  function saveComment(frag: KbFragment, text: string) {
+    const now = Date.now();
+    noteActions.add({
+      id: uid(),
+      type: 'comment',
+      title: freeTitle(`Комментарий: ${frag.excerpt}`),
+      body: text,
+      props: { к: [linkText({ title: frag.title, anchor: frag.anchor })] },
+      date: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    setDialog(null);
+  }
+  function addToSet(frag: KbFragment, setId: string | null, title: string) {
+    const embed = '!' + linkText({ title: frag.title, anchor: frag.anchor });
+    const now = Date.now();
+    if (setId) {
+      setNotes((list) =>
+        list.map((n) => (n.id === setId ? { ...n, body: (n.body.trimEnd() ? n.body.trimEnd() + '\n\n' : '') + embed, updatedAt: now } : n)),
+      );
+    } else {
+      noteActions.add({ id: uid(), type: 'set', title: freeTitle(title), body: embed, date: null, createdAt: now, updatedAt: now });
+    }
+    setDialog(null);
+  }
 
   // Админ показывает официальный календарь всегда; остальные — по переключателю.
   const effectiveUseAdmin = isAdmin || useAdmin;
@@ -288,7 +351,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className={`content ${tab === 'projects' ? 'content-wide' : ''}`}>
+      <main className={`content ${tab === 'projects' || tab === 'quick' ? 'content-wide' : ''}`}>
         {tab === 'today' && (
           <TodayView
             checklists={visibleChecklists}
@@ -351,6 +414,9 @@ export default function App() {
             relations={visibleRelations}
             setRelations={setRelations}
           />
+        )}
+        {tab === 'quick' && (
+          <QuickView notes={visibleNotes} setNotes={setNotes} relations={visibleRelations} setRelations={setRelations} />
         )}
         {tab === 'finance' && (
           <FinanceView
@@ -422,20 +488,57 @@ export default function App() {
         ))}
       </nav>
 
-      {topNote && (
-        <NoteModal
-          key={`${topNote.id}-${opened.length}`}
-          note={topNote}
-          allNotes={visibleNotes}
-          relations={visibleRelations}
-          setRelations={setRelations}
-          focus={top.anchor || top.heading ? { anchor: top.anchor, heading: top.heading } : undefined}
-          onSave={(patch) => noteActions.update(topNote.id, patch)}
-          onDelete={() => {
-            noteActions.remove(topNote.id);
-            setOpened((st) => st.slice(0, -1));
+      {/* вся стопка остаётся живой: нижняя карточка может ждать выбора цели ссылки */}
+      {opened.map((t, i) => {
+        const n = visibleNotes.find((x) => x.id === t.id);
+        if (!n) return null;
+        return (
+          <NoteModal
+            key={`${n.id}-${i}`}
+            note={n}
+            allNotes={visibleNotes}
+            relations={visibleRelations}
+            setRelations={setRelations}
+            focus={t.anchor || t.heading ? { anchor: t.anchor, heading: t.heading } : undefined}
+            onSave={(patch) => noteActions.update(n.id, patch)}
+            onDelete={() => {
+              noteActions.remove(n.id);
+              setOpened((st) => st.slice(0, i));
+            }}
+            onClose={() => setOpened((st) => st.slice(0, i))}
+            picking={!!picking && i + 1 === picking.depth}
+          />
+        );
+      })}
+
+      {dialog?.kind === 'link' && (
+        <LinkPicker
+          index={kbIndex}
+          fromId={dialog.fromId}
+          onPick={(t) => {
+            dialog.resolve(t);
+            setDialog(null);
           }}
-          onClose={() => setOpened((st) => st.slice(0, -1))}
+          onSelectWords={(id) => {
+            setPicking({ depth: opened.length + 1, resolve: dialog.resolve });
+            setDialog(null);
+            setOpened((st) => [...st, { id }]);
+          }}
+          onClose={() => {
+            dialog.resolve(null);
+            setDialog(null);
+          }}
+        />
+      )}
+      {dialog?.kind === 'comment' && (
+        <CommentComposer frag={dialog.frag} onSave={(t) => saveComment(dialog.frag, t)} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === 'set' && (
+        <SetPicker
+          index={kbIndex}
+          frag={dialog.frag}
+          onAdd={(id, title) => addToSet(dialog.frag, id, title)}
+          onClose={() => setDialog(null)}
         />
       )}
     </div>

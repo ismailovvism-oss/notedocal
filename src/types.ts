@@ -454,6 +454,7 @@ export type Tab =
   | 'calendar'
   | 'tasks'
   | 'notes'
+  | 'quick'
   | 'finance'
   | 'directory'
   | 'documents'

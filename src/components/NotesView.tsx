@@ -19,7 +19,32 @@ import {
 } from '../lib/relations';
 import { TYPE_BADGE, TYPE_LABELS } from '../lib/noteTypes';
 import { Backlinks } from './Backlinks';
-import { focusFragment, handleKbClick, handleKbHover, useKb } from '../lib/kb/ui';
+import { focusFragment, handleKbClick, handleKbHover, textBefore, useCommentRefs, useKb } from '../lib/kb/ui';
+import { FragmentButtons } from './FragmentButtons';
+import { LiveEditor } from './LazyLiveEditor';
+import type { LiveEditorHandle } from './liveEditorTypes';
+import { CommentsMargin } from './Comments';
+import { addAnchor, dropEmptyAnchors, anchorsAt, excerpt, locateSelection, type Span } from '../lib/kb/edit';
+import { runFragmentAction, type FragmentAction } from '../lib/kb/fragmentActions';
+
+/** Что сохраняет карточка заметки. */
+export type NotePatch = Pick<
+  Note,
+  | 'title'
+  | 'body'
+  | 'date'
+  | 'type'
+  | 'attachments'
+  | 'phone'
+  | 'contacts'
+  | 'address'
+  | 'locationId'
+  | 'category'
+  | 'docNumber'
+  | 'expires'
+  | 'usedIn'
+> &
+  Partial<Pick<Note, 'tags'>>;
 
 interface Props {
   notes: Note[];
@@ -42,24 +67,7 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
     return [...base].sort((a, b) => b.updatedAt - a.updatedAt);
   }, [notes, fixedDate]);
 
-  function save(
-    patch: Pick<
-      Note,
-      | 'title'
-      | 'body'
-      | 'date'
-      | 'type'
-      | 'attachments'
-      | 'phone'
-      | 'contacts'
-      | 'address'
-      | 'locationId'
-      | 'category'
-      | 'docNumber'
-      | 'expires'
-      | 'usedIn'
-    >,
-  ) {
+  function save(patch: NotePatch) {
     const now = Date.now();
     if (editing && editing !== 'new') {
       // Существующую обновляем и оставляем окно открытым (модалка сама уйдёт в отображение).
@@ -77,6 +85,7 @@ export function NotesView({ notes, setNotes, fixedDate, relations, setRelations 
         phone: patch.phone,
         address: patch.address,
         locationId: patch.locationId,
+        ...(patch.tags?.length ? { tags: patch.tags } : {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -164,6 +173,7 @@ export function NoteModal({
   setRelations,
   initialMode,
   focus,
+  picking,
   onSave,
   onDelete,
   onClose,
@@ -177,24 +187,9 @@ export function NoteModal({
   initialMode?: 'view' | 'edit';
   /** Перейти к фрагменту после открытия: метка (`^k3f9`) или заголовок — так открывают по ссылке. */
   focus?: { anchor?: string; heading?: string };
-  onSave: (
-    patch: Pick<
-      Note,
-      | 'title'
-      | 'body'
-      | 'date'
-      | 'type'
-      | 'attachments'
-      | 'phone'
-      | 'contacts'
-      | 'address'
-      | 'locationId'
-      | 'category'
-      | 'docNumber'
-      | 'expires'
-      | 'usedIn'
-    >,
-  ) => void;
+  /** Идёт выбор слов для ссылки из другой заметки: у выделения есть кнопка «Сюда». */
+  picking?: boolean;
+  onSave: (patch: NotePatch) => void;
   onDelete?: () => void;
   onClose: () => void;
 }) {
@@ -213,7 +208,11 @@ export function NoteModal({
   const [usedIn, setUsedIn] = useState((note?.usedIn ?? []).join('\n'));
   // Существующая заметка открывается отрендеренной; новая — сразу в правке.
   const [mode, setMode] = useState<'view' | 'edit'>(initialMode ?? (note ? 'view' : 'edit'));
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [tags, setTags] = useState<string[]>(note?.tags ?? []);
+  const [tagInput, setTagInput] = useState('');
+  const editor = useRef<LiveEditorHandle | null>(null);
+  // куда поставить курсор при переходе в правку — туда, куда нажали в чтении
+  const [cursorAt, setCursorAt] = useState<number | undefined>(undefined);
   const kb = useKb();
   const readRef = useRef<HTMLDivElement>(null);
   // «Ссылаются сюда» только на этот фрагмент — щелчок по помеченным словам
@@ -223,7 +222,27 @@ export function NoteModal({
     // только при открытии: переход по ссылке ведёт к фрагменту один раз
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const tags = note && kb ? (kb.index.noteTags.get(note.id) ?? []) : [];
+  // в чтении текст всегда свежий: его могли поменять ссылка из другой заметки, комментарий,
+  // правка с телефона. В правке не трогаем — там свой, ещё не сохранённый текст.
+  useEffect(() => {
+    if (mode !== 'view' || !note) return;
+    setBody(note.body ?? '');
+    setTitle(note.title ?? '');
+    setTags(note.tags ?? []);
+    // только эти поля: остальное карточка правит сама
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, note?.body, note?.title, note?.tags]);
+  // теги из свойства и из текста — в чтении; в правке — только свойство (текстовые правятся в тексте)
+  const shownTags = note && kb ? (kb.index.noteTags.get(note.id) ?? []) : [];
+  const [readEl, setReadEl] = useState<HTMLDivElement | null>(null);
+  const readHtml = useMemo(
+    () =>
+      renderMarkdown(
+        body.trim() || '_Пусто. Нажмите, чтобы добавить текст…_',
+        kb && note ? { index: kb.index, noteId: note.id } : undefined,
+      ),
+    [body, kb, note],
+  );
 
   const isPerson = type === 'person';
   const isLocation = type === 'location';
@@ -236,11 +255,12 @@ export function NoteModal({
     setContacts((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   }
 
-  function patchOf(over?: Partial<Pick<Note, 'attachments'>>) {
+  function patchOf(over?: Partial<Pick<Note, 'attachments' | 'body'>>) {
     const cleanContacts = contacts.filter((c) => c.value.trim());
     return {
       title: title.trim() || 'Без названия',
-      body,
+      body: dropEmptyAnchors(body),
+      tags,
       date: date || null,
       type,
       attachments,
@@ -292,43 +312,113 @@ export function NoteModal({
     setDocNumber(note?.docNumber ?? '');
     setExpires(note?.expires ?? '');
     setUsedIn((note?.usedIn ?? []).join('\n'));
+    setTags(note?.tags ?? []);
     setMode('view');
   }
 
-  function surround(before: string, after = before) {
-    const ta = taRef.current;
-    if (!ta) return;
-    const s = ta.selectionStart;
-    const e = ta.selectionEnd;
-    const sel = body.slice(s, e);
-    const next = body.slice(0, s) + before + sel + after + body.slice(e);
-    setBody(next);
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(s + before.length, s + before.length + sel.length);
-    });
+  // Кнопки оформления над полем правки — работают с редактором (src/components/LiveEditor.tsx)
+  const surround = (before: string, after = before) => editor.current?.wrap(before, after);
+  const linePrefix = (prefix: string) => editor.current?.prefixLine(prefix);
+  const insertCallout = () => editor.current?.replaceSelection((sel) => `> [!note] Заметка\n> ${sel || 'текст'}\n`);
+  function addTag(raw: string) {
+    const t = raw.trim().replace(/^#/, '').replace(/\s+/g, '-');
+    if (t && !tags.some((x) => x.toLowerCase() === t.toLowerCase())) setTags([...tags, t]);
+    setTagInput('');
   }
-  function linePrefix(prefix: string) {
-    const ta = taRef.current;
-    if (!ta) return;
-    const s = ta.selectionStart;
-    const lineStart = body.lastIndexOf('\n', s - 1) + 1;
-    const next = body.slice(0, lineStart) + prefix + body.slice(lineStart);
+
+  // --- Чтение: выделил слова — панель действий (метка, ссылка, комментарий, набор) ---
+  const [readBar, setReadBar] = useState<{ top: number; left: number; span: Span | null; error?: string } | null>(null);
+  const [readPieces, setReadPieces] = useState<Span[]>([]);
+  const [commentsOpen, setCommentsOpen] = useState<Set<string>>(new Set());
+  const commentRefs = useCommentRefs(note?.id);
+  useEffect(() => {
+    if (mode !== 'view') return;
+    const onSel = () => {
+      const root = readRef.current;
+      const sel = window.getSelection();
+      if (!root || !sel || sel.isCollapsed || !sel.rangeCount) {
+        if (!document.activeElement?.closest('.fragment-bar')) setReadBar((b) => (b && !readPieces.length ? null : b));
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      if (!root.contains(range.commonAncestorContainer)) return;
+      const box = root.getBoundingClientRect();
+      const r = range.getBoundingClientRect();
+      const touch = matchMedia('(pointer: coarse)').matches;
+      const before = textBefore(root, range.startContainer, range.startOffset);
+      const span = locateSelection(body, sel.toString(), before);
+      setReadBar({
+        top: (touch ? r.bottom + 8 : r.top - 6) - box.top,
+        left: Math.max(0, Math.min(r.left - box.left, box.width - 280)),
+        span,
+        error: span ? undefined : 'Не нашёл это место в тексте — поставьте метку в правке',
+      });
+    };
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, [mode, body, readPieces.length]);
+
+  /** Сохранить новый текст из чтения (метка, ссылка) — сразу, без «Сохранить». */
+  function saveBody(next: string) {
     setBody(next);
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(s + prefix.length, s + prefix.length);
-    });
+    onSave(patchOf({ body: next }));
   }
-  function insertCallout() {
-    const ta = taRef.current;
-    if (!ta) return;
-    const s = ta.selectionStart;
-    const e = ta.selectionEnd;
-    const sel = body.slice(s, e) || 'текст';
-    const block = `> [!note] Заметка\n> ${sel}\n`;
-    setBody(body.slice(0, s) + block + body.slice(e));
-    requestAnimationFrame(() => ta.focus());
+  async function readAction(action: FragmentAction | 'piece') {
+    if (!note || !readBar) return;
+    const spans = [...readPieces, ...(readBar.span ? [readBar.span] : [])];
+    if (action === 'piece') {
+      if (readBar.span) setReadPieces(spans);
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+    if (!spans.length) return;
+    try {
+      const next = await runFragmentAction(action, body, spans, { id: note.id, title }, kb);
+      if (next !== null) saveBody(next);
+      setReadPieces([]);
+      setReadBar(null);
+      window.getSelection()?.removeAllRanges();
+    } catch (e) {
+      setReadBar({ ...readBar, error: (e as Error).message });
+    }
+  }
+  function pickHere() {
+    if (!note || !readBar || !kb) return;
+    const spans = [...readPieces, ...(readBar.span ? [readBar.span] : [])];
+    try {
+      const r = addAnchor(body, spans);
+      if (!r.existed) saveBody(r.text);
+      kb.pickHere({ noteId: note.id, title, anchor: r.name, excerpt: excerpt(body, spans) });
+    } catch (e) {
+      setReadBar({ ...readBar, error: (e as Error).message });
+    }
+  }
+  /** Нажатие в чтении — правка с курсором на том же слове. */
+  function editAt(e: React.MouseEvent) {
+    const root = readRef.current;
+    const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null };
+    let node: Node | null = null;
+    let offset = 0;
+    const cp = doc.caretPositionFromPoint?.(e.clientX, e.clientY);
+    if (cp) {
+      node = cp.offsetNode;
+      offset = cp.offset;
+    } else {
+      const r = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+      if (r) {
+        node = r.startContainer;
+        offset = r.startOffset;
+      }
+    }
+    if (root && node && node.nodeType === Node.TEXT_NODE) {
+      const t = node.textContent ?? '';
+      const word = t.slice(Math.max(0, offset - 12), offset + 12).trim();
+      const start = Math.max(0, offset - 12) + (t.slice(Math.max(0, offset - 12), offset + 12).length - t.slice(Math.max(0, offset - 12), offset + 12).trimStart().length);
+      const before = textBefore(root, node, start);
+      const at = word ? locateSelection(body, word, before) : null;
+      setCursorAt(at ? Math.min(at.to, at.from + (offset - start)) : undefined);
+    }
+    setMode('edit');
   }
 
   // В режиме отображения клик по фону закрывает; в правке — нет (чтобы не терять текст).
@@ -415,9 +505,9 @@ export function NoteModal({
             </div>
           )}
 
-          {tags.length > 0 && (
+          {shownTags.length > 0 && (
             <div className="kb-tags">
-              {tags.map((t) => (
+              {shownTags.map((t) => (
                 <span key={t} className="kb-tag">
                   #{t}
                 </span>
@@ -425,23 +515,53 @@ export function NoteModal({
             </div>
           )}
 
-          <div
-            ref={readRef}
-            className="md note-read-body note-read-tap"
-            onClick={(e) => {
-              if (handleKbClick(e, kb, note.id, setAnchorFilter)) return;
-              setMode('edit');
-            }}
-            onMouseOver={(e) => handleKbHover(e, true)}
-            onMouseLeave={(e) => handleKbHover(e, false)}
-            title="Нажмите, чтобы редактировать"
-            dangerouslySetInnerHTML={{
-              __html: renderMarkdown(
-                body.trim() || '_Пусто. Нажмите, чтобы добавить текст…_',
-                kb ? { index: kb.index, noteId: note.id } : undefined,
-              ),
-            }}
-          />
+          {picking && (
+            <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>
+          )}
+
+          <div className={`note-read-wrap ${commentRefs.length ? 'with-margin' : ''}`}>
+            <div
+              ref={(el) => {
+                readRef.current = el;
+                setReadEl(el);
+              }}
+              className="md note-read-body note-read-tap"
+              onClick={(e) => {
+                if (handleKbClick(e, kb, note.id, (a) => {
+                  setAnchorFilter(a);
+                  setCommentsOpen((s) => {
+                    const n = new Set(s);
+                    if (n.has(a)) n.delete(a);
+                    else n.add(a);
+                    return n;
+                  });
+                }))
+                  return;
+                if ((e.target as HTMLElement).closest('.kb-cm-slot')) return;
+                // выделяли слова — это не нажатие «править»
+                if (!window.getSelection()?.isCollapsed) return;
+                editAt(e);
+              }}
+              onMouseOver={(e) => handleKbHover(e, true)}
+              onMouseLeave={(e) => handleKbHover(e, false)}
+              title="Нажмите, чтобы редактировать; выделите слова — метка, ссылка, комментарий"
+              dangerouslySetInnerHTML={{ __html: readHtml }}
+            />
+            <CommentsMargin noteId={note.id} root={readEl} html={readHtml} open={commentsOpen} setOpen={setCommentsOpen} />
+            {readBar && (
+              <div className="fragment-bar" style={{ top: readBar.top, left: readBar.left }} onMouseDown={(e) => e.preventDefault()}>
+                <FragmentButtons
+                  onAction={readAction}
+                  pieces={readPieces.length}
+                  canNoteActions
+                  inAnchor={!!readBar.span && anchorsAt(body, readBar.span.from).length > 0}
+                  picking={picking}
+                  onPickHere={pickHere}
+                />
+                {readBar.error && <div className="fragment-err">{readBar.error}</div>}
+              </div>
+            )}
+          </div>
 
           <AttachmentList items={attachments} />
 
@@ -659,14 +779,69 @@ export function NoteModal({
           <button className="md-btn" title="Код" onClick={() => surround('`')}>
             {'</>'}
           </button>
+          <button className="md-btn" title="Задача" onClick={() => linePrefix('- [ ] ')}>
+            ☐
+          </button>
+          <button className="md-btn" title="Выделить маркером" onClick={() => surround('==')}>
+            <mark>М</mark>
+          </button>
         </div>
-        <textarea
-          ref={taRef}
-          className="input md-editor"
-          placeholder="Текст заметки (Markdown)…"
+        <LiveEditor
+          key={note?.id ?? 'new'}
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={setBody}
+          noteId={note?.id}
+          noteTitle={title}
+          placeholder="Текст заметки… [[ — ссылка, # — тег"
+          autoFocus={!!note}
+          cursorAt={cursorAt}
+          handle={editor}
+          className="md-editor-live"
+          keys={[
+            {
+              key: 'Mod-s',
+              run: () => {
+                handleSave();
+                return true;
+              },
+            },
+          ]}
+          onCommit={(v) => {
+            setBody(v);
+            onSave(patchOf({ body: v }));
+          }}
         />
+
+        <div className="field">
+          <span className="field-label">Теги</span>
+          <div className="tag-edit">
+            {tags.map((t) => (
+              <span key={t} className="kb-tag">
+                #{t}
+                <button className="tag-x" onClick={() => setTags(tags.filter((x) => x !== t))} aria-label={`Убрать тег ${t}`}>
+                  ×
+                </button>
+              </span>
+            ))}
+            <input
+              className="input tag-input"
+              list="kb-tag-names"
+              placeholder="тема/фикх/намаз — Enter"
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ',') {
+                  e.preventDefault();
+                  addTag(tagInput);
+                }
+              }}
+              onBlur={() => tagInput.trim() && addTag(tagInput)}
+            />
+            <datalist id="kb-tag-names">
+              {kb && [...kb.index.tagNames.values()].map((t) => <option key={t} value={t} />)}
+            </datalist>
+          </div>
+        </div>
 
         {!fixedDate && !isDocument && (
           <label className="field">
