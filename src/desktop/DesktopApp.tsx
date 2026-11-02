@@ -26,9 +26,13 @@ import { NotePane, type PaneFocus } from './NotePane';
 import { useBridgeSync, type BridgeStatus } from './bridge';
 import { Guard } from './Guard';
 import { native } from './native';
+import { MenuHost, useMenu, type MenuItem } from './Menu';
+import { FileView, fileIcon } from './FileView';
 
 interface Target extends PaneFocus {
   id: string;
+  /** Открыто вложение этой заметки (id файла) — во вкладке просмотр файла (./FileView.tsx). */
+  file?: string;
   /** Номер перехода: тот же адрес второй раз — снова к фрагменту. */
   n: number;
 }
@@ -43,6 +47,14 @@ let seq = 0;
 const newTab = (t: Target): Tab => ({ key: `t${++seq}`, hist: [t], pos: 0 });
 
 export default function DesktopApp() {
+  return (
+    <MenuHost>
+      <Desktop />
+    </MenuHost>
+  );
+}
+
+function Desktop() {
   const [notes, setNotes, loaded] = useNotesStore();
   const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
   const status = useBridgeSync(notes, setNotes, relations, setRelations, loaded);
@@ -341,6 +353,112 @@ export default function DesktopApp() {
   const madeHere = useRef(new Set<string>());
   const prevNote = useRef<string | undefined>(undefined);
 
+  // --- меню по правой кнопке (./Menu.tsx) ---
+  const menu = useMenu();
+  /** Скопировать текст: буфер обмена, а нет доступа — через выделение. */
+  const copyText = (text: string) =>
+    void navigator.clipboard?.writeText(text).catch(() => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.append(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    });
+  function renameNote(id: string) {
+    const n = index.byId.get(id);
+    if (!n) return;
+    const t = prompt('Новое название', n.title)?.trim();
+    if (!t || t === n.title) return;
+    if (n.title) kb.renamed(id, n.title, t);
+    actions.update(id, { title: t });
+  }
+  /** Куда переложить: все видимые папки с путём. */
+  function moveMenu(at: { clientX: number; clientY: number }, id: string, from: string | null) {
+    const list = live
+      .filter((n) => n.type === 'folder' && n.id !== id && (showAll || !isService(n.id)))
+      .map((n) => ({ id: n.id, path: [...(folders.get(n.id) ?? [])].reverse().concat(n.title).join(' / ') }))
+      .sort((a, b) => a.path.localeCompare(b.path, 'ru'));
+    const items: MenuItem[] = [
+      ...(from ? [{ label: 'В корень (без папки)', icon: '⤒', run: () => move(id, from, null) }, 'sep' as const] : []),
+      ...list.map((f) => ({ label: f.path, icon: '📁', run: () => move(id, from, f.id), disabled: f.id === from })),
+    ];
+    menu({ ...at, preventDefault() {}, stopPropagation() {} } as unknown as MouseEvent, items);
+  }
+  function treeMenu(e: React.MouseEvent, node: { id: string; folder: boolean; parent: string | null } | null) {
+    const at = { clientX: e.clientX, clientY: e.clientY };
+    if (!node) {
+      return menu(e, [
+        { label: 'Новая заметка', icon: '✎', keys: 'Ctrl+N', run: () => createNote() },
+        { label: 'Новая папка', icon: '📁', run: () => createFolder(null) },
+      ]);
+    }
+    const n = index.byId.get(node.id);
+    if (!n) return;
+    const hidden = !scope.get(n.id)?.shown;
+    const common: MenuItem[] = [
+      { label: 'Переименовать', icon: '✏️', run: () => renameNote(n.id) },
+      { label: 'Переложить в папку…', icon: '↪', run: () => setTimeout(() => moveMenu(at, n.id, node.parent), 0) },
+    ];
+    if (node.folder) {
+      return menu(e, [
+        { label: 'Новая заметка здесь', icon: '✎', run: () => createNote(false, n.id) },
+        { label: 'Новая подпапка', icon: '📁', run: () => createFolder(n.id) },
+        'sep',
+        ...common,
+        { label: 'Открыть папку как заметку', icon: '📄', run: () => go({ id: n.id }) },
+        'sep',
+        {
+          label: 'Удалить папку',
+          icon: '🗑',
+          danger: true,
+          run: () => {
+            if (!confirm(`Удалить папку «${n.title}»? Заметки из неё не удалятся — окажутся выше.`)) return;
+            for (const r of relations) if (!r.deleted && r.type === 'child' && r.from === n.id) relActions.remove(r.id);
+            actions.remove(n.id);
+          },
+        },
+      ]);
+    }
+    menu(e, [
+      { label: 'Открыть', icon: '📄', run: () => go({ id: n.id }) },
+      { label: 'Открыть в новой вкладке', icon: '⧉', keys: 'Ctrl+щелчок', run: () => go({ id: n.id }, true) },
+      'sep',
+      ...common,
+      { label: 'Скопировать ссылку [[…]]', icon: '🔗', run: () => copyText(`[[${n.title}]]`), disabled: !n.title },
+      {
+        label: hidden ? 'Показывать в Базе' : 'Спрятать из Базы',
+        icon: hidden ? '👁' : '🙈',
+        run: () => actions.update(n.id, { inBase: hidden }),
+      },
+      'sep',
+      {
+        label: 'Удалить',
+        icon: '🗑',
+        danger: true,
+        run: () => confirm(`Удалить «${n.title || 'Без названия'}»?`) && actions.remove(n.id),
+      },
+    ]);
+  }
+  function tabMenu(e: React.MouseEvent, key: string) {
+    const t = tabs.find((x) => x.key === key);
+    const id = t?.hist[t.pos]?.id;
+    menu(e, [
+      { label: 'Закрыть', icon: '×', keys: 'Ctrl+W', run: () => closeTab(key) },
+      {
+        label: 'Закрыть остальные',
+        icon: '⊠',
+        run: () => {
+          setTabs((list) => list.filter((x) => x.key === key));
+          setActive(key);
+        },
+        disabled: tabs.length < 2,
+      },
+      'sep',
+      { label: 'Открыть копию в новой вкладке', icon: '⧉', run: () => id && go({ id }, true), disabled: !id },
+    ]);
+  }
+
   // --- клавиши: как в Obsidian ---
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -410,6 +528,7 @@ export default function DesktopApp() {
           onMove={move}
           open={open}
           setOpen={setOpen}
+          onTreeMenu={treeMenu}
         />
 
         <main className="dk-main">
@@ -423,15 +542,17 @@ export default function DesktopApp() {
             <div className="dk-tablist">
               {tabs.map((t) => {
                 const n = byId.get(t.hist[t.pos]?.id);
+                const f = t.hist[t.pos]?.file ? n?.attachments?.find((a) => a.id === t.hist[t.pos].file) : undefined;
                 return (
                   <div
                     key={t.key}
                     className={`dk-tab ${t.key === cur?.key ? 'on' : ''}`}
                     onClick={() => setActive(t.key)}
                     onAuxClick={(e) => e.button === 1 && closeTab(t.key)}
+                    onContextMenu={(e) => tabMenu(e, t.key)}
                     title={n?.title}
                   >
-                    <span className="dk-tab-title">{n?.title || 'Без названия'}</span>
+                    <span className="dk-tab-title">{f ? `${fileIcon(f)} ${f.name}` : n?.title || 'Без названия'}</span>
                     <button
                       className="dk-tab-x"
                       onClick={(e) => {
@@ -450,7 +571,9 @@ export default function DesktopApp() {
             </div>
           </div>
           <div className="dk-page">
-            {note ? (
+            {note && target?.file && note.attachments?.some((a) => a.id === target.file) ? (
+              <FileView note={note} file={note.attachments.find((a) => a.id === target.file)!} onBack={() => step(-1)} />
+            ) : note ? (
               <Guard key={`${cur!.key}-${note.id}-${target!.n}`}>
               <NotePane
                 note={note}
@@ -460,6 +583,7 @@ export default function DesktopApp() {
                 autoRecord={recordNew === note.id}
                 onVoiceLeft={(vid, nid) => leftVoice.current.set(vid, nid)}
                 toolsSlot={toolsSlot}
+                onOpenFile={(fid, inNew) => go({ id: note.id, file: fid }, inNew)}
                 picking={!!picking && picking.tab === cur?.key}
                 onDelete={() => {
                   actions.remove(note.id);
@@ -564,6 +688,7 @@ function Sidebar({
   onMove,
   open,
   setOpen,
+  onTreeMenu,
 }: {
   notes: Note[];
   /** Видимые заметки; null — показывать всё. */
@@ -587,6 +712,7 @@ function Sidebar({
   onMove: (id: string, from: string | null, to: string | null) => void;
   open: string[];
   setOpen: React.Dispatch<React.SetStateAction<string[]>>;
+  onTreeMenu: (e: React.MouseEvent, node: { id: string; folder: boolean; parent: string | null } | null) => void;
 }) {
   const kb = useKb()!;
   const [q, setQ] = useState('');
@@ -699,6 +825,7 @@ function Sidebar({
           onMove={onMove}
           open={open}
           setOpen={setOpen}
+          onMenu={onTreeMenu}
         />
       )}
       <div className="dk-scope small">

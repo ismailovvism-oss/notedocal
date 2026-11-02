@@ -26,9 +26,11 @@ export interface TreeProps {
   /** Раскрытые папки (хранит окно: туда же раскрывает папку, куда создали заметку). */
   open: string[];
   setOpen: React.Dispatch<React.SetStateAction<string[]>>;
+  /** Правая кнопка: по заметке или папке (parent — в какой папке она здесь показана), по пустому месту — null. */
+  onMenu: (e: React.MouseEvent, node: { id: string; folder: boolean; parent: string | null } | null) => void;
 }
 
-export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen }: TreeProps) {
+export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen, onMenu }: TreeProps) {
   const openSet = useMemo(() => new Set(open), [open]);
   const toggle = (id: string) => setOpen((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [over, setOver] = useState<string | null>(null);
@@ -98,13 +100,14 @@ export function FolderTree({ notes, relations, visible, isService, activeId, onO
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate };
+  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu };
   return (
     <div
       className={`dk-tree ${over === '' ? 'drop' : ''}`}
       onDragOver={dragOver('')}
       onDragLeave={(e) => e.currentTarget === e.target && setOver(null)}
       onDrop={drop(null)}
+      onContextMenu={(e) => onMenu(e, null)}
     >
       <Items parent={null} depth={0} path={[]} ctx={ctx} />
       <div className="dk-tree-foot">
@@ -133,10 +136,11 @@ interface Ctx {
   activeId?: string;
   onOpen: TreeProps['onOpen'];
   onCreate: TreeProps['onCreate'];
+  onMenu: TreeProps['onMenu'];
 }
 
 function Items({ parent, depth, path, ctx }: { parent: string | null; depth: number; path: string[]; ctx: Ctx }) {
-  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate } = ctx;
+  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu } = ctx;
   const { folders, items } = parent ? t.split(t.kids.get(parent) ?? []) : t.roots;
   const [limit, setLimit] = useState(PER_FOLDER);
   const pad = { paddingInlineStart: 6 + depth * 14 };
@@ -156,6 +160,7 @@ function Items({ parent, depth, path, ctx }: { parent: string | null; depth: num
               onDragLeave={() => setOver((o) => (o === f.id ? null : o))}
               onDrop={drop(f.id)}
               onClick={() => toggle(f.id)}
+              onContextMenu={(e) => onMenu(e, { id: f.id, folder: true, parent })}
               dir="auto"
             >
               <span className="dk-caret">{isOpen ? '▾' : '▸'}</span>
@@ -188,6 +193,7 @@ function Items({ parent, depth, path, ctx }: { parent: string | null; depth: num
             onDragStart={drag(n.id, parent)}
             onClick={(e) => onOpen(n.id, e.ctrlKey || e.metaKey)}
             onAuxClick={(e) => e.button === 1 && onOpen(n.id, true)}
+            onContextMenu={(e) => onMenu(e, { id: n.id, folder: false, parent })}
             dir="auto"
           >
             <span className="dk-caret" />

@@ -11,6 +11,8 @@ import LiveEditor from '../components/LiveEditor';
 import type { LiveEditorHandle } from '../components/liveEditorTypes';
 import { useLocalStorage } from '../lib/storage';
 import { native, type Mics, type VoiceEvent } from './native';
+import { useMenu, type MenuItem } from './Menu';
+import { fileIcon } from './FileView';
 import { PropsView, SchemaView, ViewResult } from '../components/Props';
 import { PropsEditor, SchemaEditor, ViewEditor } from '../components/PropsEdit';
 import { TYPE_LABELS } from '../lib/noteTypes';
@@ -37,6 +39,7 @@ export function NotePane({
   autoRecord,
   onVoiceLeft,
   toolsSlot,
+  onOpenFile,
   onDelete,
 }: {
   note: Note;
@@ -52,6 +55,8 @@ export function NotePane({
   onVoiceLeft: (voiceId: string, noteId: string) => void;
   /** Место в правой колонке для панели инструментов этой заметки (./desktop.css, .dk-tools). */
   toolsSlot?: HTMLElement | null;
+  /** Открыть вложение (PDF, картинку…) во вкладке. */
+  onOpenFile: (fileId: string, inNew: boolean) => void;
   onDelete: () => void;
 }) {
   const kb = useKb()!;
@@ -212,6 +217,53 @@ export function NotePane({
   }
   const versionNames = Object.keys(note.versions ?? {});
 
+  // --- меню по правой кнопке в тексте (./Menu.tsx) ---
+  const menu = useMenu();
+  function textMenu(e: React.MouseEvent) {
+    const h = editor.current;
+    if (!h) return;
+    const sel = h.selected();
+    const link = (e.target as HTMLElement).closest<HTMLElement>('.kb-link');
+    const words = (a: Parameters<typeof h.run>[0]) => () => h.run(a);
+    const items: MenuItem[] = [];
+    if (link) {
+      const { target, anchor, heading } = link.dataset;
+      items.push({ label: 'Открыть ссылку', icon: '↗', run: () => kb.open(target ? { name: target, anchor, heading } : { id: note.id, anchor, heading }) }, 'sep');
+    }
+    items.push(
+      { label: 'Вырезать', icon: '✂', keys: 'Ctrl+X', run: () => document.execCommand('cut'), disabled: !sel },
+      { label: 'Копировать', icon: '⧉', keys: 'Ctrl+C', run: () => document.execCommand('copy'), disabled: !sel },
+      {
+        label: 'Вставить',
+        icon: '📋',
+        keys: 'Ctrl+V',
+        run: () =>
+          void navigator.clipboard
+            ?.readText()
+            .then((t) => t && h.replaceSelection(() => t))
+            .catch(() => setMsg('Вставить из меню не дали — нажмите Ctrl+V')),
+      },
+      'sep',
+    );
+    if (sel) {
+      items.push(
+        { label: 'Жирный', icon: 'Ж', keys: 'Ctrl+B', run: () => h.wrap('**') },
+        { label: 'Курсив', icon: 'К', keys: 'Ctrl+I', run: () => h.wrap('*') },
+        { label: 'Маркер', icon: 'М', run: () => h.wrap('==') },
+        'sep',
+        { label: 'Сослаться этими словами…', icon: '🔗', run: words('link') },
+        { label: 'Метка на слова', icon: '⚓', run: words('anchor') },
+        { label: 'Комментарий к словам…', icon: '💬', run: words('comment') },
+        { label: 'В набор…', icon: '📚', run: words('set') },
+        { label: 'Снять метку', icon: '✕', run: words('unanchor') },
+        'sep',
+      );
+    }
+    items.push({ label: 'Вставить ссылку [[…]]', icon: '[[', run: () => h.startLink() });
+    if (native.available()) items.push({ label: voiceId.current ? 'Пауза / дальше' : 'Диктовать сюда', icon: '🎤', keys: 'Ctrl+Пробел', run: toggleVoice });
+    menu(e, items);
+  }
+
   function commitTitle() {
     // пустое так и остаётся пустым: «Без названия» в базе мешало бы ссылкам и поиску
     const t = title.trim();
@@ -355,6 +407,39 @@ export function NotePane({
         </datalist>
       </div>
 
+      {(note.attachments ?? []).length > 0 && (
+        <div className="dk-files">
+          {note.attachments!.map((a) => (
+            <button
+              key={a.id}
+              className="dk-file-chip"
+              title={`${a.name} — открыть здесь (Ctrl+щелчок — в новой вкладке)`}
+              onClick={(e) => onOpenFile(a.id, e.ctrlKey || e.metaKey)}
+              onAuxClick={(e) => e.button === 1 && onOpenFile(a.id, true)}
+              onContextMenu={(e) =>
+                menu(e, [
+                  { label: 'Открыть', icon: fileIcon(a), run: () => onOpenFile(a.id, false) },
+                  { label: 'Открыть в новой вкладке', icon: '⧉', run: () => onOpenFile(a.id, true) },
+                  {
+                    label: 'Скачать в «Загрузки»',
+                    icon: '⤓',
+                    run: () => {
+                      const l = document.createElement('a');
+                      l.href = a.url;
+                      l.download = a.name;
+                      l.click();
+                    },
+                  },
+                ])
+              }
+              dir="auto"
+            >
+              {fileIcon(a)} {a.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {propsOpen ? (
         <>
           {type === 'schema' && <SchemaEditor props={note.props ?? {}} setProps={setProps} />}
@@ -377,6 +462,7 @@ export function NotePane({
       {msg && <div className="dk-msg small">{msg}</div>}
       {picking && <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>}
 
+      <div onContextMenu={textMenu}>
       <LiveEditor
         key={note.id}
         value={body}
@@ -407,6 +493,7 @@ export function NotePane({
           },
         ]}
       />
+      </div>
       {toolsSlot &&
         createPortal(
           <Tools
