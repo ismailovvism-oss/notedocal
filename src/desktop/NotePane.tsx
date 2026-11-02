@@ -1,10 +1,15 @@
 // Открытая заметка в окне «База»: сразу правится, без режима чтения и всплывающих окон —
 // как в Obsidian. Текст сохраняется сам (через 0,7 с после правки, Ctrl+S — сразу).
 // Сверху — название, роль, теги и свойства; ниже — текст в редакторе «как видишь».
+// В окне на компьютере ещё голос (🎤, Ctrl+Пробел — с места курсора) и кнопки Claude с версиями
+// текста, как в быстрых заметках: оригинал, очищено, связно, перевод (./native.ts).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Note, NoteType } from '../types';
 import LiveEditor from '../components/LiveEditor';
+import type { LiveEditorHandle } from '../components/liveEditorTypes';
+import { useLocalStorage } from '../lib/storage';
+import { native, type VoiceEvent } from './native';
 import { PropsView, SchemaView, ViewResult } from '../components/Props';
 import { PropsEditor, SchemaEditor, ViewEditor } from '../components/PropsEdit';
 import { TYPE_LABELS } from '../lib/noteTypes';
@@ -28,6 +33,8 @@ export function NotePane({
   allNotes,
   scope,
   picking,
+  autoRecord,
+  onVoiceLeft,
   onDelete,
 }: {
   note: Note;
@@ -37,6 +44,10 @@ export function NotePane({
   scope?: ScopeWhy;
   /** Эта заметка открыта, чтобы выделить в ней слова для ссылки из другой. */
   picking: boolean;
+  /** Сразу начать запись голосом (★ с кнопки на микрофоне — новая заметка и запись). */
+  autoRecord?: boolean;
+  /** Ушли с заметки посреди диктовки: дораспознанное вставит окно в текст заметки. */
+  onVoiceLeft: (voiceId: string, noteId: string) => void;
   onDelete: () => void;
 }) {
   const kb = useKb()!;
@@ -57,12 +68,15 @@ export function NotePane({
   }, [note.body]);
   useEffect(() => setTitle(note.title), [note.title]);
 
+  /** Текст в базу; у заметки с версиями (быстрые) — и в текущую версию. */
+  const withVersion = (clean: string) =>
+    note.versions ? { body: clean, versions: { ...note.versions, [note.currentVersion ?? 'оригинал']: clean } } : { body: clean };
   function save(text: string) {
     if (timer.current) clearTimeout(timer.current);
     const clean = dropEmptyAnchors(text);
     if (clean === saved.current) return;
     saved.current = clean;
-    kb.updateNote(note.id, { body: clean });
+    kb.updateNote(note.id, withVersion(clean));
   }
   function change(text: string) {
     setBody(text);
@@ -77,12 +91,102 @@ export function NotePane({
       if (timer.current) {
         clearTimeout(timer.current);
         const clean = dropEmptyAnchors(bodyRef.current);
-        if (clean !== saved.current) kb.updateNote(note.id, { body: clean });
+        if (clean !== saved.current) kb.updateNote(note.id, withVersion(clean));
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [note.id],
   );
+
+  // --- голос: метка %%🎤:id%% на месте курсора, распознанное встаёт перед ней ---
+  const editor = useRef<LiveEditorHandle | null>(null);
+  const [voice, setVoice] = useState<{ id: string; state: string; seconds: number; level: number; waiting: number } | null>(null);
+  const voiceId = useRef<string | null>(null);
+  const [lang, setLang] = useLocalStorage<string>('dk.voiceLang', 'ru');
+  const [msg, setMsg] = useState('');
+  const mark = (id: string) => `%%🎤:${id}%%`;
+  function toggleVoice() {
+    if (!native.available()) return setMsg('Голос — только в окне на компьютере');
+    const v = voiceId.current;
+    if (v) return native.voice({ op: voice?.state === 'rec' ? 'pause' : 'resume' });
+    const h = editor.current;
+    if (!h) return;
+    const id = Math.random().toString(36).slice(2, 8);
+    h.insertAtCursor(mark(id));
+    voiceId.current = id;
+    setVoice({ id, state: 'rec', seconds: 0, level: 0, waiting: 0 });
+    setMsg('');
+    native.voice({ op: 'start', id, lang });
+  }
+  const stopVoice = () => voiceId.current && native.voice({ op: 'stop' });
+  useEffect(
+    () =>
+      native.onVoice((e: VoiceEvent) => {
+        const id = voiceId.current;
+        const h = editor.current;
+        if (e.event === 'error') return setMsg(e.message);
+        if (!id || !('id' in e) || e.id !== id) return;
+        if (e.event === 'state') setVoice((v) => v && { ...v, state: e.state, seconds: e.seconds, level: e.level, waiting: e.waiting });
+        else if (e.event === 'text' && e.text && h) {
+          const a = h.around(mark(id));
+          const sp = a && a.before && !/[\s(«"'\u00a0]/.test(a.before) ? ' ' : '';
+          if (!h.replaceText(mark(id), `${sp}${e.text} ${mark(id)}`)) h.insertAtCursor(`${sp}${e.text} `);
+        } else if (e.event === 'done') {
+          if (h && !h.replaceText(` ${mark(id)}`, '')) h.replaceText(mark(id), '');
+          voiceId.current = null;
+          setVoice(null);
+        }
+      }),
+    [],
+  );
+  // ушли с заметки посреди диктовки — закончить; дораспознанное вставит окно (DesktopApp)
+  useEffect(
+    () => () => {
+      const id = voiceId.current;
+      if (id) {
+        native.voice({ op: 'stop' });
+        onVoiceLeft(id, note.id);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [note.id],
+  );
+  // ★ с кнопки на микрофоне: новая заметка — и сразу запись; повторное нажатие — пауза
+  useEffect(() => {
+    if (autoRecord) setTimeout(toggleVoice, 150);
+    const onRecord = () => toggleVoice();
+    window.addEventListener('dk-record', onRecord);
+    return () => window.removeEventListener('dk-record', onRecord);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- Claude: очистить, связно, перевести — новая версия текста, как в быстрых заметках ---
+  const [busy, setBusy] = useState('');
+  async function claude(kind: 'clean' | 'connect' | 'translate', label: string, to?: string) {
+    const text = dropEmptyAnchors(body);
+    if (!text.trim()) return setMsg('Пустая заметка — нечего обрабатывать');
+    setBusy(label);
+    setMsg('');
+    const res = await native.process(kind, text, { lang: note.lang ?? 'ru', to });
+    setBusy('');
+    if (!res.trim()) return setMsg('Claude не ответил — попробуйте ещё раз');
+    const name = kind === 'clean' ? 'очищено' : kind === 'connect' ? 'связно' : `перевод-${to}`;
+    const versions = { ...(note.versions ?? {}), [note.currentVersion ?? 'оригинал']: text, [name]: res };
+    if (timer.current) clearTimeout(timer.current);
+    saved.current = res;
+    setBody(res);
+    kb.updateNote(note.id, { body: res, versions, currentVersion: name });
+  }
+  function pickVersion(name: string) {
+    if (!note.versions?.[name] && note.versions?.[name] !== '') return;
+    const text = dropEmptyAnchors(body);
+    const versions = { ...note.versions, [note.currentVersion ?? 'оригинал']: text };
+    if (timer.current) clearTimeout(timer.current);
+    saved.current = versions[name];
+    setBody(versions[name]);
+    kb.updateNote(note.id, { body: versions[name], versions, currentVersion: name });
+  }
+  const versionNames = Object.keys(note.versions ?? {});
 
   function commitTitle() {
     // пустое так и остаётся пустым: «Без названия» в базе мешало бы ссылкам и поиску
@@ -146,7 +250,76 @@ export function NotePane({
             служебная{scope.why !== 'отметка' ? ` · ${scope.why}` : ''}
           </span>
         )}
+        {versionNames.length > 1 && (
+          <select className="dk-type" title="Версия текста" value={note.currentVersion ?? 'оригинал'} onChange={(e) => pickVersion(e.target.value)}>
+            {versionNames.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        )}
+        {native.available() && (
+          <span className="dk-claude">
+            <button disabled={!!busy} title="Claude: исправить ослышки и пунктуацию — новая версия" onClick={() => claude('clean', 'чищу…')}>
+              ✨ Очистить
+            </button>
+            <button disabled={!!busy} title="Claude: свести надиктованное в связный текст" onClick={() => claude('connect', 'собираю…')}>
+              ≡ Связно
+            </button>
+            <select
+              disabled={!!busy}
+              value=""
+              title="Claude: перевести — новая версия"
+              onChange={(e) => e.target.value && claude('translate', 'перевожу…', e.target.value)}
+            >
+              <option value="">🌐 Перевод</option>
+              <option value="ru">на русский</option>
+              <option value="ar">на арабский</option>
+              <option value="en">на английский</option>
+            </select>
+            {busy && <span className="dk-busy">{busy}</span>}
+          </span>
+        )}
         <span className="dk-spacer" />
+        {native.available() && (
+          <span className={`dk-voice ${voice ? 'on ' + voice.state : ''}`}>
+            {voice ? (
+              <>
+                <span className="dk-voice-dot" style={{ opacity: voice.state === 'rec' ? 0.4 + Math.min(1, voice.level * 6) : 1 }} />
+                <span className="dk-voice-time">
+                  {voice.state === 'rec'
+                    ? `${Math.floor(voice.seconds / 60)}:${String(voice.seconds % 60).padStart(2, '0')}`
+                    : voice.state === 'pause'
+                      ? 'пауза · жду голос'
+                      : `распознаю… ${voice.waiting || ''}`}
+                </span>
+                {(voice.state === 'rec' || voice.state === 'pause') && (
+                  <>
+                    <button title="Пауза / дальше (Ctrl+Пробел)" onClick={toggleVoice}>
+                      {voice.state === 'rec' ? '⏸' : '●'}
+                    </button>
+                    <button title="Готово — дораспознать и закончить" onClick={stopVoice}>
+                      ✓
+                    </button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <button title="Диктовать с места курсора (Ctrl+Пробел)" onClick={toggleVoice}>
+                  🎤
+                </button>
+                <select value={lang} onChange={(e) => setLang(e.target.value)} title="Язык диктовки">
+                  <option value="ru">рус</option>
+                  <option value="ar">араб</option>
+                  <option value="ar-dia">диалект</option>
+                  <option value="en">англ</option>
+                </select>
+              </>
+            )}
+          </span>
+        )}
         {scope?.why === 'отметка' && (
           <button
             className="dk-icon"
@@ -246,6 +419,7 @@ export function NotePane({
       {type === 'schema' && <SchemaView note={note} />}
       {type === 'view' && <ViewResult note={note} />}
 
+      {msg && <div className="dk-msg small">{msg}</div>}
       {picking && <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>}
 
       <LiveEditor
@@ -259,8 +433,16 @@ export function NotePane({
         autoFocus={cursorAt !== undefined || !body}
         cursorAt={cursorAt}
         voice={false}
+        handle={editor}
         className="dk-editor"
         keys={[
+          {
+            key: 'Ctrl-Space',
+            run: () => {
+              toggleVoice();
+              return true;
+            },
+          },
           {
             key: 'Mod-s',
             run: (v) => {

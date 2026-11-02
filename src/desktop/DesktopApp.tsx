@@ -25,6 +25,7 @@ import { CommentComposer, LinkPicker, SetPicker } from '../components/KbDialogs'
 import { NotePane, type PaneFocus } from './NotePane';
 import { useBridgeSync, type BridgeStatus } from './bridge';
 import { Guard } from './Guard';
+import { native } from './native';
 
 interface Target extends PaneFocus {
   id: string;
@@ -237,6 +238,7 @@ export default function DesktopApp() {
     const now = Date.now();
     const id = uid();
     actions.add({ id, title: '', body: '', type: 'note', date: null, createdAt: now, updatedAt: now });
+    madeHere.current.add(id);
     linkTo(parent, id, now);
     go({ id }, inNew);
     setTimeout(() => document.querySelector<HTMLInputElement>('.dk-title')?.focus(), 50);
@@ -272,6 +274,72 @@ export default function DesktopApp() {
     if (to && !live.some((r) => r.from === to && r.to === id)) linkTo(to, id, Date.now());
   }
 
+  // --- быстрые заметки: ★ и кнопка на микрофоне (команды окна, ./native.ts) ---
+  const [recordNew, setRecordNew] = useState<string | null>(null);
+  /** Новая заметка в папке «Быстрые заметки» (нет такой — завести). */
+  function quickNote(record: boolean) {
+    const folder = live.find((n) => n.type === 'folder' && n.title.trim().toLowerCase() === 'быстрые заметки');
+    const now = Date.now();
+    let fid = folder?.id ?? null;
+    if (!fid) {
+      fid = uid();
+      actions.add({ id: fid, title: 'Быстрые заметки', body: '', type: 'folder', date: null, createdAt: now, updatedAt: now });
+    }
+    const id = uid();
+    actions.add({ id, title: '', body: '', type: 'note', date: null, createdAt: now, updatedAt: now });
+    madeHere.current.add(id);
+    linkTo(fid, id, now);
+    if (record) {
+      setRecordNew(id);
+      setTimeout(() => setRecordNew(null), 1000); // только при первом открытии
+    }
+    go({ id });
+    if (!record) setTimeout(() => document.querySelector<HTMLElement>('.dk-page .cm-content')?.focus(), 80);
+  }
+  const quickRef = useRef(quickNote);
+  quickRef.current = quickNote;
+  const noteRef = useRef<string | undefined>(undefined);
+  useEffect(
+    () =>
+      native.onCommand((op) => {
+        if (op === 'quick') quickRef.current(false);
+        // запись: открыта заметка — в неё с места курсора, нет — новая быстрая и сразу запись
+        else if (op === 'record') {
+          if (noteRef.current) window.dispatchEvent(new Event('dk-record'));
+          else quickRef.current(true);
+        }
+      }),
+    [],
+  );
+
+  // ушли с заметки посреди диктовки: дораспознанное — в её текст, на место метки
+  const leftVoice = useRef(new Map<string, string>());
+  useEffect(
+    () =>
+      native.onVoice((e) => {
+        if (e.event !== 'text' && e.event !== 'done') return;
+        const nid = leftVoice.current.get(e.id);
+        if (!nid) return;
+        const mark = `%%🎤:${e.id}%%`;
+        setNotes((list) =>
+          list.map((n) => {
+            if (n.id !== nid || !n.body?.includes(mark)) return n;
+            const body =
+              e.event === 'text'
+                ? n.body.replace(mark, `${e.text ? e.text + ' ' : ''}${mark}`)
+                : n.body.replace(` ${mark}`, '').replace(mark, '');
+            return { ...n, body, updatedAt: Date.now() };
+          }),
+        );
+        if (e.event === 'done') leftVoice.current.delete(e.id);
+      }),
+    [setNotes],
+  );
+
+  // пустая новая заметка, с которой ушли, не нужна: ★ без единого слова не оставляет мусора
+  const madeHere = useRef(new Set<string>());
+  const prevNote = useRef<string | undefined>(undefined);
+
   // --- клавиши: как в Obsidian ---
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -295,7 +363,26 @@ export default function DesktopApp() {
   });
 
   const byId = index.byId;
+  const indexRef = useRef(index);
+  indexRef.current = index;
   const note = target ? byId.get(target.id) : undefined;
+  noteRef.current = note?.id;
+  useEffect(() => {
+    const prev = prevNote.current;
+    prevNote.current = note?.id;
+    if (!prev || prev === note?.id || !madeHere.current.has(prev)) return;
+    // ушли — и в ней ни названия, ни текста, ни тегов: убрать (диктовка ещё идёт — оставить).
+    // Смотрим свежий указатель: последнее несохранённое уходит в базу как раз при уходе.
+    const t = setTimeout(() => {
+      const m = indexRef.current.byId.get(prev);
+      if (m && !m.title.trim() && !(m.body ?? '').trim() && !(m.tags ?? []).length) {
+        madeHere.current.delete(prev);
+        actions.remove(prev);
+      }
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note?.id]);
 
   return (
     <KbContext.Provider value={kb}>
@@ -369,6 +456,8 @@ export default function DesktopApp() {
                 focus={target}
                 allNotes={live}
                 scope={scope.get(note.id)}
+                autoRecord={recordNew === note.id}
+                onVoiceLeft={(vid, nid) => leftVoice.current.set(vid, nid)}
                 picking={!!picking && picking.tab === cur?.key}
                 onDelete={() => {
                   actions.remove(note.id);

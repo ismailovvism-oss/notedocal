@@ -245,3 +245,33 @@
 .dk-tags-panel { display: flex; flex-direction: column; gap: 8px; }
 .dk-tags-panel section { margin: 0; }
 .dk-tags-panel h4 { margin: 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+
+/* --- голос и Claude в шапке заметки --- */
+.dk-claude, .dk-voice { display: flex; align-items: center; gap: 2px; }
+.dk-claude button, .dk-voice button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+}
+.dk-claude button:hover:not(:disabled), .dk-voice button:hover { background: var(--surface-2); color: var(--text); }
+.dk-claude button:disabled { opacity: 0.4; }
+.dk-claude select, .dk-voice select {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+}
+.dk-busy { color: var(--accent); font-size: 12.5px; padding: 0 6px; }
+.dk-voice.on { background: var(--surface-2); border-radius: 999px; padding: 1px 4px 1px 10px; }
+.dk-voice.rec { background: color-mix(in srgb, #c0392b 15%, var(--surface)); }
+.dk-voice.pause { background: color-mix(in srgb, #e67e22 18%, var(--surface)); }
+.dk-voice-dot { width: 9px; height: 9px; border-radius: 50%; background: #c0392b; }
+.dk-voice.pause .dk-voice-dot { background: #e67e22; }
+.dk-voice.wait .dk-voice-dot { background: var(--accent); }
+.dk-voice-time { font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0 4px; }
+.dk-msg { color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 4px 10px; margin-bottom: 8px; }

@@ -10,6 +10,7 @@ import type { Note, Relation } from '../types';
 import { mergeById } from '../lib/storage';
 import { cleanNote, cleanRelation } from '../lib/clean';
 import { loadMeta, saveMeta } from '../lib/notesStore';
+import { attachNative, type QtLink } from './native';
 
 type Msg = Record<string, unknown> & { event?: string; ref?: string };
 
@@ -25,11 +26,6 @@ declare global {
     QWebChannel?: new (t: unknown, cb: (ch: { objects: Record<string, QtLink> }) => void) => unknown;
   }
 }
-interface QtLink {
-  message: { connect: (cb: (s: string) => void) => void };
-  send: (s: string) => void;
-  ready: (cb: (ok: boolean) => void) => void;
-}
 
 /** Подключиться: окно Qt или сервер разработки. Сообщения — в onMsg. */
 function connect(onMsg: (m: Msg) => void): Promise<Transport> {
@@ -37,6 +33,7 @@ function connect(onMsg: (m: Msg) => void): Promise<Transport> {
     return new Promise((resolve) => {
       new window.QWebChannel!(window.qt!.webChannelTransport, (ch) => {
         const link = ch.objects.most;
+        attachNative(link);
         link.message.connect((s) => {
           try {
             onMsg(JSON.parse(s));

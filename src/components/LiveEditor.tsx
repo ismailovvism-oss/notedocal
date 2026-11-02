@@ -202,6 +202,22 @@ export default function LiveEditor({
           view.dispatch({ changes: { from: r.from, to: r.to, insert: fn(view.state.sliceDoc(r.from, r.to)) } });
           view.focus();
         },
+        insertAtCursor: (text) => {
+          const at = view.state.selection.main.to;
+          view.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length }, filter: false });
+        },
+        replaceText: (find, replace) => {
+          const at = view.state.doc.toString().indexOf(find);
+          if (at < 0) return false;
+          view.dispatch({ changes: { from: at, to: at + find.length, insert: replace }, filter: false });
+          return true;
+        },
+        around: (find) => {
+          const doc = view.state.doc.toString();
+          const at = doc.indexOf(find);
+          if (at < 0) return null;
+          return { before: doc.slice(Math.max(0, at - 1), at), after: doc.slice(at + find.length, at + find.length + 1) };
+        },
       };
     }
     if (autoFocus) {

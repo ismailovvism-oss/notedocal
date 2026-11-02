@@ -11,6 +11,12 @@ export interface LiveEditorHandle {
   prefixLine: (prefix: string) => void;
   /** Заменить выделение тем, что вернёт fn. */
   replaceSelection: (fn: (selected: string) => string) => void;
+  /** Вставить на место курсора (после выделенного), не трогая выделенное. */
+  insertAtCursor: (text: string) => void;
+  /** Заменить первое вхождение строки; false — её в тексте нет. */
+  replaceText: (find: string, replace: string) => boolean;
+  /** Текст вокруг строки: знак перед ней и после (для пробелов при вставке). */
+  around: (find: string) => { before: string; after: string } | null;
 }
 
 export interface LiveEditorProps {
