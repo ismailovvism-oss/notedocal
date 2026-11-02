@@ -9,7 +9,7 @@ import type { Note, NoteType } from '../types';
 import LiveEditor from '../components/LiveEditor';
 import type { LiveEditorHandle } from '../components/liveEditorTypes';
 import { useLocalStorage } from '../lib/storage';
-import { native, type VoiceEvent } from './native';
+import { native, type Mics, type VoiceEvent } from './native';
 import { PropsView, SchemaView, ViewResult } from '../components/Props';
 import { PropsEditor, SchemaEditor, ViewEditor } from '../components/PropsEdit';
 import { TYPE_LABELS } from '../lib/noteTypes';
@@ -100,7 +100,20 @@ export function NotePane({
 
   // --- голос: метка %%🎤:id%% на месте курсора, распознанное встаёт перед ней ---
   const editor = useRef<LiveEditorHandle | null>(null);
-  const [voice, setVoice] = useState<{ id: string; state: string; seconds: number; level: number; waiting: number } | null>(null);
+  const [voice, setVoice] = useState<{ id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null>(null);
+  // с какого микрофона писать: mic — какой стоит в системе по умолчанию; выбор запоминается
+  const [mic, setMic] = useLocalStorage<string>('dk.mic', 'mic');
+  const [mics, setMics] = useState<Mics>({ default: '', list: [] });
+  const loadMics = () => void native.mics().then(setMics);
+  useEffect(loadMics, []);
+  const micTitle = (name: string) =>
+    name === 'mic'
+      ? `по умолчанию — ${mics.list.find((m) => m.name === mics.default)?.title ?? '…'}`
+      : (mics.list.find((m) => m.name === name)?.title ?? 'нет такого — по умолчанию');
+  const pickMic = (name: string) => {
+    setMic(name);
+    if (voiceId.current) native.voice({ op: 'mic', mic: name });
+  };
   const voiceId = useRef<string | null>(null);
   const [lang, setLang] = useLocalStorage<string>('dk.voiceLang', 'ru');
   const [msg, setMsg] = useState('');
@@ -114,9 +127,9 @@ export function NotePane({
     const id = Math.random().toString(36).slice(2, 8);
     h.insertAtCursor(mark(id));
     voiceId.current = id;
-    setVoice({ id, state: 'rec', seconds: 0, level: 0, waiting: 0 });
+    setVoice({ id, state: 'rec', seconds: 0, level: 0, waiting: 0, mic: micTitle(mic) });
     setMsg('');
-    native.voice({ op: 'start', id, lang });
+    native.voice({ op: 'start', id, lang, mic });
   }
   const stopVoice = () => voiceId.current && native.voice({ op: 'stop' });
   useEffect(
@@ -126,7 +139,7 @@ export function NotePane({
         const h = editor.current;
         if (e.event === 'error') return setMsg(e.message);
         if (!id || !('id' in e) || e.id !== id) return;
-        if (e.event === 'state') setVoice((v) => v && { ...v, state: e.state, seconds: e.seconds, level: e.level, waiting: e.waiting });
+        if (e.event === 'state') setVoice((v) => v && { ...v, state: e.state, seconds: e.seconds, level: e.level, waiting: e.waiting, mic: e.mic || v.mic });
         else if (e.event === 'text' && e.text && h) {
           const a = h.around(mark(id));
           const sp = a && a.before && !/[\s(«"'\u00a0]/.test(a.before) ? ' ' : '';
@@ -296,6 +309,7 @@ export function NotePane({
                 </span>
                 {(voice.state === 'rec' || voice.state === 'pause') && (
                   <>
+                    <MicSelect value={mic} mics={mics} title={micTitle} onFocus={loadMics} onChange={pickMic} current={voice.mic} />
                     <button title="Пауза / дальше (Ctrl+Пробел)" onClick={toggleVoice}>
                       {voice.state === 'rec' ? '⏸' : '●'}
                     </button>
@@ -310,6 +324,7 @@ export function NotePane({
                 <button title="Диктовать с места курсора (Ctrl+Пробел)" onClick={toggleVoice}>
                   🎤
                 </button>
+                <MicSelect value={mic} mics={mics} title={micTitle} onFocus={loadMics} onChange={pickMic} />
                 <select value={lang} onChange={(e) => setLang(e.target.value)} title="Язык диктовки">
                   <option value="ru">рус</option>
                   <option value="ar">араб</option>
@@ -453,5 +468,42 @@ export function NotePane({
         ]}
       />
     </div>
+  );
+}
+
+/** Выбор микрофона. Видно, с какого пишем сейчас; список обновляется при каждом открытии. */
+function MicSelect({
+  value,
+  mics,
+  title,
+  current,
+  onFocus,
+  onChange,
+}: {
+  value: string;
+  mics: Mics;
+  title: (name: string) => string;
+  /** Запись идёт: как называется микрофон, с которого пишет окно. */
+  current?: string;
+  onFocus: () => void;
+  onChange: (name: string) => void;
+}) {
+  return (
+    <select
+      className="dk-mic"
+      value={value}
+      title={current ? `Пишу с: ${current}` : `Микрофон: ${title(value)}`}
+      onFocus={onFocus}
+      onMouseDown={onFocus}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="mic">🎙 {title('mic')}</option>
+      {mics.list.map((m) => (
+        <option key={m.name} value={m.name}>
+          {m.name === 'monitor' ? m.title : `🎙 ${m.title}`}
+        </option>
+      ))}
+      {value !== 'mic' && !mics.list.some((m) => m.name === value) && <option value={value}>🎙 {title(value)}</option>}
+    </select>
   );
 }

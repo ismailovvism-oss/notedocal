@@ -10,12 +10,13 @@ export interface QtLink {
   send: (s: string) => void;
   voice: (s: string) => void;
   process: (s: string) => void;
+  mics: (cb: (s: string) => void) => void;
   ready: (cb: (ok: boolean) => void) => void;
 }
 
 /** Событие голоса из окна. */
 export type VoiceEvent =
-  | { event: 'state'; id: string | null; state: 'rec' | 'pause' | 'wait' | 'idle'; seconds: number; level: number; waiting: number }
+  | { event: 'state'; id: string | null; state: 'rec' | 'pause' | 'wait' | 'idle'; seconds: number; level: number; waiting: number; mic: string }
   | { event: 'text'; id: string; text: string }
   | { event: 'done'; id: string }
   | { event: 'error'; message: string };
@@ -53,9 +54,22 @@ export function attachNative(l: QtLink) {
   });
 }
 
+/** Откуда писать: имя источника PipeWire, `mic` — по умолчанию, `monitor` — звук компьютера. */
+export interface Mics {
+  default: string;
+  list: { name: string; title: string }[];
+}
+
 export const native = {
   available: () => !!link,
-  voice: (cmd: { op: 'start'; id: string; lang: string } | { op: 'pause' | 'resume' | 'stop' }) => link?.voice(JSON.stringify(cmd)),
+  voice: (cmd: { op: 'start'; id: string; lang: string; mic: string } | { op: 'mic'; mic: string } | { op: 'pause' | 'resume' | 'stop' }) =>
+    link?.voice(JSON.stringify(cmd)),
+  /** Микрофоны системы (спрашивает окно у PipeWire каждый раз: BOYA могли подключить). */
+  mics: () =>
+    new Promise<Mics>((resolve) => {
+      if (!link) return resolve({ default: '', list: [] });
+      link.mics((s) => resolve(parse<Mics>(s) ?? { default: '', list: [] }));
+    }),
   /** Claude: очистить, связно, перевести. Пустая строка — не вышло. */
   process: (kind: 'clean' | 'connect' | 'translate', text: string, opts: { lang?: string; to?: string } = {}) =>
     new Promise<string>((resolve) => {

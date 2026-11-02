@@ -275,3 +275,4 @@
 .dk-voice.wait .dk-voice-dot { background: var(--accent); }
 .dk-voice-time { font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0 4px; }
 .dk-msg { color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 4px 10px; margin-bottom: 8px; }
+.dk-mic { max-width: 220px; }
