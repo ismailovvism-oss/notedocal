@@ -26,6 +26,8 @@ import type { LiveEditorHandle } from './liveEditorTypes';
 import { CommentsMargin } from './Comments';
 import { addAnchor, dropEmptyAnchors, anchorsAt, excerpt, locateSelection, type Span } from '../lib/kb/edit';
 import { runFragmentAction, type FragmentAction } from '../lib/kb/fragmentActions';
+import { checkNewTag, tagCards } from '../lib/kb/tags';
+import { notesWithTag } from '../lib/kb/index';
 
 /** Что сохраняет карточка заметки. */
 export type NotePatch = Pick<
@@ -44,7 +46,7 @@ export type NotePatch = Pick<
   | 'expires'
   | 'usedIn'
 > &
-  Partial<Pick<Note, 'tags'>>;
+  Partial<Pick<Note, 'tags' | 'aliases' | 'props'>>;
 
 interface Props {
   notes: Note[];
@@ -210,6 +212,12 @@ export function NoteModal({
   const [mode, setMode] = useState<'view' | 'edit'>(initialMode ?? (note ? 'view' : 'edit'));
   const [tags, setTags] = useState<string[]>(note?.tags ?? []);
   const [tagInput, setTagInput] = useState('');
+  // карточка тега (роль «тег»): синонимы — aliases, остальное — свойства (src/lib/kb/tags.ts)
+  const listOf = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' && v ? [v] : []).join(', ');
+  const [synonyms, setSynonyms] = useState((note?.aliases ?? []).join(', '));
+  const [seeAlso, setSeeAlso] = useState(listOf(note?.props?.['смотри-также']));
+  const [tagParents, setTagParents] = useState(listOf(note?.props?.['родители']));
+  const [mergedInto, setMergedInto] = useState(listOf(note?.props?.['слит-в']));
   const editor = useRef<LiveEditorHandle | null>(null);
   // куда поставить курсор при переходе в правку — туда, куда нажали в чтении
   const [cursorAt, setCursorAt] = useState<number | undefined>(undefined);
@@ -273,6 +281,7 @@ export function NoteModal({
       expires: expires || '',
       // Поле только у документов: остальным заметкам пустой массив ни к чему.
       ...(isDocument ? { usedIn: splitUsedIn(usedIn) } : {}),
+      ...(type === 'tag' ? tagCardPatch() : {}),
       ...over,
     };
   }
@@ -282,6 +291,8 @@ export function NoteModal({
     // указатель ещё знает старое название)
     if (note && kb && patch.title !== note.title) kb.renamed(note.id, note.title, patch.title);
     onSave(patch);
+    // карточку тега переименовали — сам тег переписать во всех заметках (с вопросом)
+    if (note && kb && note.type === 'tag' && patch.type === 'tag' && patch.title !== note.title) kb.renameTag(note.title, patch.title);
     // Существующую оставляем открытой в режиме отображения; новую закрываем.
     if (note) setMode('view');
     else onClose();
@@ -313,6 +324,10 @@ export function NoteModal({
     setExpires(note?.expires ?? '');
     setUsedIn((note?.usedIn ?? []).join('\n'));
     setTags(note?.tags ?? []);
+    setSynonyms((note?.aliases ?? []).join(', '));
+    setSeeAlso(listOf(note?.props?.['смотри-также']));
+    setTagParents(listOf(note?.props?.['родители']));
+    setMergedInto(listOf(note?.props?.['слит-в']));
     setMode('view');
   }
 
@@ -320,9 +335,30 @@ export function NoteModal({
   const surround = (before: string, after = before) => editor.current?.wrap(before, after);
   const linePrefix = (prefix: string) => editor.current?.prefixLine(prefix);
   const insertCallout = () => editor.current?.replaceSelection((sel) => `> [!note] Заметка\n> ${sel || 'текст'}\n`);
+  function tagCardPatch(): Pick<Note, 'aliases' | 'props'> {
+    const split = (v: string) => v.split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean);
+    const props: Record<string, unknown> = { ...(note?.props ?? {}) };
+    const put = (k: string, v: unknown) => {
+      if ((Array.isArray(v) && v.length) || (typeof v === 'string' && v)) props[k] = v;
+      else delete props[k];
+    };
+    put('смотри-также', split(seeAlso));
+    put('родители', split(tagParents));
+    put('слит-в', split(mergedInto)[0] ?? '');
+    return { aliases: split(synonyms), props };
+  }
   function addTag(raw: string) {
     const t = raw.trim().replace(/^#/, '').replace(/\s+/g, '-');
-    if (t && !tags.some((x) => x.toLowerCase() === t.toLowerCase())) setTags([...tags, t]);
+    if (!t || tags.some((x) => x.toLowerCase() === t.toLowerCase())) return setTagInput('');
+    // новый тег — явным согласием, а не опечаткой (docs/ЗАМЕТКИ.md, 3.3)
+    if (kb) {
+      const c = checkNewTag(kb.index, tagCards(allNotes), t);
+      if (!c.exists) {
+        const hint = c.similar.length ? `\nПохожие: ${c.similar.join(', ')}` : '';
+        if (!confirm(`Тега «${t}» ещё нет — завести новый?${hint}`)) return;
+      }
+    }
+    setTags([...tags, t]);
     setTagInput('');
   }
 
@@ -505,12 +541,42 @@ export function NoteModal({
             </div>
           )}
 
+          {type === 'tag' && kb && (
+            <div className="doc-facts tag-card-facts">
+              <button className="btn btn-small" onClick={() => kb.openTag(title)}>
+                Заметки с этим тегом · {notesWithTag(kb.index, title).size} →
+              </button>
+              {synonyms && (
+                <span className="doc-fact">
+                  <span className="muted small">Синонимы</span> {synonyms}
+                </span>
+              )}
+              {[
+                ['Смотри также', seeAlso],
+                ['Вторые родители', tagParents],
+                ['Слит в', mergedInto],
+              ].map(
+                ([label, v]) =>
+                  v && (
+                    <span key={label} className="doc-fact">
+                      <span className="muted small">{label}</span>{' '}
+                      {v.split(',').map((x) => x.trim()).filter(Boolean).map((x) => (
+                        <button key={x} className="kb-tag kb-tag-btn" onClick={() => kb.openTag(x)}>
+                          #{x}
+                        </button>
+                      ))}
+                    </span>
+                  ),
+              )}
+            </div>
+          )}
+
           {shownTags.length > 0 && (
             <div className="kb-tags">
               {shownTags.map((t) => (
-                <span key={t} className="kb-tag">
+                <button key={t} className="kb-tag kb-tag-btn" title="Все заметки с этим тегом" onClick={() => kb?.openTag(t)}>
                   #{t}
-                </span>
+                </button>
               ))}
             </div>
           )}
@@ -616,6 +682,28 @@ export function NoteModal({
               ))}
             </select>
           </label>
+
+          {type === 'tag' && (
+            <>
+              <p className="muted small">Карточка тега: название — сам тег (путь вроде «тема/фикх/закят»), текст — описание.</p>
+              <label className="field">
+                <span className="field-label">Синонимы, в том числе по-арабски (через запятую)</span>
+                <input className="input" value={synonyms} onChange={(e) => setSynonyms(e.target.value)} placeholder="закят, زكاة" />
+              </label>
+              <label className="field">
+                <span className="field-label">Смотри также</span>
+                <input className="input" list="kb-tag-names" value={seeAlso} onChange={(e) => setSeeAlso(e.target.value)} placeholder="тема/фикх/садака" />
+              </label>
+              <label className="field">
+                <span className="field-label">Вторые родители — тег стоит и в этих ветках</span>
+                <input className="input" list="kb-tag-names" value={tagParents} onChange={(e) => setTagParents(e.target.value)} placeholder="тема/имущество" />
+              </label>
+              <label className="field">
+                <span className="field-label">Слит в (этот тег больше не используется)</span>
+                <input className="input" list="kb-tag-names" value={mergedInto} onChange={(e) => setMergedInto(e.target.value)} />
+              </label>
+            </>
+          )}
 
           {isDocument && (
             <>

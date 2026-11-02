@@ -19,6 +19,7 @@ import { KbContext, type KbApi, type KbFragment, type KbPicked, type KbTarget } 
 import { NoteModal } from './components/NotesView';
 import { CommentComposer, LinkPicker, SetPicker } from './components/KbDialogs';
 import { linkText } from './lib/kb/edit';
+import { planTagRename } from './lib/kb/tags';
 import { useCloudSync, type SyncStatus } from './lib/sync';
 import { useDocReminder, useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
@@ -206,6 +207,8 @@ export default function App() {
     | { kind: 'set'; frag: KbFragment }
     | null
   >(null);
+  // Нажали тег в тексте — вкладка «Заметки» с отбором по нему
+  const [focusTag, setFocusTag] = useState<{ tag: string; n: number } | null>(null);
   // Выбор слов для ссылки в другой заметке: она открыта в стопке на глубине depth
   const [picking, setPicking] = useState<{ depth: number; resolve: (t: KbPicked | null) => void } | null>(null);
   useEffect(() => {
@@ -255,10 +258,33 @@ export default function App() {
       },
       comment: (frag) => setDialog({ kind: 'comment', frag }),
       addToSet: (frag) => setDialog({ kind: 'set', frag }),
+      renameTag: (oldTag, newTag) => {
+        const patches = planTagRename(visibleNotes, oldTag, newTag);
+        if (!patches.length) return 0;
+        if (!confirm(`Переписать тег «${oldTag}» → «${newTag}» в заметках: ${patches.length}?`)) return 0;
+        const byId = new Map(patches.map((p) => [p.id, p]));
+        const now = Date.now();
+        setNotes((list) =>
+          list.map((n) => {
+            const p = byId.get(n.id);
+            if (!p) return n;
+            const { id: _id, ...rest } = p;
+            void _id;
+            return { ...n, ...rest, updatedAt: now };
+          }),
+        );
+        return patches.length;
+      },
+      openTag: (tag) => {
+        setOpened([]);
+        setDialog(null);
+        setTab('notes');
+        setFocusTag((f) => ({ tag, n: (f?.n ?? 0) + 1 }));
+      },
       updateNote: (id, patch) => noteActions.update(id, patch),
       removeNote: (id) => noteActions.remove(id),
     }),
-    [kbIndex, noteActions, setNotes, picking],
+    [kbIndex, noteActions, setNotes, picking, visibleNotes],
   );
 
   /** Название, которого ещё нет: «Комментарий: слова», «Комментарий: слова (2)»… */
@@ -413,6 +439,7 @@ export default function App() {
             setNotes={setNotes}
             relations={visibleRelations}
             setRelations={setRelations}
+            focusTag={focusTag}
           />
         )}
         {tab === 'quick' && (

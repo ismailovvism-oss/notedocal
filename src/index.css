@@ -4471,3 +4471,54 @@ button.chip {
   text-align: start;
 }
 .live-host .cm-rtl { text-align: right; }
+
+/* ---------- Этап 3: фасеты и дерево тегов (src/components/Facets.tsx) ---------- */
+.facet-bar { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; position: relative; }
+.facet-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.facet-chip.open { border-color: var(--accent); }
+.facet-search { flex: 1; min-width: 140px; max-width: 260px; padding: 4px 10px; }
+.facet-pop {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  max-height: 50vh;
+  overflow: auto;
+}
+.facet-found, .facet-chosen { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.facet-found-tag, .facet-chosen-tag, .kb-tag-btn { border: none; cursor: pointer; font: inherit; }
+.facet-chosen-tag { font-size: 0.85rem; }
+.tag-tree { list-style: none; margin: 0; padding: 0; }
+.tag-tree-row { display: flex; align-items: center; gap: 2px; }
+.tag-tree-row.tag-zero { opacity: 0.5; }
+.tag-tree-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+.tag-tree-label:hover { background: var(--surface-2); }
+.tag-tree-label span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-tree-count { margin-left: auto; color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.tag-tree-act {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  opacity: 0;
+}
+.tag-tree-row:hover .tag-tree-act, .tag-tree-act:focus-visible { opacity: 1; }
+@media (pointer: coarse) { .tag-tree-act { opacity: 1; } }
+.tag-tree-act:hover { background: var(--surface-2); color: var(--text); }
+.tag-facet + .tag-facet { margin-top: 8px; }
+.tag-facet-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 4px 0 2px; }
+@media (min-width: 760px) { .ne-panel.ne-tags { width: 250px; } }
+.tag-card-facts { align-items: center; }

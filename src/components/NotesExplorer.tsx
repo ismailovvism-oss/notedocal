@@ -1,23 +1,29 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Note, NoteType, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
-import { getChildren, getParents, getTaggedNotes } from '../lib/relations';
+import { getChildren, getParents } from '../lib/relations';
 import { TYPE_BADGE } from '../lib/noteTypes';
 import { NoteModal } from './NotesView';
+import { useKb } from '../lib/kb/ui';
+import { OTHER, computeFacets, searchTags, tagCards, toggleTag, type Selection } from '../lib/kb/tags';
+import { normTag } from '../lib/kb/syntax';
+import { FacetBar, TagTree } from './Facets';
 
 interface Props {
   notes: Note[];
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   relations: Relation[];
   setRelations: React.Dispatch<React.SetStateAction<Relation[]>>;
+  /** Перейти к тегу (нажали тег в тексте заметки): отбор по нему. `n` меняется на каждый переход. */
+  focusTag?: { tag: string; n: number } | null;
 }
 
-// Текущий вид центра: корень структуры, узел-папка (по трейлу) или тег.
-type View = { kind: 'root' } | { kind: 'node'; trail: string[] } | { kind: 'tag'; id: string };
+// Текущий вид центра: корень структуры или узел-папка (по трейлу). Отбор по тегам — поверх.
+type View = { kind: 'root' } | { kind: 'node'; trail: string[] };
 
 const isNarrow = () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 759px)').matches;
 
-export function NotesExplorer({ notes, setNotes, relations, setRelations }: Props) {
+export function NotesExplorer({ notes, setNotes, relations, setRelations, focusTag }: Props) {
   const notesActions = useListActions(setNotes);
   const relActions = useListActions(setRelations);
 
@@ -31,6 +37,37 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
   const [hideFolders, setHideFolders] = useState(false);
 
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
+
+  // Теги и фасеты (src/lib/kb/tags.ts): отбор по тегам поверх папок
+  const kb = useKb();
+  const cards = useMemo(() => tagCards(notes), [notes]);
+  const [sel, setSel] = useState<Selection>(new Map());
+  const facets = useMemo(() => (kb ? computeFacets(kb.index, cards, sel) : { facets: [], matching: [] }), [kb, cards, sel]);
+  const filtering = [...sel.values()].some((s) => s.size);
+  useEffect(() => {
+    if (!focusTag) return;
+    setEditing(null);
+    setSel(toggleTag(new Map(), normTag(focusTag.tag)));
+  }, [focusTag]);
+
+  /** Карточка тега: есть — открыть, нет — завести. */
+  function openCard(tag: string) {
+    const c = cards.get(tag.toLowerCase());
+    if (c) return setEditing(c.note);
+    const now = Date.now();
+    const note: Note = { id: uid(), type: 'tag', title: tag, body: '', date: null, createdAt: now, updatedAt: now };
+    notesActions.add(note);
+    setEditing(note);
+  }
+  /** Переименовать или слить тег во всех заметках. */
+  function renameTag(tag: string) {
+    const next = prompt(`Новое имя тега «${tag}».\nЕсли такой тег уже есть — теги сольются.`, tag);
+    if (!kb || !next || normTag(next).toLowerCase() === tag.toLowerCase()) return;
+    if (kb.renameTag(tag, normTag(next)) === 0 && !notes.some((n) => n.type === 'tag' && n.title.toLowerCase() === tag.toLowerCase())) {
+      alert('Этим тегом ничего не помечено.');
+    }
+    setSel(new Map());
+  }
   const typeOf = (n?: Note): NoteType => (n?.type ?? 'note');
 
   const toggleExpand = (id: string) =>
@@ -52,8 +89,6 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
 
   const folderChildrenOf = (id: string) =>
     getChildren(id, relations).filter((cid) => typeOf(byId.get(cid)) !== 'tag');
-  const tagChildrenOf = (id: string) =>
-    getChildren(id, relations).filter((cid) => typeOf(byId.get(cid)) === 'tag');
 
   const folderRoots = useMemo(
     () =>
@@ -62,26 +97,14 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
         .sort(cmp),
     [notes, relations],
   );
-  const tagRoots = useMemo(
-    () =>
-      notes
-        .filter(
-          (n) =>
-            typeOf(n) === 'tag' &&
-            getParents(n.id, relations).filter((p) => typeOf(byId.get(p)) === 'tag').length === 0,
-        )
-        .sort(cmp),
-    [notes, relations, byId],
-  );
-
   // --- Что показывает центр ---
   const trail = view.kind === 'node' ? view.trail : [];
   const curId = view.kind === 'node' ? trail[trail.length - 1] : null;
   const curNote = curId ? byId.get(curId) : undefined;
 
   let items: Note[];
-  if (view.kind === 'tag') {
-    items = resolve(getTaggedNotes(view.id, relations)).sort(cmp);
+  if (filtering) {
+    items = resolve(facets.matching).sort((a, b) => b.updatedAt - a.updatedAt);
   } else if (curId) {
     items = resolve(getChildren(curId, relations)).sort(cmp);
   } else {
@@ -135,7 +158,6 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
   }
 
   const activeFolder = view.kind === 'node' ? curId : null;
-  const activeTag = view.kind === 'tag' ? view.id : null;
 
   return (
     <section className="view ne">
@@ -184,8 +206,16 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
           </button>
         </span>
         <span className="ne-facets-spacer" />
-        <span className="muted small">Фасеты · MOC — скоро</span>
       </div>
+
+      {kb && (
+        <FacetBar
+          facets={facets.facets}
+          sel={sel}
+          setSel={setSel}
+          search={(q) => searchTags(kb.index, cards, q)}
+        />
+      )}
 
       <div className="ne-3">
         <TreePanel
@@ -207,13 +237,13 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
             <button className="ne-crumb" onClick={() => setView({ kind: 'root' })}>
               Все
             </button>
-            {view.kind === 'tag' && (
+            {filtering && (
               <>
                 <span className="ne-sep">/</span>
-                <span className="ne-crumb ne-crumb-cur"># {byId.get(view.id)?.title || '…'}</span>
+                <span className="ne-crumb ne-crumb-cur">отбор по тегам · {items.length}</span>
               </>
             )}
-            {view.kind === 'node' &&
+            {!filtering && view.kind === 'node' &&
               trail.map((id, i) => (
                 <span key={id}>
                   <span className="ne-sep">/</span>
@@ -227,7 +257,7 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
               ))}
           </div>
 
-          {curNote && (
+          {curNote && !filtering && (
             <div className="ne-cur">
               {typeOf(curNote) !== 'note' && (
                 <span className={`type-badge type-${typeOf(curNote)}`}>{TYPE_BADGE[typeOf(curNote)]}</span>
@@ -242,8 +272,8 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
           <div className="ne-list">
             {visibleItems.length === 0 ? (
               <p className="muted small ne-empty">
-                {view.kind === 'tag'
-                  ? 'Ничего не помечено этим тегом.'
+                {filtering
+                  ? 'Под такой отбор ничего не подходит.'
                   : items.length > 0
                     ? 'Всё скрыто фильтрами.'
                     : 'Пусто.'}
@@ -256,17 +286,13 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
                   typeOf={typeOf}
                   relations={relations}
                   onOpen={() => setEditing(n)}
-                  onEnter={
-                    view.kind === 'tag'
-                      ? undefined
-                      : () => setView({ kind: 'node', trail: [...trail, n.id] })
-                  }
+                  onEnter={filtering ? undefined : () => setView({ kind: 'node', trail: [...trail, n.id] })}
                 />
               ))
             )}
           </div>
 
-          {view.kind !== 'tag' && (
+          {!filtering && (
             <div className="ne-add">
               <button className="btn btn-small" onClick={() => createChild('note')}>
                 ＋ Заметка
@@ -278,19 +304,29 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations }: Prop
           )}
         </div>
 
-        <TreePanel
-          title="Теги"
-          roots={tagRoots}
-          childrenOf={tagChildrenOf}
-          byId={byId}
-          relations={relations}
-          activeId={activeTag}
-          collapsed={rightClosed}
-          onToggleCollapse={() => setRightClosed((v) => !v)}
-          expanded={expanded}
-          onToggleExpand={toggleExpand}
-          onSelect={(t) => setView({ kind: 'tag', id: t[t.length - 1] })}
-        />
+        {!rightClosed && (
+          <aside className="ne-panel ne-tags">
+            <button className="ne-panel-head" onClick={() => setRightClosed(true)} title="Свернуть">
+              <span className="ne-panel-title">Теги</span>
+              <span className="ne-panel-chev">✕</span>
+            </button>
+            <div className="ne-panel-body">
+              {facets.facets.length === 0 && <span className="muted small">тегов пока нет</span>}
+              {facets.facets.map(({ facet, values }) => (
+                <div key={facet || '—'} className="tag-facet">
+                  <div className="tag-facet-head">{facet === OTHER ? 'прочее' : facet}</div>
+                  <TagTree
+                    nodes={values}
+                    sel={sel}
+                    onToggle={(t) => setSel(toggleTag(sel, t))}
+                    onCard={openCard}
+                    onRename={renameTag}
+                  />
+                </div>
+              ))}
+            </div>
+          </aside>
+        )}
       </div>
 
       {editing && (

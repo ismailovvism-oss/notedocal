@@ -44,6 +44,10 @@ export interface KbApi {
   comment: (f: KbFragment) => void;
   /** Добавить фрагмент в набор (новый или существующий). */
   addToSet: (f: KbFragment) => void;
+  /** Переименовать или слить тег во всех заметках (с вопросом). Возвращает, сколько переписано. */
+  renameTag: (oldTag: string, newTag: string) => number;
+  /** Показать заметки с тегом — вкладка «Заметки», отбор по нему. */
+  openTag: (tag: string) => void;
   /** Поправить и удалить заметку (комментарий на полях). */
   updateNote: (id: string, patch: Partial<Note>) => void;
   removeNote: (id: string) => void;
@@ -74,8 +78,11 @@ export function handleKbClick(
     onFragment(frag.dataset.a ?? frag.dataset.blk ?? '');
     return true;
   }
-  if (el.closest('.kb-tag')) {
-    e.stopPropagation(); // поиск по тегу — этап 3 (docs/ЗАМЕТКИ.md, раздел 7)
+  const tag = el.closest<HTMLElement>('.kb-tag');
+  if (tag) {
+    e.stopPropagation();
+    const name = tag.dataset.tag ?? tag.textContent?.replace(/^#/, '');
+    if (kb && name) kb.openTag(name);
     return true;
   }
   return false;

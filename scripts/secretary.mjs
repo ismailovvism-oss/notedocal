@@ -31,7 +31,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 // Ядро базы знаний — те же исходники, что у приложения (Node 26 запускает .ts сам).
-import { backlinks, buildIndex, planRename } from '../src/lib/kb/index.ts';
+import { backlinks, buildIndex, notesWithTag, planRename } from '../src/lib/kb/index.ts';
+import { computeFacets, planTagRename, tagCards } from '../src/lib/kb/tags.ts';
 import * as P from './projects.mjs';
 
 // ---------- Разбор аргументов ----------
@@ -2378,6 +2379,60 @@ async function main() {
     throw new Error(`не знаю команду note ${action ?? ''}`);
   }
 
+  // tag — теги и фасеты базы знаний (docs/ЗАМЕТКИ.md, 3.3): дерево со счётчиками,
+  // заметки с тегом, переименование и слияние во всех заметках (как в приложении).
+  if (group === 'tag') {
+    const notes = await allNotes(db, uid);
+    if (action === 'list' || !action) {
+      const { facets } = computeFacets(buildIndex(notes), tagCards(notes), new Map());
+      if (json) {
+        console.log(JSON.stringify(facets, null, 2));
+        return;
+      }
+      const print = (nodes, depth) => {
+        for (const n of nodes) {
+          console.log(`${'  '.repeat(depth)}#${n.tag}  ${n.count}`);
+          print(n.children, depth + 1);
+        }
+      };
+      if (!facets.length) console.log('Тегов пока нет.');
+      for (const f of facets) {
+        console.log(f.facet || '(прочее)');
+        print(f.values, 1);
+      }
+      return;
+    }
+    if (action === 'notes') {
+      const tag = rest.join(' ').trim();
+      if (!tag) throw new Error('tag notes "тема/фикх"');
+      const index = buildIndex(notes);
+      const ids = [...notesWithTag(index, tag)];
+      const list = ids.map((id) => index.byId.get(id)).filter(Boolean);
+      console.log(json ? JSON.stringify(list) : list.map((n) => `${n.title}  (${(index.noteTags.get(n.id) ?? []).map((t) => '#' + t).join(' ')})`).join('\n') || 'нет таких');
+      return;
+    }
+    if (action === 'rename') {
+      const [from, to] = rest;
+      if (!from || !to) throw new Error('tag rename "старый/тег" "новый/тег" — если новый уже есть, теги сольются');
+      const patches = planTagRename(notes, from, to);
+      if (!patches.length) {
+        console.log('Этим тегом ничего не помечено.');
+        return;
+      }
+      const now = Date.now();
+      for (let i = 0; i < patches.length; i += 400) {
+        const batch = db.batch();
+        for (const { id, ...p } of patches.slice(i, i + 400)) {
+          batch.set(db.doc(`users/${uid}/notes/${id}`), clean({ ...p, updatedAt: now }), { merge: true });
+        }
+        await batch.commit();
+      }
+      console.log(`Тег «${from}» → «${to}»: переписано заметок ${patches.length}.`);
+      return;
+    }
+    throw new Error(`не знаю команду tag ${action}`);
+  }
+
   // agenda — сводка на несколько дней: события + невыполненные задачи.
   if (group === 'agenda') {
     const days = Number(flags.days ?? 3);
@@ -2714,6 +2769,9 @@ const HELP = `Секретарь notedocal — запись и чтение де
                                             или на карточке человека
   note show "заголовок или id"
   note links "заголовок или id"         ссылки заметки: куда ведёт, кто ссылается сюда, теги
+  tag list [--json]                     дерево тегов по фасетам (тип, тема, …) со счётчиками
+  tag notes "тема/фикх"                 заметки с тегом (и с тегами ниже по пути)
+  tag rename "старый" "новый"           переименовать тег во всех заметках; новый уже есть — слить
   note edit "заголовок или id" [--title "..."] [--body "..."]
                                [--address "..."] [--city "..."] [--category "..."]
                                [--expires D] срок документа (виза, паспорт); none — снять
