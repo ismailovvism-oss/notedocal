@@ -29,6 +29,8 @@ export interface LiveEditorProps {
   onCommit?: (v: string) => void;
   /** Показывать панель действий над выделенными словами. */
   actions?: boolean;
+  /** Кнопка «🎤 Диктовать» (в окне «База» на компьютере диктует само окно — её нет). */
+  voice?: boolean;
   className?: string;
   handle?: React.MutableRefObject<LiveEditorHandle | null>;
 }

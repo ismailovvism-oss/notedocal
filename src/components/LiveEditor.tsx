@@ -16,7 +16,7 @@ import { runFragmentAction, type FragmentAction } from '../lib/kb/fragmentAction
 import { FragmentButtons } from './FragmentButtons';
 import type { LiveEditorProps } from './liveEditorTypes';
 import { useKb, type KbApi } from '../lib/kb/ui';
-import { anchorsAt, dropEmptyAnchors } from '../lib/kb/edit';
+import { addAnchor, anchorsAt, dropEmptyAnchors, excerpt } from '../lib/kb/edit';
 import { fmtSeconds, useRecorder } from '../lib/recorder';
 import { attachmentsReady, uploadAttachment } from '../lib/attachments';
 import { useLocalStorage } from '../lib/storage';
@@ -108,6 +108,7 @@ export default function LiveEditor({
   keys,
   onCommit,
   actions = true,
+  voice = true,
   className,
   handle,
 }: LiveEditorProps) {
@@ -356,6 +357,25 @@ export default function LiveEditor({
     }
   }
 
+  /** Выбирали слова для ссылки из другой заметки: метка на них — и ссылка готова. */
+  function pickHere() {
+    const v = viewRef.current;
+    const k = kbRef.current;
+    if (!v || !k || !noteId) return;
+    const st = v.state;
+    const spans = [...pendingPieces(st), ...st.selection.ranges.filter((r) => !r.empty).map((r) => ({ from: r.from, to: r.to }))];
+    if (!spans.length) return;
+    try {
+      const body = st.doc.toString();
+      const r = addAnchor(body, spans);
+      if (!r.existed) v.dispatch({ changes: diff(body, r.text), filter: false, effects: clearPieces.of(null) });
+      onCommit?.(dropEmptyAnchors(v.state.doc.toString()));
+      k.pickHere({ noteId, title: noteTitle ?? '', anchor: r.name, excerpt: excerpt(body, spans) });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   return (
     <div className={`live-editor ${className ?? ''}`}>
       <div ref={host} className="live-host md" />
@@ -370,12 +390,14 @@ export default function LiveEditor({
             pieces={bar.pieces}
             canNoteActions={!!noteId}
             inAnchor={bar.inAnchor}
+            picking={!!kb?.picking && !!noteId}
+            onPickHere={pickHere}
             format={(f) => viewRef.current && wrap(viewRef.current, ...f)}
           />
           {error && <div className="fragment-err">{error}</div>}
         </div>
       )}
-      {noteId && (
+      {noteId && voice && (
         <div className="voice-row" onMouseDown={(e) => e.preventDefault()}>
           {voiceMsg && <span className="small muted voice-msg">{voiceMsg}</span>}
           {recorder.state === 'idle' ? (

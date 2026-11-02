@@ -1594,6 +1594,12 @@ const VOICE_FOLDER = 'Голосом';
  * {event:'dictations', jobs:[{noteId, id, path, type, lang}]} — диктовки из приложения в любые заметки
  * (окно отвечает {op:'dictated', ref, noteId, id, text, error?}),
  * в том числе после правки с телефона.
+ *
+ * Окно «База» (вся база знаний на компьютере, notoducal: src/desktop/): {op:'base', ref, since} —
+ * прислать заметки с `updatedAt` позже `since` (0 — все) и все связи пачками
+ * {event:'base', notes?, relations?}, в конце {event:'base', done:true}; дальше — только изменённое,
+ * тем же событием. {op:'base-put', ref, notes?, relations?} — записать целиком, если в базе
+ * не новее (последнее изменение побеждает).
  */
 async function notesBridge(db, uid, bucket) {
   const say = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
@@ -1638,16 +1644,54 @@ async function notesBridge(db, uid, bucket) {
     lastJobs = text;
     say({ event: 'dictations', jobs });
   };
+  // Окно «База»: после подписки получает всё, потом — только изменённое
+  let base = false;
+  let baseSince = null; // подписались, а списка ещё нет — отдать, когда придёт
+  const sendBase = (since) => {
+    const list = [...notes.values()].filter((n) => (n.updatedAt ?? 0) > since);
+    for (let i = 0; i < list.length; i += 300) say({ event: 'base', notes: list.slice(i, i + 300) });
+    say({ event: 'base', relations: rels });
+    say({ event: 'base', done: true });
+    base = true;
+    baseSince = null;
+  };
+  const changed = (snap) => snap.docChanges().filter((c) => c.type !== 'removed').map((c) => c.doc.data());
   const fail = (err) => say({ event: 'error', message: String(err?.message ?? err) });
   db.collection(`users/${uid}/notes`).onSnapshot((snap) => {
+    const first = notes === null;
     notes = new Map(snap.docs.map((d) => [d.id, d.data()]));
     publish();
     publishJobs();
+    if (baseSince !== null && rels) sendBase(baseSince);
+    else if (base && !first) {
+      const list = changed(snap);
+      if (list.length) say({ event: 'base', notes: list });
+    }
   }, fail);
   db.collection(`users/${uid}/relations`).onSnapshot((snap) => {
+    const first = rels === null;
     rels = snap.docs.map((d) => d.data());
     publish();
+    if (baseSince !== null && notes) sendBase(baseSince);
+    else if (base && !first) {
+      const list = changed(snap);
+      if (list.length) say({ event: 'base', relations: list });
+    }
   }, fail);
+  /** Записать целиком, если в базе не новее. */
+  const putNewer = async (path, items) => {
+    for (let i = 0; i < items.length; i += 200) {
+      const chunk = items.slice(i, i + 200).map((x) => JSON.parse(JSON.stringify(x))); // без undefined
+      const refs = chunk.map((x) => db.doc(`users/${uid}/${path}/${x.id}`));
+      await db.runTransaction(async (tr) => {
+        const docs = await tr.getAll(...refs);
+        docs.forEach((d, j) => {
+          if (d.exists && (d.data().updatedAt ?? 0) > (chunk[j].updatedAt ?? 0)) return;
+          tr.set(refs[j], chunk[j]);
+        });
+      });
+    }
+  };
   say({ event: 'ready' });
 
   const { createInterface } = await import('node:readline');
@@ -1706,6 +1750,12 @@ async function notesBridge(db, uid, bucket) {
           tr.set(noteRef, patch, { merge: true });
         });
         if (path && bucket && path.startsWith(`users/${uid}/files/`)) await bucket.file(path).delete({ ignoreNotFound: true });
+      } else if (cmd.op === 'base') {
+        if (notes && rels) sendBase(Number(cmd.since) || 0);
+        else baseSince = Number(cmd.since) || 0;
+      } else if (cmd.op === 'base-put') {
+        if (Array.isArray(cmd.notes) && cmd.notes.length) await putNewer('notes', cmd.notes);
+        if (Array.isArray(cmd.relations) && cmd.relations.length) await putNewer('relations', cmd.relations);
       } else if (cmd.op === 'delete') {
         await ref.set({ deleted: true, updatedAt: cmd.updatedAt ?? Date.now() }, { merge: true });
       } else if (cmd.op === 'download' || cmd.op === 'rmfile') {
