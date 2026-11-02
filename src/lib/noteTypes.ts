@@ -14,6 +14,8 @@ export const TYPE_LABELS: Record<NoteType, string> = {
   credential: 'Пароль',
   comment: 'Комментарий',
   set: 'Набор',
+  schema: 'Схема',
+  view: 'Вид',
 };
 
 /** Короткие подписи для бейджа на карточке/строке. */
@@ -30,4 +32,6 @@ export const TYPE_BADGE: Record<NoteType, string> = {
   credential: 'пароль',
   comment: 'комментарий',
   set: 'набор',
+  schema: 'схема',
+  view: 'вид',
 };

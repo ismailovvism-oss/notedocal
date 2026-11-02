@@ -33,6 +33,7 @@ import { getStorage } from 'firebase-admin/storage';
 // Ядро базы знаний — те же исходники, что у приложения (Node 26 запускает .ts сам).
 import { backlinks, buildIndex, notesWithTag, planRename } from '../src/lib/kb/index.ts';
 import { computeFacets, planTagRename, tagCards } from '../src/lib/kb/tags.ts';
+import { display, parseView, runView, schemaCoverage, schemas, valueOf } from '../src/lib/kb/schema.ts';
 import * as P from './projects.mjs';
 
 // ---------- Разбор аргументов ----------
@@ -2433,6 +2434,45 @@ async function main() {
     throw new Error(`не знаю команду tag ${action}`);
   }
 
+  // view run — выборка вида (роль «вид») таблицей; schema check — неполные заметки под схемой
+  // (docs/ЗАМЕТКИ.md, 3.4).
+  if (group === 'view' || group === 'schema') {
+    const notes = await allNotes(db, uid);
+    const index = buildIndex(notes);
+    const name = rest.join(' ').trim().toLowerCase();
+    const role = group === 'view' ? 'view' : 'schema';
+    const mine = notes.filter((n) => n.type === role);
+    if (action === 'list' || !action) {
+      console.log(mine.map((n) => n.title).join('\n') || (group === 'view' ? 'Видов пока нет.' : 'Схем пока нет.'));
+      return;
+    }
+    const note = mine.find((n) => n.title.toLowerCase() === name) ?? mine.find((n) => n.title.toLowerCase().includes(name));
+    if (!note) throw new Error(`нет ${group === 'view' ? 'вида' : 'схемы'} «${name}»; список — ${group} list`);
+    if (group === 'view' && action === 'run') {
+      const spec = parseView(note);
+      const rows = runView(index, spec, note.id);
+      if (json) {
+        console.log(JSON.stringify(rows.map((n) => ({ id: n.id, title: n.title, ...Object.fromEntries(spec.columns.map((c) => [c, valueOf(index, n, c)])) })), null, 2));
+        return;
+      }
+      console.log(`«${note.title}» — заметок: ${rows.length}`);
+      for (const n of rows) console.log(`  ${n.title}${spec.columns.map((c) => ` | ${c}: ${display(valueOf(index, n, c))}`).join('')}`);
+      return;
+    }
+    if (group === 'schema' && action === 'check') {
+      const s = schemas([note])[0];
+      const cov = schemaCoverage(index, s);
+      if (json) {
+        console.log(JSON.stringify({ notes: cov.notes.length, incomplete: cov.incomplete.map((x) => ({ id: x.note.id, title: x.note.title, missing: x.missing })) }, null, 2));
+        return;
+      }
+      console.log(`«${note.title}» (для ${s.for.map((t) => '#' + t).join(', ') || '—'}): заметок ${cov.notes.length}, неполных ${cov.incomplete.length}`);
+      for (const x of cov.incomplete) console.log(`  ${x.note.title} — нет: ${x.missing.join(', ')}`);
+      return;
+    }
+    throw new Error(`не знаю команду ${group} ${action}`);
+  }
+
   // agenda — сводка на несколько дней: события + невыполненные задачи.
   if (group === 'agenda') {
     const days = Number(flags.days ?? 3);
@@ -2772,6 +2812,8 @@ const HELP = `Секретарь notedocal — запись и чтение де
   tag list [--json]                     дерево тегов по фасетам (тип, тема, …) со счётчиками
   tag notes "тема/фикх"                 заметки с тегом (и с тегами ниже по пути)
   tag rename "старый" "новый"           переименовать тег во всех заметках; новый уже есть — слить
+  view list | view run "название"       виды (сохранённые выборки) и их результат [--json]
+  schema list | schema check "название" схемы полей и неполные заметки под ними [--json]
   note edit "заголовок или id" [--title "..."] [--body "..."]
                                [--address "..."] [--city "..."] [--category "..."]
                                [--expires D] срок документа (виза, паспорт); none — снять

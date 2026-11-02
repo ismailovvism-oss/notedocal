@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import type { Attachment, ContactMethod, ContactType, Note, NoteType, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
 import { fromKey } from '../lib/dates';
@@ -28,6 +28,13 @@ import { addAnchor, dropEmptyAnchors, anchorsAt, excerpt, locateSelection, type 
 import { runFragmentAction, type FragmentAction } from '../lib/kb/fragmentActions';
 import { checkNewTag, tagCards } from '../lib/kb/tags';
 import { notesWithTag } from '../lib/kb/index';
+import { PropsView, SchemaView, ViewResult } from './Props';
+import { OWN_KEYS, fieldsOf, schemas } from '../lib/kb/schema';
+
+// правка свойств тянет разбор YAML — грузится, только когда открыли правку
+const PropsEditor = lazy(() => import('./PropsEdit').then((m) => ({ default: m.PropsEditor })));
+const SchemaEditor = lazy(() => import('./PropsEdit').then((m) => ({ default: m.SchemaEditor })));
+const ViewEditor = lazy(() => import('./PropsEdit').then((m) => ({ default: m.ViewEditor })));
 
 /** Что сохраняет карточка заметки. */
 export type NotePatch = Pick<
@@ -218,6 +225,8 @@ export function NoteModal({
   const [seeAlso, setSeeAlso] = useState(listOf(note?.props?.['смотри-также']));
   const [tagParents, setTagParents] = useState(listOf(note?.props?.['родители']));
   const [mergedInto, setMergedInto] = useState(listOf(note?.props?.['слит-в']));
+  // свойства заметки (frontmatter): поля схем, схема, вид — src/lib/kb/schema.ts
+  const [noteProps, setNoteProps] = useState<Record<string, unknown>>(note?.props ?? {});
   const editor = useRef<LiveEditorHandle | null>(null);
   // куда поставить курсор при переходе в правку — туда, куда нажали в чтении
   const [cursorAt, setCursorAt] = useState<number | undefined>(undefined);
@@ -230,26 +239,36 @@ export function NoteModal({
     // только при открытии: переход по ссылке ведёт к фрагменту один раз
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // заметка как она сейчас в базе: карточку часто открывают со снимком (список «Заметок»,
+  // документы), а после сохранения или правки с телефона нужен свежий текст и свойства
+  const live = note ? (allNotes.find((n) => n.id === note.id) ?? note) : null;
   // в чтении текст всегда свежий: его могли поменять ссылка из другой заметки, комментарий,
   // правка с телефона. В правке не трогаем — там свой, ещё не сохранённый текст.
   useEffect(() => {
-    if (mode !== 'view' || !note) return;
-    setBody(note.body ?? '');
-    setTitle(note.title ?? '');
-    setTags(note.tags ?? []);
+    if (mode !== 'view' || !live) return;
+    setBody(live.body ?? '');
+    setTitle(live.title ?? '');
+    setTags(live.tags ?? []);
+    setNoteProps(live.props ?? {});
     // только эти поля: остальное карточка правит сама
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, note?.body, note?.title, note?.tags]);
+  }, [mode, live?.body, live?.title, live?.tags, live?.props]);
+  // поля схем для правки — по тегам, какие стоят сейчас в форме (и из текста)
+  const editFields = useMemo(() => {
+    if (!kb) return [];
+    return fieldsOf(schemas(kb.index.byId.values()), [...tags, ...(note ? (kb.index.noteTags.get(note.id) ?? []) : [])]);
+  }, [kb, tags, note]);
   // теги из свойства и из текста — в чтении; в правке — только свойство (текстовые правятся в тексте)
   const shownTags = note && kb ? (kb.index.noteTags.get(note.id) ?? []) : [];
   const [readEl, setReadEl] = useState<HTMLDivElement | null>(null);
   const readHtml = useMemo(
     () =>
       renderMarkdown(
-        body.trim() || '_Пусто. Нажмите, чтобы добавить текст…_',
+        body.trim() ||
+          (type === 'view' || type === 'schema' ? '_Нажмите здесь, чтобы настроить…_' : '_Пусто. Нажмите, чтобы добавить текст…_'),
         kb && note ? { index: kb.index, noteId: note.id } : undefined,
       ),
-    [body, kb, note],
+    [body, kb, note, type],
   );
 
   const isPerson = type === 'person';
@@ -281,6 +300,7 @@ export function NoteModal({
       expires: expires || '',
       // Поле только у документов: остальным заметкам пустой массив ни к чему.
       ...(isDocument ? { usedIn: splitUsedIn(usedIn) } : {}),
+      ...(Object.keys(noteProps).length || note?.props ? { props: noteProps } : {}),
       ...(type === 'tag' ? tagCardPatch() : {}),
       ...over,
     };
@@ -312,22 +332,23 @@ export function NoteModal({
   // «Назад» из правки: откатываем несохранённые текстовые правки и возвращаемся
   // к отображению. Вложения не откатываем — они сохраняются сразу при загрузке.
   function cancelEdit() {
-    setTitle(note?.title ?? '');
-    setBody(note?.body ?? '');
-    setDate(note?.date ?? '');
-    setType(note?.type ?? 'note');
-    setContacts(note ? effectiveContacts(note) : []);
-    setAddress(note?.address ?? '');
-    setLocationId(note?.locationId ?? '');
-    setCategory(note?.category ?? '');
-    setDocNumber(note?.docNumber ?? '');
-    setExpires(note?.expires ?? '');
-    setUsedIn((note?.usedIn ?? []).join('\n'));
-    setTags(note?.tags ?? []);
-    setSynonyms((note?.aliases ?? []).join(', '));
-    setSeeAlso(listOf(note?.props?.['смотри-также']));
-    setTagParents(listOf(note?.props?.['родители']));
-    setMergedInto(listOf(note?.props?.['слит-в']));
+    setTitle(live?.title ?? '');
+    setBody(live?.body ?? '');
+    setDate(live?.date ?? '');
+    setType(live?.type ?? 'note');
+    setContacts(live ? effectiveContacts(live) : []);
+    setAddress(live?.address ?? '');
+    setLocationId(live?.locationId ?? '');
+    setCategory(live?.category ?? '');
+    setDocNumber(live?.docNumber ?? '');
+    setExpires(live?.expires ?? '');
+    setUsedIn((live?.usedIn ?? []).join('\n'));
+    setTags(live?.tags ?? []);
+    setSynonyms((live?.aliases ?? []).join(', '));
+    setSeeAlso(listOf(live?.props?.['смотри-также']));
+    setTagParents(listOf(live?.props?.['родители']));
+    setMergedInto(listOf(live?.props?.['слит-в']));
+    setNoteProps(live?.props ?? {});
     setMode('view');
   }
 
@@ -337,7 +358,7 @@ export function NoteModal({
   const insertCallout = () => editor.current?.replaceSelection((sel) => `> [!note] Заметка\n> ${sel || 'текст'}\n`);
   function tagCardPatch(): Pick<Note, 'aliases' | 'props'> {
     const split = (v: string) => v.split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean);
-    const props: Record<string, unknown> = { ...(note?.props ?? {}) };
+    const props: Record<string, unknown> = { ...noteProps };
     const put = (k: string, v: unknown) => {
       if ((Array.isArray(v) && v.length) || (typeof v === 'string' && v)) props[k] = v;
       else delete props[k];
@@ -580,6 +601,10 @@ export function NoteModal({
               ))}
             </div>
           )}
+
+          {live && type !== 'schema' && type !== 'view' && <PropsView note={live} />}
+          {live && type === 'schema' && <SchemaView note={live} />}
+          {live && type === 'view' && <ViewResult note={live} />}
 
           {picking && (
             <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>
@@ -930,6 +955,19 @@ export function NoteModal({
             </datalist>
           </div>
         </div>
+
+        <Suspense fallback={<div className="muted small">Загружаю свойства…</div>}>
+          {type === 'schema' && <SchemaEditor props={noteProps} setProps={setNoteProps} />}
+          {type === 'view' && <ViewEditor props={noteProps} setProps={setNoteProps} />}
+          <PropsEditor
+            key={`${type}-${editFields.length}`}
+            props={noteProps}
+            setProps={setNoteProps}
+            fields={editFields}
+            hidden={OWN_KEYS[type] ?? []}
+            titles={allNotes.map((n) => n.title).filter(Boolean)}
+          />
+        </Suspense>
 
         {!fixedDate && !isDocument && (
           <label className="field">

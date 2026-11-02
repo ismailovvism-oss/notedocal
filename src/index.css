@@ -4522,3 +4522,119 @@ button.chip {
 .tag-facet-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 4px 0 2px; }
 @media (min-width: 760px) { .ne-panel.ne-tags { width: 250px; } }
 .tag-card-facts { align-items: center; }
+
+/* ---------- Этап 4: свойства, схемы, виды (src/components/Props.tsx, PropsEdit.tsx) ---------- */
+.props-view {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  font-size: 0.9rem;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.prop-row { display: contents; }
+.prop-key { color: var(--muted); }
+.prop-val { min-width: 0; overflow-wrap: anywhere; }
+.prop-missing .prop-key, .prop-missing .prop-val, .prop-missing-text { color: var(--danger); }
+.prop-wrong .prop-val { text-decoration: underline wavy var(--danger); }
+.props-edit, .schema-edit, .view-edit { display: flex; flex-direction: column; gap: 6px; }
+.prop-edit-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.prop-edit-row input[type='checkbox'] { justify-self: start; }
+.prop-edit-yaml { display: flex; flex-direction: column; gap: 4px; }
+.props-yaml { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+.schema-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.sf-name { flex: 1 1 140px; }
+.sf-kind { width: auto; }
+.sf-opts { flex: 1 1 100%; }
+.sf-req { display: inline-flex; align-items: center; gap: 4px; }
+.sf-acts { margin-left: auto; display: inline-flex; }
+.schema-view { display: flex; flex-direction: column; gap: 6px; }
+.schema-table, .view-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+.schema-table th, .schema-table td, .view-table th, .view-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.schema-incomplete { margin: 0; padding-left: 1.2em; }
+.view-table-wrap { overflow-x: auto; display: flex; flex-direction: column; gap: 4px; }
+.view-th { cursor: pointer; white-space: nowrap; user-select: none; }
+.view-th:hover { color: var(--accent); }
+.view-table .link-btn { text-decoration: none; text-align: left; }
+.view-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+.view-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+}
+.view-card:hover { border-color: var(--accent); }
+.view-card-title { font-weight: 600; }
+.view-card-text { margin-top: 4px; }
+.view-board { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+.board-col {
+  flex: 0 0 220px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.board-head { font-weight: 600; font-size: 0.9rem; }
+.board-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.board-title {
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.board-title:hover { color: var(--accent); }
+.board-move { padding: 2px 6px; font-size: 0.8rem; }
+@media (max-width: 600px) {
+  .prop-edit-row { grid-template-columns: 1fr; gap: 2px; }
+}
+.props-view a.kb-link, .view-table a.kb-link, .view-board a.kb-link, .schema-view a.kb-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ---------- диктовка с места курсора (🎤 в поле правки) ---------- */
