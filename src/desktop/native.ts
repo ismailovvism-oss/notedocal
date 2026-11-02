@@ -1,3 +1,5 @@
+import type { Attachment } from '../types';
+
 // Что умеет только окно на компьютере (~/projects/apps/zametki, baza.py): голос с микрофона,
 // кнопки Claude, команды ★ и кнопки на микрофоне. Связь — тот же объект QWebChannel `most`,
 // что и мост к базе (./bridge.ts). В обычном браузере (npm run dev) этого нет: available() — false.
@@ -7,7 +9,10 @@ export interface QtLink {
   voiceEvent: { connect: (cb: (s: string) => void) => void };
   processed: { connect: (cb: (s: string) => void) => void };
   command: { connect: (cb: (s: string) => void) => void };
+  attached: { connect: (cb: (s: string) => void) => void };
   send: (s: string) => void;
+  attach: (ref: string) => void;
+  attachData: (s: string) => void;
   voice: (s: string) => void;
   process: (s: string) => void;
   mics: (cb: (s: string) => void) => void;
@@ -25,6 +30,13 @@ let link: QtLink | null = null;
 const voiceListeners = new Set<(e: VoiceEvent) => void>();
 const commandListeners = new Set<(op: string) => void>();
 const waiting = new Map<string, (text: string) => void>();
+const uploads = new Map<string, (r: Attached) => void>();
+
+/** Что прикрепилось: готовые вложения для заметки и что не вышло. */
+export interface Attached {
+  attachments: Attachment[];
+  errors: string[];
+}
 let num = 0;
 
 const parse = <T,>(s: string): T | null => {
@@ -47,6 +59,12 @@ export function attachNative(l: QtLink) {
     if (!r) return;
     waiting.get(r.ref)?.(r.text);
     waiting.delete(r.ref);
+  });
+  l.attached.connect((s) => {
+    const r = parse<Attached & { ref: string }>(s);
+    if (!r) return;
+    uploads.get(r.ref)?.(r);
+    uploads.delete(r.ref);
   });
   l.command.connect((s) => {
     const c = parse<{ op: string }>(s);
@@ -77,6 +95,28 @@ export const native = {
       const ref = `p${++num}`;
       waiting.set(ref, resolve);
       link.process(JSON.stringify({ ref, kind, text, ...opts }));
+    }),
+  /** 📎 — окно спросит файлы обычным диалогом и положит их в хранилище. */
+  attach: () =>
+    new Promise<Attached>((resolve) => {
+      if (!link) return resolve({ attachments: [], errors: ['Прикреплять файлы — только в окне на компьютере'] });
+      const ref = `a${++num}`;
+      uploads.set(ref, resolve);
+      link.attach(ref);
+    }),
+  /** Файл перетащили в заметку: содержимое — окну, оно положит в хранилище. */
+  attachFile: (file: File) =>
+    new Promise<Attached>((resolve) => {
+      if (!link) return resolve({ attachments: [], errors: ['Прикреплять файлы — только в окне на компьютере'] });
+      const ref = `a${++num}`;
+      const r = new FileReader();
+      r.onload = () => {
+        uploads.set(ref, resolve);
+        const data = String(r.result).split(',')[1] ?? '';
+        link!.attachData(JSON.stringify({ ref, name: file.name, data }));
+      };
+      r.onerror = () => resolve({ attachments: [], errors: [`${file.name}: не прочитался`] });
+      r.readAsDataURL(file);
     }),
   onVoice: (cb: (e: VoiceEvent) => void) => {
     voiceListeners.add(cb);

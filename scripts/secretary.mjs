@@ -305,6 +305,7 @@ const MIME = {
   '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.png': 'image/png', '.webp': 'image/webp', '.heic': 'image/heic',
   '.gif': 'image/gif', '.txt': 'text/plain', '.md': 'text/markdown',
+  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
 };
 
 /**
@@ -1599,7 +1600,8 @@ const VOICE_FOLDER = 'Голосом';
  * прислать заметки с `updatedAt` позже `since` (0 — все) и все связи пачками
  * {event:'base', notes?, relations?}, в конце {event:'base', done:true}; дальше — только изменённое,
  * тем же событием. {op:'base-put', ref, notes?, relations?} — записать целиком, если в базе
- * не новее (последнее изменение побеждает).
+ * не новее (последнее изменение побеждает). {op:'upload', ref, file} — файл с диска в хранилище,
+ * в ответе ok — `attachment` для заметки.
  */
 async function notesBridge(db, uid, bucket) {
   const say = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
@@ -1699,6 +1701,7 @@ async function notesBridge(db, uid, bucket) {
   for await (const line of lines) {
     if (!line.trim()) continue;
     let cmd;
+    let answer = {}; // что приложить к ответу ok (upload — само вложение)
     try {
       cmd = JSON.parse(line);
       const ref = db.doc(`users/${uid}/notes/${cmd.id}`);
@@ -1753,6 +1756,10 @@ async function notesBridge(db, uid, bucket) {
       } else if (cmd.op === 'base') {
         if (notes && rels) sendBase(Number(cmd.since) || 0);
         else baseSince = Number(cmd.since) || 0;
+      } else if (cmd.op === 'upload') {
+        // окно «База»: прикрепить файл с диска — в хранилище, как это делает приложение
+        if (!bucket) throw new Error('нет доступа к хранилищу файлов');
+        answer = { attachment: await uploadFile(bucket, uid, cmd.file) };
       } else if (cmd.op === 'base-put') {
         if (Array.isArray(cmd.notes) && cmd.notes.length) await putNewer('notes', cmd.notes);
         if (Array.isArray(cmd.relations) && cmd.relations.length) await putNewer('relations', cmd.relations);
@@ -1767,7 +1774,7 @@ async function notesBridge(db, uid, bucket) {
       } else {
         throw new Error(`неизвестная команда: ${cmd.op}`);
       }
-      say({ event: 'ok', ref: cmd.ref });
+      say({ event: 'ok', ref: cmd.ref, ...answer });
     } catch (err) {
       say({ event: 'fail', ref: cmd?.ref, message: String(err?.message ?? err) });
     }

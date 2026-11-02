@@ -217,6 +217,31 @@ export function NotePane({
   }
   const versionNames = Object.keys(note.versions ?? {});
 
+  // --- вложения: 📎 и перетаскивание файлов в заметку (окно кладёт их в хранилище) ---
+  const [uploading, setUploading] = useState(false);
+  const noteNow = useRef(note);
+  noteNow.current = note;
+  async function attach(p: Promise<{ attachments: NonNullable<Note['attachments']>; errors: string[] }>) {
+    setUploading(true);
+    const r = await p;
+    setUploading(false);
+    if (r.attachments.length) {
+      const was = kb.index.byId.get(noteNow.current.id)?.attachments ?? noteNow.current.attachments ?? [];
+      kb.updateNote(noteNow.current.id, { attachments: [...was, ...r.attachments] });
+    }
+    setMsg(r.errors.length ? `Не прикрепилось: ${r.errors.join('; ')}` : '');
+  }
+  const [dropping, setDropping] = useState(false);
+  // ловим раньше редактора (capture): CodeMirror сам читает брошенный файл как текст и вставил
+  // бы PDF мусором в заметку
+  const onDrop = (e: React.DragEvent) => {
+    if (!e.dataTransfer.files.length) return; // перетаскивают текст или заметку — не наше
+    e.preventDefault();
+    e.stopPropagation();
+    setDropping(false);
+    for (const f of e.dataTransfer.files) void attach(native.attachFile(f));
+  };
+
   // --- меню по правой кнопке в тексте (./Menu.tsx) ---
   const menu = useMenu();
   function textMenu(e: React.MouseEvent) {
@@ -307,7 +332,18 @@ export function NotePane({
   }, [note.id, focus]);
 
   return (
-    <div className="dk-note" dir="auto">
+    <div
+      className={`dk-note ${dropping ? 'dk-dropping' : ''}`}
+      dir="auto"
+      onDragOverCapture={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => e.currentTarget === e.target && setDropping(false)}
+      onDropCapture={onDrop}
+    >
       <div className="dk-note-head">
         <select
           className="dk-type"
@@ -407,7 +443,8 @@ export function NotePane({
         </datalist>
       </div>
 
-      {(note.attachments ?? []).length > 0 && (
+      {/* вложения: 📎 — выбрать файлы, или перетащить их в заметку */}
+      {((note.attachments ?? []).length > 0 || native.available()) && (
         <div className="dk-files">
           {note.attachments!.map((a) => (
             <button
@@ -437,6 +474,11 @@ export function NotePane({
               {fileIcon(a)} {a.name}
             </button>
           ))}
+          {native.available() && (
+            <button className="dk-file-chip dk-file-add" title="Прикрепить файлы (PDF, картинки, звук…). Можно и перетащить их в заметку" onClick={() => attach(native.attach())}>
+              {uploading ? 'загружаю…' : '📎 Прикрепить'}
+            </button>
+          )}
         </div>
       )}
 
