@@ -92,7 +92,8 @@ export function propLinks(props: Record<string, unknown> | undefined): (WikiLink
   for (const [name, value] of Object.entries(props ?? {})) {
     const kind = name === 'к' ? 'comment' : name;
     for (const s of propStrings(value)) {
-      const links = findLinks(s);
+      // без `[[` разбор не нужен: свойств в волте тысячи, а сборка указателя — на каждую правку
+      const links = s.includes('[[') ? findLinks(s) : [];
       if (links.length) out.push(...links.map((l) => ({ ...l, kind })));
       else if (RELATION_PROPS.includes(name) && s.trim()) {
         out.push({ raw: s, embed: false, target: s.trim(), start: 0, end: s.length, kind });
@@ -117,6 +118,63 @@ function anchorsAt(anchors: Map<string, AnchorPiece[]>, pos: number): string[] {
     if (pieces.some((p) => p.start <= pos && pos < p.end)) res.push(name);
   }
   return res;
+}
+
+/** Всё, что выводится из одного текста и не зависит от других заметок. */
+export interface BodyParse {
+  parsed: ParsedBody;
+  /** Для каждой ссылки из `parsed.links`: текст вокруг и метки, внутри которых она стоит. */
+  ctx: string[];
+  at: string[][];
+  /** Начало текста без разметки — подпись ссылок из свойств. */
+  head: string;
+}
+
+// Разбор запоминается по заметке: на волте (8 800 заметок, 57 МБ) полный разбор — 2,3 с,
+// а после правки заново разбирается одна заметка. `body` сверяется целиком (строки из одного
+// источника сравниваются мгновенно); у разбора, поднятого с диска, текста нет — там подпись
+// «когда изменена : длина».
+const parseCache = new Map<string, { body?: string; sig: string; bp: BodyParse }>();
+let parseFresh = new Set<string>();
+let parseGone = new Set<string>();
+const sigOf = (n: Note) => `${n.updatedAt ?? 0}:${(n.body ?? '').length}`;
+
+function parseNote(n: Note): BodyParse {
+  const body = n.body ?? '';
+  const hit = parseCache.get(n.id);
+  if (hit && (hit.body === body || (hit.body === undefined && hit.sig === sigOf(n)))) {
+    hit.body = body;
+    return hit.bp;
+  }
+  const parsed = parseBody(body);
+  const bp: BodyParse = {
+    parsed,
+    ctx: parsed.links.map((l) => contextAround(body, l.start, l.end)),
+    at: parsed.links.map((l) => anchorsAt(parsed.anchors, l.start)),
+    head: plainText(body.slice(0, 2000)).slice(0, 160),
+  };
+  parseCache.set(n.id, { body, sig: sigOf(n), bp });
+  parseFresh.add(n.id);
+  parseGone.delete(n.id);
+  return bp;
+}
+
+/** Разбор, сохранённый на устройстве (src/lib/notesStore.ts): поднять до первой сборки. */
+export function seedParseCache(entries: Iterable<[string, { sig: string; bp: BodyParse }]>): void {
+  for (const [id, e] of entries) if (!parseCache.has(id)) parseCache.set(id, { sig: e.sig, bp: e.bp });
+}
+
+/** Что сохранить на устройстве с прошлого раза: новые разборы и id исчезнувших заметок. */
+export function takeParseUpdates(): { put: [string, { sig: string; bp: BodyParse }][]; del: string[] } {
+  const put: [string, { sig: string; bp: BodyParse }][] = [];
+  for (const id of parseFresh) {
+    const e = parseCache.get(id);
+    if (e) put.push([id, { sig: e.sig, bp: e.bp }]);
+  }
+  const del = [...parseGone];
+  parseFresh = new Set();
+  parseGone = new Set();
+  return { put, del };
 }
 
 export function buildIndex(notes: Note[]): KbIndex {
@@ -146,8 +204,8 @@ export function buildIndex(notes: Note[]): KbIndex {
   };
 
   for (const n of live) {
-    const body = n.body ?? '';
-    const parsed = parseBody(body);
+    const bp = parseNote(n);
+    const parsed = bp.parsed;
     index.parsed.set(n.id, parsed);
 
     const refs: LinkRef[] = [];
@@ -160,14 +218,10 @@ export function buildIndex(notes: Note[]): KbIndex {
       if (ambiguous) ref.ambiguous = true;
       return ref;
     };
-    for (const l of parsed.links) {
-      refs.push(
-        toRef(l, l.embed ? 'embed' : 'mention', contextAround(body, l.start, l.end), anchorsAt(parsed.anchors, l.start)),
-      );
-    }
+    parsed.links.forEach((l, i) => refs.push(toRef(l, l.embed ? 'embed' : 'mention', bp.ctx[i], bp.at[i])));
     for (const l of propLinks(n.props)) {
       const label = l.kind === 'comment' ? 'комментарий' : l.kind;
-      refs.push(toRef(l, l.kind, `${label}: ${plainText(body).slice(0, 160)}`, []));
+      refs.push(toRef(l, l.kind, `${label}: ${bp.head}`, []));
     }
     index.outgoing.set(n.id, refs);
     for (const r of refs) {
@@ -189,6 +243,13 @@ export function buildIndex(notes: Note[]): KbIndex {
       if (set) set.add(n.id);
       else index.tagged.set(k, new Set([n.id]));
     }
+  }
+  // заметки, которых больше нет, забываем — и на устройстве тоже
+  for (const id of parseCache.keys()) {
+    if (byId.has(id)) continue;
+    parseCache.delete(id);
+    parseFresh.delete(id);
+    parseGone.add(id);
   }
   return index;
 }

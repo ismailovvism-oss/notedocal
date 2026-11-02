@@ -18,9 +18,10 @@ import {
   signOut as fbSignOut,
   type User,
 } from 'firebase/auth';
-import { collection, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
 import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
+import { loadMeta, saveMeta } from './notesStore';
 import type {
   Attachment,
   CalEvent,
@@ -315,11 +316,28 @@ function cleanChecklist(c: Checklist): Checklist {
   };
 }
 
+/** Что сверено с облаком — для заметок хранится на устройстве (src/lib/notesStore.ts). */
+interface SyncMeta {
+  /** id → «updatedAt:deleted» версии, которая есть в облаке. */
+  synced: Record<string, string>;
+  /** Самое позднее `updatedAt`, пришедшее из облака. */
+  since: number;
+  /** Когда последний раз читали подколлекцию целиком. */
+  full: number;
+}
+
+const DAY = 24 * 3600 * 1000;
+
 /**
  * Синхронизация одной подколлекции `users/{uid}/{path}` по документу на запись.
- * Читает всю подколлекцию (onSnapshot), сливает с локальным (LWW по id) и пишет
+ * Читает подколлекцию (onSnapshot), сливает с локальным (LWW по id) и пишет
  * только изменённые записи (дифф по подписи updatedAt:deleted), батчами.
  * Так документ `users/{uid}` не раздувается (лимит Firestore 1 МБ).
+ *
+ * `delta` (заметки): читать только изменённое с прошлого раза — `updatedAt` позже
+ * запомненного с запасом в 2 суток на расхождение часов устройств. Иначе каждый запуск
+ * читал бы все заметки: на волте это 8 800 чтений за раз при 50 000 бесплатных в сутки.
+ * Раз в неделю подколлекция читается целиком — на случай часов, ушедших сильнее.
  */
 function useCollectionSync<T extends { id: string; updatedAt: number; deleted?: boolean }>(
   user: User | null,
@@ -327,34 +345,85 @@ function useCollectionSync<T extends { id: string; updatedAt: number; deleted?: 
   items: T[],
   setItems: React.Dispatch<React.SetStateAction<T[]>>,
   clean: (x: T) => T,
+  delta = false,
 ): void {
   const syncedRef = useRef<Map<string, string>>(new Map());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const isig = (x: T) => `${x.updatedAt}:${x.deleted ? 1 : 0}`;
+  // писать можно, только когда известно, что уже есть в облаке: иначе всё локальное
+  // показалось бы новым и ушло бы в облако целиком
+  const [known, setKnown] = useState(false);
+  const meta = useRef<{ since: number; full: number; dirty: boolean; timer?: ReturnType<typeof setTimeout> }>({
+    since: 0,
+    full: 0,
+    dirty: false,
+  });
+
+  const saveMetaSoon = useCallback(() => {
+    if (!delta || !user) return;
+    const m = meta.current;
+    m.dirty = true;
+    if (m.timer) return;
+    m.timer = setTimeout(() => {
+      m.timer = undefined;
+      if (!m.dirty) return;
+      m.dirty = false;
+      const value: SyncMeta = { synced: Object.fromEntries(syncedRef.current), since: m.since, full: m.full };
+      void saveMeta(`sync:${user.uid}:${path}`, value);
+    }, 2000);
+  }, [delta, user, path]);
 
   useEffect(() => {
     if (!firebaseEnabled || !db || !user) return;
     syncedRef.current = new Map();
-    const col = collection(db, 'users', user.uid, path);
-    return onSnapshot(
-      col,
-      (snap) => {
-        const cloud = snap.docs.map((d) => d.data() as T);
-        const m = syncedRef.current;
-        for (const r of cloud) m.set(r.id, isig(r));
-        setItems(mergeById(cloud, itemsRef.current));
-      },
-      () => {
-        /* нет доступа/сети — оставляем локальное */
-      },
-    );
+    meta.current = { since: 0, full: 0, dirty: false };
+    setKnown(false);
+    let alive = true;
+    let unsub = () => {};
+    (async () => {
+      let since = 0;
+      if (delta) {
+        const saved = await loadMeta<SyncMeta>(`sync:${user.uid}:${path}`);
+        if (!alive) return;
+        if (saved && saved.full > Date.now() - 7 * DAY) {
+          syncedRef.current = new Map(Object.entries(saved.synced));
+          meta.current = { since: saved.since, full: saved.full, dirty: false };
+          since = saved.since;
+        }
+      }
+      const col = collection(db!, 'users', user.uid, path);
+      const q = since ? query(col, where('updatedAt', '>', since - 2 * DAY)) : col;
+      unsub = onSnapshot(
+        q,
+        (snap) => {
+          const cloud = snap.docs.map((d) => d.data() as T);
+          const m = syncedRef.current;
+          for (const r of cloud) m.set(r.id, isig(r));
+          setItems(mergeById(cloud, itemsRef.current));
+          setKnown(true);
+          if (delta) {
+            const now = Date.now();
+            for (const r of cloud) if (r.updatedAt > meta.current.since) meta.current.since = Math.min(r.updatedAt, now);
+            if (!since && !snap.metadata.fromCache) meta.current.full = now;
+            saveMetaSoon();
+          }
+        },
+        () => {
+          /* нет доступа/сети — оставляем локальное */
+        },
+      );
+    })();
+    return () => {
+      alive = false;
+      unsub();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, path, setItems]);
 
   useEffect(() => {
-    if (!firebaseEnabled || !db || !user) return;
+    if (!firebaseEnabled || !db || !user || !known) return;
     const m = syncedRef.current;
     const changed = items.filter((r) => m.get(r.id) !== isig(r));
     if (changed.length === 0) return;
@@ -373,6 +442,7 @@ function useCollectionSync<T extends { id: string; updatedAt: number; deleted?: 
       )
         .then(() => {
           for (const r of changed) m.set(r.id, isig(r));
+          saveMetaSoon();
         })
         .catch(() => {
           /* повторим при следующем изменении */
@@ -383,7 +453,7 @@ function useCollectionSync<T extends { id: string; updatedAt: number; deleted?: 
       if (timer.current) clearTimeout(timer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, user, path]);
+  }, [items, user, path, known]);
 }
 
 export function useCloudSync({
@@ -418,7 +488,7 @@ export function useCloudSync({
   const isAdmin = !!user?.email && user.email === ADMIN_EMAIL;
 
   // Заметки, связи и помидорки — в подколлекциях users/{uid}/{notes,relations,pomodoros}.
-  useCollectionSync(user, 'notes', notes, setNotes, cleanNote);
+  useCollectionSync(user, 'notes', notes, setNotes, cleanNote, true);
   useCollectionSync(user, 'relations', relations, setRelations, cleanRelation);
   useCollectionSync(user, 'pomodoros', pomodoros, setPomodoros, cleanPomodoro);
   useCollectionSync(user, 'finance', finance, setFinance, cleanFinance);

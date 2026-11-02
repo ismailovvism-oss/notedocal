@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Note, NoteType, Relation } from '../types';
 import { uid, useListActions } from '../lib/storage';
-import { getChildren, getParents } from '../lib/relations';
+import { getChildren } from '../lib/relations';
 import { TYPE_BADGE } from '../lib/noteTypes';
 import { NoteModal } from './NotesView';
 import { useKb } from '../lib/kb/ui';
 import { OTHER, computeFacets, searchTags, tagCards, toggleTag, type Selection } from '../lib/kb/tags';
 import { normTag } from '../lib/kb/syntax';
 import { FacetBar, TagTree } from './Facets';
+import { searchNotes, type SearchHit } from '../lib/kb/search';
 
 interface Props {
   notes: Note[];
@@ -20,6 +21,9 @@ interface Props {
 
 // Текущий вид центра: корень структуры или узел-папка (по трейлу). Отбор по тегам — поверх.
 type View = { kind: 'root' } | { kind: 'node'; trail: string[] };
+
+/** Сколько строк списка показывать сразу: тысячи строк разом браузер рисует секундами. */
+const PAGE = 200;
 
 const isNarrow = () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 759px)').matches;
 
@@ -37,6 +41,21 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations, focusT
   const [hideFolders, setHideFolders] = useState(false);
 
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
+  // родители и дети по связям child — один проход, а не поиск по всем связям на каждую строку
+  const tree = useMemo(() => {
+    const kids = new Map<string, number>();
+    const parents = new Map<string, number>();
+    for (const r of relations) {
+      if (r.deleted || r.type !== 'child') continue;
+      kids.set(r.from, (kids.get(r.from) ?? 0) + 1);
+      parents.set(r.to, (parents.get(r.to) ?? 0) + 1);
+    }
+    return { kids, parents };
+  }, [relations]);
+
+  // Поиск по тексту (src/lib/kb/search.ts): огласовки и вид хамзы не мешают
+  const [query, setQuery] = useState('');
+  const [shown, setShown] = useState(PAGE);
 
   // Теги и фасеты (src/lib/kb/tags.ts): отбор по тегам поверх папок
   const kb = useKb();
@@ -91,19 +110,28 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations, focusT
     getChildren(id, relations).filter((cid) => typeOf(byId.get(cid)) !== 'tag');
 
   const folderRoots = useMemo(
-    () =>
-      notes
-        .filter((n) => typeOf(n) !== 'tag' && getParents(n.id, relations).length === 0)
-        .sort(cmp),
-    [notes, relations],
+    () => notes.filter((n) => typeOf(n) !== 'tag' && !tree.parents.has(n.id)).sort(cmp),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [notes, tree],
   );
   // --- Что показывает центр ---
   const trail = view.kind === 'node' ? view.trail : [];
   const curId = view.kind === 'node' ? trail[trail.length - 1] : null;
   const curNote = curId ? byId.get(curId) : undefined;
 
+  // поиск — по отбору тегов, если он есть, иначе по всем заметкам
+  const found = useMemo(
+    () => (query ? searchNotes(filtering ? resolve(facets.matching) : notes, query, shown) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [query, notes, filtering, facets, shown],
+  );
+  const hitOf = useMemo(() => new Map((found?.hits ?? []).map((h) => [h.note.id, h])), [found]);
+  useEffect(() => setShown(PAGE), [query, sel, view]);
+
   let items: Note[];
-  if (filtering) {
+  if (found) {
+    items = found.hits.map((h) => h.note);
+  } else if (filtering) {
     items = resolve(facets.matching).sort((a, b) => b.updatedAt - a.updatedAt);
   } else if (curId) {
     items = resolve(getChildren(curId, relations)).sort(cmp);
@@ -223,7 +251,7 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations, focusT
           roots={folderRoots}
           childrenOf={folderChildrenOf}
           byId={byId}
-          relations={relations}
+          counts={tree}
           activeId={activeFolder}
           collapsed={leftClosed}
           onToggleCollapse={() => setLeftClosed((v) => !v)}
@@ -240,10 +268,18 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations, focusT
             {filtering && (
               <>
                 <span className="ne-sep">/</span>
-                <span className="ne-crumb ne-crumb-cur">отбор по тегам · {items.length}</span>
+                <span className="ne-crumb ne-crumb-cur">отбор по тегам · {facets.matching.length}</span>
               </>
             )}
-            {!filtering && view.kind === 'node' &&
+            {found && (
+              <>
+                <span className="ne-sep">/</span>
+                <span className="ne-crumb ne-crumb-cur">
+                  поиск · {found.total}
+                </span>
+              </>
+            )}
+            {!filtering && !found && view.kind === 'node' &&
               trail.map((id, i) => (
                 <span key={id}>
                   <span className="ne-sep">/</span>
@@ -257,7 +293,9 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations, focusT
               ))}
           </div>
 
-          {curNote && !filtering && (
+          <SearchBox onSearch={setQuery} />
+
+          {curNote && !filtering && !found && (
             <div className="ne-cur">
               {typeOf(curNote) !== 'note' && (
                 <span className={`type-badge type-${typeOf(curNote)}`}>{TYPE_BADGE[typeOf(curNote)]}</span>
@@ -272,27 +310,36 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations, focusT
           <div className="ne-list">
             {visibleItems.length === 0 ? (
               <p className="muted small ne-empty">
-                {filtering
+                {found
+                  ? 'Ничего не нашлось.'
+                  : filtering
                   ? 'Под такой отбор ничего не подходит.'
                   : items.length > 0
                     ? 'Всё скрыто фильтрами.'
                     : 'Пусто.'}
               </p>
             ) : (
-              visibleItems.map((n) => (
+              visibleItems.slice(0, shown).map((n) => (
                 <Row
                   key={n.id}
                   note={n}
                   typeOf={typeOf}
-                  relations={relations}
+                  kids={tree.kids.get(n.id) ?? 0}
+                  parents={tree.parents.get(n.id) ?? 0}
+                  hit={hitOf.get(n.id)}
                   onOpen={() => setEditing(n)}
-                  onEnter={filtering ? undefined : () => setView({ kind: 'node', trail: [...trail, n.id] })}
+                  onEnter={filtering || found ? undefined : () => setView({ kind: 'node', trail: [...trail, n.id] })}
                 />
               ))
             )}
+            {(found ? found.total : visibleItems.length) > shown && (
+              <button className="btn btn-small ne-more" onClick={() => setShown((x) => x + PAGE)}>
+                Показать ещё ({(found ? found.total : visibleItems.length) - shown})
+              </button>
+            )}
           </div>
 
-          {!filtering && (
+          {!filtering && !found && (
             <div className="ne-add">
               <button className="btn btn-small" onClick={() => createChild('note')}>
                 ＋ Заметка
@@ -347,21 +394,59 @@ export function NotesExplorer({ notes, setNotes, relations, setRelations, focusT
   );
 }
 
+/** Строка поиска. Набранное держит сама — буква не перерисовывает всю вкладку; искать
+ *  просит, когда набор приостановился (по волту поиск — десятые доли секунды). */
+function SearchBox({ onSearch }: { onSearch: (q: string) => void }) {
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => onSearch(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q, onSearch]);
+  return (
+    <div className="ne-search">
+      <input
+        className="input"
+        type="search"
+        dir="auto"
+        placeholder="🔍 Поиск по тексту заметок (арабский — с огласовками и без)"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+    </div>
+  );
+}
+
+/** Текст с подсветкой найденного. */
+function Marked({ text, marks }: { text: string; marks: [number, number][] }) {
+  const out: React.ReactNode[] = [];
+  let at = 0;
+  marks.forEach(([s, e], i) => {
+    if (s > at) out.push(text.slice(at, s));
+    out.push(<mark key={i}>{text.slice(s, e)}</mark>);
+    at = e;
+  });
+  out.push(text.slice(at));
+  return <>{out}</>;
+}
+
 function Row({
   note,
   typeOf,
-  relations,
+  kids,
+  parents,
+  hit,
   onOpen,
   onEnter,
 }: {
   note: Note;
   typeOf: (n?: Note) => NoteType;
-  relations: Relation[];
+  kids: number;
+  parents: number;
+  /** Найдено поиском: кусок текста с подсветкой. */
+  hit?: SearchHit;
   onOpen: () => void;
   onEnter?: () => void;
 }) {
-  const kids = getChildren(note.id, relations).length;
-  const parents = getParents(note.id, relations).length;
   const container = !!onEnter && (typeOf(note) === 'folder' || kids > 0);
   const t = typeOf(note);
   return (
@@ -369,6 +454,11 @@ function Row({
       <button className="ne-row-main" onClick={container ? onEnter : onOpen}>
         {t !== 'note' && <span className={`type-badge type-${t}`}>{TYPE_BADGE[t]}</span>}
         <span className="ne-title">{note.title || 'Без названия'}</span>
+        {hit && hit.snippet && (
+          <span className="ne-snippet" dir="auto">
+            <Marked text={hit.snippet} marks={hit.marks} />
+          </span>
+        )}
         {parents > 1 && (
           <span className="ne-multi" title="Несколько родителей">
             ⧉{parents}
@@ -389,7 +479,7 @@ function TreePanel({
   roots,
   childrenOf,
   byId,
-  relations,
+  counts,
   activeId,
   collapsed,
   onToggleCollapse,
@@ -401,7 +491,7 @@ function TreePanel({
   roots: Note[];
   childrenOf: (id: string) => string[];
   byId: Map<string, Note>;
-  relations: Relation[];
+  counts: { kids: Map<string, number>; parents: Map<string, number> };
   activeId: string | null;
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -409,6 +499,7 @@ function TreePanel({
   onToggleExpand: (id: string) => void;
   onSelect: (trail: string[]) => void;
 }) {
+  const [shown, setShown] = useState(PAGE);
   if (collapsed) return null;
   return (
     <aside className="ne-panel">
@@ -420,20 +511,25 @@ function TreePanel({
         {roots.length === 0 ? (
           <span className="muted small">пусто</span>
         ) : (
-          roots.map((r) => (
+          roots.slice(0, shown).map((r) => (
               <TreeNode
                 key={r.id}
                 id={r.id}
                 trail={[]}
                 childrenOf={childrenOf}
                 byId={byId}
-                relations={relations}
+                counts={counts}
                 activeId={activeId}
                 expanded={expanded}
                 onToggleExpand={onToggleExpand}
                 onSelect={onSelect}
             />
           ))
+        )}
+        {roots.length > shown && (
+          <button className="link-btn small" onClick={() => setShown((x) => x + PAGE)}>
+            ещё {roots.length - shown}
+          </button>
         )}
       </div>
     </aside>
@@ -445,7 +541,7 @@ function TreeNode({
   trail,
   childrenOf,
   byId,
-  relations,
+  counts,
   activeId,
   expanded,
   onToggleExpand,
@@ -455,7 +551,7 @@ function TreeNode({
   trail: string[];
   childrenOf: (id: string) => string[];
   byId: Map<string, Note>;
-  relations: Relation[];
+  counts: { kids: Map<string, number>; parents: Map<string, number> };
   activeId: string | null;
   expanded: Set<string>;
   onToggleExpand: (id: string) => void;
@@ -464,14 +560,16 @@ function TreeNode({
   const note = byId.get(id);
   if (!note) return null;
   const cyclic = trail.includes(id);
-  const kids = cyclic ? [] : childrenOf(id);
+  // детей ищем, только когда узел раскрыт: в корне дерева могут быть тысячи заметок
   const isOpen = expanded.has(id);
-  const parents = getParents(id, relations).length;
+  const kids = cyclic ? [] : isOpen ? childrenOf(id) : [];
+  const hasKids = !cyclic && (isOpen ? kids.length > 0 : (counts.kids.get(id) ?? 0) > 0);
+  const parents = counts.parents.get(id) ?? 0;
 
   return (
     <div className="tree-node">
       <div className="tree-row">
-        {kids.length > 0 ? (
+        {hasKids ? (
           <button className="tree-toggle" onClick={() => onToggleExpand(id)}>
             {isOpen ? '▾' : '▸'}
           </button>
@@ -495,7 +593,7 @@ function TreeNode({
             trail={[...trail, id]}
             childrenOf={childrenOf}
             byId={byId}
-            relations={relations}
+            counts={counts}
             activeId={activeId}
             expanded={expanded}
             onToggleExpand={onToggleExpand}

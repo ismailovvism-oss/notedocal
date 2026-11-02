@@ -22,9 +22,10 @@
 //   node scripts/secretary.mjs agenda --days 7
 //   node scripts/secretary.mjs batch дела.json
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { resolve, basename, extname } from 'node:path';
+import { resolve, basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -35,6 +36,47 @@ import { backlinks, buildIndex, notesWithTag, planRename } from '../src/lib/kb/i
 import { computeFacets, planTagRename, tagCards } from '../src/lib/kb/tags.ts';
 import { display, parseView, runView, schemaCoverage, schemas, valueOf } from '../src/lib/kb/schema.ts';
 import * as P from './projects.mjs';
+
+// ---------- Заметки: копия на диске, из облака — только изменённые ----------
+
+const NOTES_CACHE_DIR = join(homedir(), '.cache', 'notoducal');
+const DAY_MS = 24 * 3600 * 1000;
+
+/**
+ * Все заметки (с надгробиями). Каждая команда читала подколлекцию целиком — на волте это
+ * 8 800 чтений Firestore за раз при 50 000 бесплатных в сутки. Теперь копия лежит в
+ * ~/.cache/notoducal, а из облака берутся заметки с `updatedAt` позже запомненного (с запасом
+ * 2 суток на часы устройств); раз в неделю — целиком. Так же делает приложение (src/lib/sync.ts).
+ */
+async function notesData(db, uid) {
+  const file = join(NOTES_CACHE_DIR, `notes-${uid}.json`);
+  let cache = null;
+  try {
+    cache = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    // копии нет или она битая — читаем целиком
+  }
+  const now = Date.now();
+  const col = db.collection(`users/${uid}/notes`);
+  const fresh = cache && cache.full > now - 7 * DAY_MS;
+  const snap = fresh ? await col.where('updatedAt', '>', cache.since - 2 * DAY_MS).get() : await col.get();
+  const byId = new Map(fresh ? Object.entries(cache.notes) : []);
+  let since = fresh ? cache.since : 0;
+  for (const d of snap.docs) {
+    const n = d.data();
+    byId.set(d.id, n);
+    if ((n.updatedAt ?? 0) > since) since = Math.min(n.updatedAt, now);
+  }
+  try {
+    mkdirSync(NOTES_CACHE_DIR, { recursive: true });
+    const tmp = file + '.tmp';
+    writeFileSync(tmp, JSON.stringify({ since, full: fresh ? cache.full : now, notes: Object.fromEntries(byId) }));
+    renameSync(tmp, file);
+  } catch {
+    // не записалось — в следующий раз прочитаем больше
+  }
+  return [...byId.values()];
+}
 
 // ---------- Разбор аргументов ----------
 
@@ -869,8 +911,8 @@ function oneEvent(events, query) {
 
 /** Локация — заметка типа 'location' (см. lib/locations.ts). Ищет по названию. */
 async function findLocation(db, uid, query) {
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  const all = snap.docs.map((d) => d.data()).filter((n) => !n.deleted && n.type === 'location');
+  const data = await notesData(db, uid);
+  const all = data.filter((n) => !n.deleted && n.type === 'location');
   const byId = all.filter((n) => n.id === query);
   if (byId.length) return byId[0];
   const q = query.toLowerCase();
@@ -1155,8 +1197,7 @@ function parseSite(raw) {
 
 /** Все заметки пользователя (без надгробий). */
 async function readNotes(db, uid) {
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  return snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
+  return (await notesData(db, uid)).filter((n) => !n.deleted);
 }
 
 function daysBetweenKeys(a, b) {
@@ -1217,8 +1258,8 @@ async function personAdd(db, uid, name, flags) {
   const key = (c) => `${c.type}:${c.value.replace(/\s+/g, '').toLowerCase()}`;
   const now = Date.now();
 
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  const notes = snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
+  const data = await notesData(db, uid);
+  const notes = data.filter((n) => !n.deleted);
   const existing = notes.find(
     (n) => n.type === 'person' && (n.title ?? '').trim().toLowerCase() === name.trim().toLowerCase(),
   );
@@ -1320,9 +1361,8 @@ const LOCATION_CATEGORIES = [
 async function ensureFolder(db, uid, title) {
   const name = title.trim();
   if (!name) throw new Error('--folder: нужно название папки');
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  const existing = snap.docs
-    .map((d) => d.data())
+  const data = await notesData(db, uid);
+  const existing = data
     .find(
       (n) =>
         !n.deleted && n.type === 'folder' && (n.title ?? '').trim().toLowerCase() === name.toLowerCase(),
@@ -1350,9 +1390,8 @@ async function ensureFolder(db, uid, title) {
 async function findPersonId(db, uid, name) {
   const wanted = name.trim().toLowerCase();
   if (!wanted) throw new Error('--person: нужно имя');
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  const person = snap.docs
-    .map((d) => d.data())
+  const data = await notesData(db, uid);
+  const person = data
     .find((n) => !n.deleted && n.type === 'person' && (n.title ?? '').trim().toLowerCase() === wanted);
   if (!person) throw new Error(`--person: карточки «${name}» нет, заведи её через person add`);
   return person.id;
@@ -1386,9 +1425,8 @@ async function unlinkChild(db, uid, parentId, childId) {
 /** Папка или карточка человека по названию — общий разбор для --folder/--person/--detach. */
 async function holderId(db, uid, title) {
   const wanted = title.trim().toLowerCase();
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  const holder = snap.docs
-    .map((d) => d.data())
+  const data = await notesData(db, uid);
+  const holder = data
     .find(
       (n) => !n.deleted && ['folder', 'person'].includes(n.type) && (n.title ?? '').trim().toLowerCase() === wanted,
     );
@@ -1467,8 +1505,8 @@ async function noteAdd(db, uid, title, flags, bucket) {
 
 /** Ищет заметку по id или по подстроке заголовка. */
 async function findNotes(db, uid, query) {
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  const all = snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
+  const data = await notesData(db, uid);
+  const all = data.filter((n) => !n.deleted);
   const byId = all.filter((n) => n.id === query);
   if (byId.length) return byId;
   const q = query.toLowerCase();
@@ -1497,8 +1535,8 @@ function splitUsed(text) {
 }
 
 async function noteList(db, uid, limit, parent) {
-  const snap = await db.collection(`users/${uid}/notes`).get();
-  const notes = snap.docs.map((d) => d.data()).filter((n) => !n.deleted);
+  const data = await notesData(db, uid);
+  const notes = data.filter((n) => !n.deleted);
   let pool = notes;
   if (parent) {
     const wanted = parent.trim().toLowerCase();
@@ -1536,7 +1574,7 @@ async function rewriteLinks(db, uid, all, noteId, oldTitle, newTitle) {
 }
 
 async function allNotes(db, uid) {
-  return (await db.collection(`users/${uid}/notes`).get()).docs.map((d) => d.data()).filter((n) => !n.deleted);
+  return (await notesData(db, uid)).filter((n) => !n.deleted);
 }
 
 // ---------- Мост для окна «Быстрые заметки» ----------
@@ -2594,9 +2632,8 @@ async function main() {
       return;
     }
     if (action === 'list') {
-      const snap = await db.collection(`users/${uid}/notes`).get();
-      const persons = snap.docs
-        .map((d) => d.data())
+      const data = await notesData(db, uid);
+      const persons = data
         .filter((n) => !n.deleted && n.type === 'person')
         .sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
       if (json) {

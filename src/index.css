@@ -2530,10 +2530,17 @@ a.fin-contact-chip:hover {
   .ne {
     /* Выходим за пределы узкого контейнера, центрируя блок отступом.
        Без transform — иначе fixed-модалка привязалась бы к этому блоку. */
-    --ne-w: min(1180px, calc(100vw - 32px));
+    /* 100vw — вместе с полосой прокрутки: запас на неё */
+    --ne-w: min(1180px, calc(100vw - 48px));
     width: var(--ne-w);
     margin-left: calc((100% - var(--ne-w)) / 2);
   }
+}
+/* с рельсом навигации слева (84px) — без него раздел уезжал под рельс */
+@media (min-width: 760px) {
+  .ne { --ne-w: min(1180px, calc(100vw - 84px - 48px)); }
+}
+@media (min-width: 680px) {
   .ne-3 { flex-direction: row; align-items: flex-start; gap: 16px; }
   .ne-panel { width: 210px; flex: none; }
   .ne-panel-body { max-height: 70vh; overflow: auto; }
@@ -2580,6 +2587,19 @@ a.fin-contact-chip:hover {
 }
 .ne-chev { flex: none; color: var(--muted); font-size: 16px; }
 .ne-add { display: flex; gap: 8px; margin-top: 14px; }
+.ne-search { margin-bottom: 10px; }
+.ne-search .input { width: 100%; }
+.ne-row-main:has(.ne-snippet) { flex-wrap: wrap; }
+.ne-snippet {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+.ne-snippet mark { background: var(--accent-soft); color: var(--text); border-radius: 3px; padding: 0 1px; }
+.ne-more { align-self: center; margin-top: 4px; }
 
 .tree-row { display: flex; align-items: center; gap: 2px; }
 .tree-toggle { border: none; background: none; color: var(--muted); width: 20px; font-size: 11px; padding: 2px; }

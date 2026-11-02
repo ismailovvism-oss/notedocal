@@ -5,7 +5,6 @@ import type {
   ClipItem,
   FinanceEntry,
   MoonSighting,
-  Note,
   PomodoroSession,
   PomodoroSettings,
   Project,
@@ -14,6 +13,7 @@ import type {
   Task,
 } from './types';
 import { uid, useListActions, useLocalStorage, visible } from './lib/storage';
+import { persistParse, useNotesStore } from './lib/notesStore';
 import { buildIndex, planRename } from './lib/kb/index';
 import { KbContext, type KbApi, type KbFragment, type KbPicked, type KbTarget } from './lib/kb/ui';
 import { NoteModal } from './components/NotesView';
@@ -77,7 +77,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('projects');
   const [theme, setTheme] = useLocalStorage<Theme>('ndc.theme', initialTheme);
   const [tasks, setTasks] = useLocalStorage<Task[]>('ndc.tasks', []);
-  const [notes, setNotes] = useLocalStorage<Note[]>('ndc.notes', []);
+  // заметки — в IndexedDB (src/lib/notesStore.ts): волт в localStorage не помещается
+  const [notes, setNotes] = useNotesStore();
   const [sightings, setSightings] = useLocalStorage<MoonSighting[]>('ndc.sightings', []);
   const [checklists, setChecklists] = useLocalStorage<Checklist[]>('ndc.checklists', []);
   const [events, setEvents] = useLocalStorage<CalEvent[]>('ndc.events', []);
@@ -195,8 +196,13 @@ export default function App() {
   const visiblePomodoros = useMemo(() => visible(pomodoros), [pomodoros]);
 
   // База знаний: указатель связей из текстов всех заметок (src/lib/kb, docs/ЗАМЕТКИ.md).
-  // Строится в памяти заново при каждом изменении заметок — сотни заметок за миллисекунды.
+  // Собирается при каждом изменении заметок; заново разбираются только изменённые, а разбор
+  // хранится на устройстве — при запуске всё не разбирается заново.
   const kbIndex = useMemo(() => buildIndex(visibleNotes), [visibleNotes]);
+  useEffect(() => {
+    const t = setTimeout(() => void persistParse(), 2000);
+    return () => clearTimeout(t);
+  }, [kbIndex]);
   const noteActions = useListActions(setNotes);
   // Заметки, открытые переходом по ссылке, — стопкой поверх любой вкладки: закрыл — вернулся.
   const [opened, setOpened] = useState<KbTarget[]>([]);
