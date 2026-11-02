@@ -22,12 +22,15 @@ import { TagTree } from '../components/Facets';
 import { FolderTree } from './Tree';
 import { Backlinks } from '../components/Backlinks';
 import { CommentComposer, LinkPicker, SetPicker } from '../components/KbDialogs';
+import { PropsView } from '../components/Props';
 import { NotePane, type PaneFocus } from './NotePane';
 import { useBridgeSync, type BridgeStatus } from './bridge';
 import { Guard } from './Guard';
-import { native } from './native';
+import { native, vaultApi } from './native';
 import { MenuHost, useMenu, type MenuItem } from './Menu';
 import { FileView, fileIcon } from './FileView';
+import { useVault, type Vault } from './useVault';
+import { dirName, inVault, pathOfId } from '../lib/kb/vault';
 
 interface Target extends PaneFocus {
   id: string;
@@ -43,6 +46,8 @@ interface Tab {
 }
 
 const PAGE = 200;
+/** Облачные заметки (notedocal) при открытом хранилище — отдельной папкой дерева. */
+const CLOUD = 'c:облако';
 let seq = 0;
 const newTab = (t: Target): Tab => ({ key: `t${++seq}`, hist: [t], pos: 0 });
 
@@ -58,39 +63,74 @@ function Desktop() {
   const [notes, setNotes, loaded] = useNotesStore();
   const [relations, setRelations] = useLocalStorage<Relation[]>('ndc.relations', []);
   const status = useBridgeSync(notes, setNotes, relations, setRelations, loaded);
-  const live = useMemo(() => visible(notes), [notes]);
+  const actions = useListActions(setNotes);
+  const relActions = useListActions(setRelations);
+
+  // Хранилище-папка на компьютере (./useVault.ts) — основа; облако notedocal — рядом, папкой ☁.
+  // Переименование заметки хранилища меняет её id — вкладки и раскрытые папки идут следом.
+  const renamedRef = useRef<(from: string, to: string) => void>(() => {});
+  const vault = useVault((a, b) => renamedRef.current(a, b));
+  const [vaultErr, setVaultErr] = useState('');
+  const fail = useCallback((e: unknown) => setVaultErr((e as Error).message), []);
+  /** Правка по адресу: заметка хранилища — в свой файл, облачная — в notedocal. */
+  const store = useMemo(
+    () => ({
+      update: (id: string, patch: Partial<Note>) => (inVault(id) ? void vault.update(id, patch).catch(fail) : actions.update(id, patch)),
+      remove: (id: string) => (inVault(id) ? void vault.remove(id).catch(fail) : actions.remove(id)),
+    }),
+    [vault, actions, fail],
+  );
+  const cloudLive = useMemo(() => visible(notes), [notes]);
+  const live = useMemo(
+    () =>
+      vault.info
+        ? [...vault.notes, { id: CLOUD, title: '☁ notedocal', body: '', type: 'folder' as const, date: null, createdAt: 0, updatedAt: 0 }, ...cloudLive]
+        : cloudLive,
+    [vault.info, vault.notes, cloudLive],
+  );
+  // связи для дерева: папки хранилища по путям, облачное — внутри ☁
+  const treeRelations = useMemo(() => {
+    if (!vault.info) return relations;
+    const hasParent = new Set(relations.filter((r) => !r.deleted && r.type === 'child').map((r) => r.to));
+    const toCloud: Relation[] = cloudLive
+      .filter((n) => !hasParent.has(n.id))
+      .map((n) => ({ id: `cr:${n.id}`, from: CLOUD, to: n.id, type: 'child', position: 0, createdAt: 0, updatedAt: 0 }));
+    return [...vault.relations, ...toCloud, ...relations];
+  }, [vault.info, vault.relations, relations, cloudLive]);
   const index = useMemo(() => buildIndex(live), [live]);
   useEffect(() => {
     const t = setTimeout(() => void persistParse(), 2000);
     return () => clearTimeout(t);
   }, [index]);
-  const actions = useListActions(setNotes);
-
   // Рабочее и служебное (src/lib/kb/scope.ts): хозяйство — здоровье, документы, контакты —
   // в списке, поиске и тегах не видно, пока не включено «показать служебное»
   const [hiddenFolders, setHiddenFolders] = useLocalStorage<string[]>('dk.hiddenFolders', SERVICE_FOLDERS);
   const [showAll, setShowAll] = useLocalStorage<boolean>('dk.showAll', false);
-  const folders = useMemo(() => folderTitles(relations, index.byId), [relations, index]);
+  const folders = useMemo(() => folderTitles(treeRelations, index.byId), [treeRelations, index]);
   const scope = useMemo(() => {
     const why = new Map<string, ScopeWhy>();
-    for (const n of live) why.set(n.id, scopeOf(n, folders.get(n.id), hiddenFolders));
+    for (const n of live) {
+      // своё, из хранилища, — всегда рабочее (кроме спрятанного отметкой)
+      if (inVault(n.id) || n.id === CLOUD) why.set(n.id, { shown: n.inBase !== false, why: n.inBase === false ? 'отметка' : '' });
+      else why.set(n.id, scopeOf(n, folders.get(n.id), hiddenFolders));
+    }
     return why;
   }, [live, folders, hiddenFolders]);
   const shown = useMemo(() => new Set([...scope].filter(([, w]) => w.shown).map(([id]) => id)), [scope]);
   // папки верхнего уровня — их можно прятать и показывать
   const topFolders = useMemo(() => {
     const hasParent = new Set(relations.filter((r) => !r.deleted && r.type === 'child').map((r) => r.to));
-    return live.filter((n) => n.type === 'folder' && !hasParent.has(n.id)).map((n) => n.title).filter(Boolean).sort();
-  }, [live, relations]);
+    return cloudLive.filter((n) => n.type === 'folder' && !hasParent.has(n.id)).map((n) => n.title).filter(Boolean).sort();
+  }, [cloudLive, relations]);
 
   const isService = useCallback(
     (fid: string) => {
+      if (inVault(fid) || fid === CLOUD) return false;
       const hidden = new Set(hiddenFolders.map((x) => x.trim().toLowerCase()));
       return [index.byId.get(fid)?.title ?? '', ...(folders.get(fid) ?? [])].some((t) => hidden.has(t.trim().toLowerCase()));
     },
     [index, folders, hiddenFolders],
   );
-  const relActions = useListActions(setRelations);
   const [open, setOpen] = useLocalStorage<string[]>('dk.open', []);
 
   // Отбор по тегам — во вкладке «Теги» справа; отобранное — слева вместо дерева
@@ -148,6 +188,10 @@ function Desktop() {
           id = index.byName.get(t.name.trim().toLowerCase())?.[0]?.id;
           if (!id) {
             if (!confirm(`Заметки «${t.name}» нет. Создать?`)) return;
+            if (vault.info) {
+              void vault.create('', { title: t.name.trim() }).then((nid) => go({ id: nid })).catch(fail);
+              return;
+            }
             const now = Date.now();
             id = uid();
             actions.add({ id, title: t.name.trim(), body: '', type: 'note', date: null, createdAt: now, updatedAt: now });
@@ -158,15 +202,7 @@ function Desktop() {
       renamed: (id, oldTitle, newTitle) => {
         const patches = planRename(index, id, oldTitle, newTitle);
         if (!patches.length) return;
-        const byId = new Map(patches.map((p) => [p.id, p]));
-        const now = Date.now();
-        setNotes((list) =>
-          list.map((n) => {
-            const p = byId.get(n.id);
-            if (!p) return n;
-            return { ...n, ...(p.body !== undefined ? { body: p.body } : {}), ...(p.props ? { props: p.props } : {}), updatedAt: now };
-          }),
-        );
+        for (const p of patches) store.update(p.id, { ...(p.body !== undefined ? { body: p.body } : {}), ...(p.props ? { props: p.props } : {}) });
       },
       pickLink: (fromId) => new Promise((resolve) => setDialog({ kind: 'link', fromId, resolve })),
       picking: !!picking,
@@ -184,27 +220,20 @@ function Desktop() {
         const patches = planTagRename(live, oldTag, newTag);
         if (!patches.length) return 0;
         if (!confirm(`Переписать тег «${oldTag}» → «${newTag}» в заметках: ${patches.length}?`)) return 0;
-        const byId = new Map(patches.map((p) => [p.id, p]));
-        const now = Date.now();
-        setNotes((list) =>
-          list.map((n) => {
-            const p = byId.get(n.id);
-            if (!p) return n;
-            const { id: _id, ...rest } = p;
-            void _id;
-            return { ...n, ...rest, updatedAt: now };
-          }),
-        );
+        for (const p of patches) {
+          const { id, ...rest } = p;
+          store.update(id, rest);
+        }
         return patches.length;
       },
       openTag: (tag) => {
         setSel(toggleTag(new Map(), normTag(tag)));
         setRightTab('tags');
       },
-      updateNote: (id, patch) => actions.update(id, patch),
-      removeNote: (id) => actions.remove(id),
+      updateNote: (id, patch) => store.update(id, patch),
+      removeNote: (id) => store.remove(id),
     }),
-    [index, actions, setNotes, picking, live, go, setTabs, setActive, setRightTab],
+    [index, actions, store, vault, fail, picking, live, go, setTabs, setActive, setRightTab],
   );
 
   function freeTitle(base: string) {
@@ -214,6 +243,19 @@ function Desktop() {
   }
   function saveComment(frag: KbFragment, text: string) {
     const now = Date.now();
+    // комментарий к заметке хранилища — файлом рядом с ней
+    if (vault.info && inVault(frag.noteId)) {
+      void vault
+        .create(dirName(pathOfId(frag.noteId)), {
+          type: 'comment',
+          title: freeTitle(`Комментарий — ${frag.excerpt}`.replace(/[\\/:*?"<>|]/g, ' ').slice(0, 80)),
+          body: text,
+          props: { к: [linkText({ title: frag.title, anchor: frag.anchor })] },
+        })
+        .catch(fail);
+      setDialog(null);
+      return;
+    }
     actions.add({
       id: uid(),
       type: 'comment',
@@ -230,9 +272,10 @@ function Desktop() {
     const embed = '!' + linkText({ title: frag.title, anchor: frag.anchor });
     const now = Date.now();
     if (setId) {
-      setNotes((list) =>
-        list.map((n) => (n.id === setId ? { ...n, body: (n.body.trimEnd() ? n.body.trimEnd() + '\n\n' : '') + embed, updatedAt: now } : n)),
-      );
+      const b = (index.byId.get(setId)?.body ?? '').trimEnd();
+      store.update(setId, { body: (b ? b + '\n\n' : '') + embed });
+    } else if (vault.info && inVault(frag.noteId)) {
+      void vault.create(dirName(pathOfId(frag.noteId)), { type: 'set', title: freeTitle(title), body: embed }).catch(fail);
     } else {
       actions.add({ id: uid(), type: 'set', title: freeTitle(title), body: embed, date: null, createdAt: now, updatedAt: now });
     }
@@ -247,6 +290,20 @@ function Desktop() {
   /** Раскрыть папку в дереве (новое в ней должно быть видно). */
   const setOpenFolder = (id: string) => setOpen((o) => (o.includes(id) ? o : [...o, id]));
   function createNote(inNew = false, parent: string | null = null) {
+    // в хранилище: в корень или в его папку; в облако — в папку ☁ и её подпапки
+    if (vault.info && (parent === null || parent.startsWith('d:'))) {
+      void vault
+        .create(parent ? pathOfId(parent) : '', {})
+        .then((id) => {
+          madeHere.current.add(id);
+          if (parent) setOpenFolder(parent);
+          go({ id }, inNew);
+          setTimeout(() => document.querySelector<HTMLInputElement>('.dk-title')?.select(), 80);
+        })
+        .catch(fail);
+      return;
+    }
+    if (parent === CLOUD) parent = null;
     const now = Date.now();
     const id = uid();
     actions.add({ id, title: '', body: '', type: 'note', date: null, createdAt: now, updatedAt: now });
@@ -258,6 +315,12 @@ function Desktop() {
   function createFolder(parent: string | null) {
     const name = prompt('Название папки')?.trim();
     if (!name) return;
+    if (vault.info && (parent === null || parent.startsWith('d:'))) {
+      void vault.mkdir(parent ? pathOfId(parent) : '', name).catch(fail);
+      if (parent) setOpenFolder(parent);
+      return;
+    }
+    if (parent === CLOUD) parent = null;
     const now = Date.now();
     const id = uid();
     actions.add({ id, title: name, body: '', type: 'folder', date: null, createdAt: now, updatedAt: now });
@@ -266,6 +329,20 @@ function Desktop() {
   /** Перенести заметку или папку из папки from в to (null — корень). */
   function move(id: string, from: string | null, to: string | null) {
     if (from === to) return;
+    if (inVault(id)) {
+      if (to === null || to.startsWith('d:')) {
+        void vault.move(id, to ? pathOfId(to) : '').catch(fail);
+        if (to) setOpenFolder(to);
+      } else setVaultErr('Из хранилища в облако — отметкой «📱 на телефон» (следующий шаг), не перетаскиванием');
+      return;
+    }
+    if (to !== null && to.startsWith('d:')) {
+      setVaultErr('Забрать облачную заметку в хранилище — следующим шагом');
+      return;
+    }
+    if (from === CLOUD) from = null;
+    if (to === CLOUD) to = null;
+    if (from === to || id === CLOUD) return;
     const live = relations.filter((r) => !r.deleted && r.type === 'child');
     // папку нельзя положить в саму себя или в свою подпапку
     if (to) {
@@ -286,12 +363,23 @@ function Desktop() {
     if (to && !live.some((r) => r.from === to && r.to === id)) linkTo(to, id, Date.now());
   }
 
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const storeRef = useRef(store);
+  storeRef.current = store;
+  // переименовали файл хранилища — id другой: вкладки и раскрытые папки — следом
+  renamedRef.current = (from, to) => {
+    setTabs((list) => list.map((t) => ({ ...t, hist: t.hist.map((h) => (h.id === from ? { ...h, id: to } : h)) })));
+    setOpen((o) => o.map((x) => (x === from ? to : x)));
+  };
+
   // --- быстрые заметки: ★ и кнопка на микрофоне (команды окна, ./native.ts) ---
   const [recordNew, setRecordNew] = useState<string | null>(null);
   const [toolsSlot, setToolsSlot] = useState<HTMLElement | null>(null);
   /** Новая заметка в папке «Быстрые заметки» (нет такой — завести). */
   function quickNote(record: boolean) {
-    const folder = live.find((n) => n.type === 'folder' && n.title.trim().toLowerCase() === 'быстрые заметки');
+    // быстрые заметки — в облаке: их видит телефон и обрабатывает окно (заказы)
+    const folder = cloudLive.find((n) => n.type === 'folder' && n.title.trim().toLowerCase() === 'быстрые заметки');
     const now = Date.now();
     let fid = folder?.id ?? null;
     if (!fid) {
@@ -334,19 +422,15 @@ function Desktop() {
         const nid = leftVoice.current.get(e.id);
         if (!nid) return;
         const mark = `%%🎤:${e.id}%%`;
-        setNotes((list) =>
-          list.map((n) => {
-            if (n.id !== nid || !n.body?.includes(mark)) return n;
-            const body =
-              e.event === 'text'
-                ? n.body.replace(mark, `${e.text ? e.text + ' ' : ''}${mark}`)
-                : n.body.replace(` ${mark}`, '').replace(mark, '');
-            return { ...n, body, updatedAt: Date.now() };
-          }),
-        );
+        const n = indexRef.current.byId.get(nid);
+        if (n?.body?.includes(mark)) {
+          const body =
+            e.event === 'text' ? n.body.replace(mark, `${e.text ? e.text + ' ' : ''}${mark}`) : n.body.replace(` ${mark}`, '').replace(mark, '');
+          storeRef.current.update(nid, { body });
+        }
         if (e.event === 'done') leftVoice.current.delete(e.id);
       }),
-    [setNotes],
+    [],
   );
 
   // пустая новая заметка, с которой ушли, не нужна: ★ без единого слова не оставляет мусора
@@ -371,7 +455,7 @@ function Desktop() {
     const t = prompt('Новое название', n.title)?.trim();
     if (!t || t === n.title) return;
     if (n.title) kb.renamed(id, n.title, t);
-    actions.update(id, { title: t });
+    store.update(id, { title: t });
   }
   /** Куда переложить: все видимые папки с путём. */
   function moveMenu(at: { clientX: number; clientY: number }, id: string, from: string | null) {
@@ -413,6 +497,10 @@ function Desktop() {
           icon: '🗑',
           danger: true,
           run: () => {
+            if (inVault(n.id)) {
+              if (confirm(`Убрать папку «${n.title}» со всем содержимым в корзину хранилища (.trash)?`)) store.remove(n.id);
+              return;
+            }
             if (!confirm(`Удалить папку «${n.title}»? Заметки из неё не удалятся — окажутся выше.`)) return;
             for (const r of relations) if (!r.deleted && r.type === 'child' && r.from === n.id) relActions.remove(r.id);
             actions.remove(n.id);
@@ -429,14 +517,14 @@ function Desktop() {
       {
         label: hidden ? 'Показывать в Базе' : 'Спрятать из Базы',
         icon: hidden ? '👁' : '🙈',
-        run: () => actions.update(n.id, { inBase: hidden }),
+        run: () => store.update(n.id, { inBase: hidden }),
       },
       'sep',
       {
         label: 'Удалить',
         icon: '🗑',
         danger: true,
-        run: () => confirm(`Удалить «${n.title || 'Без названия'}»?`) && actions.remove(n.id),
+        run: () => confirm(`Удалить «${n.title || 'Без названия'}»?${inVault(n.id) ? ' (в корзину хранилища)' : ''}`) && store.remove(n.id),
       },
     ]);
   }
@@ -482,9 +570,37 @@ function Desktop() {
   });
 
   const byId = index.byId;
-  const indexRef = useRef(index);
-  indexRef.current = index;
   const note = target ? byId.get(target.id) : undefined;
+
+  // Карточка файла хранилища: `X.md` рядом с `X.pdf` — его теги, свойства, иконка и заметки о нём.
+  // В дереве пара — один пункт (сам файл), карточка открывается из шапки просмотра.
+  const cardOf = useMemo(() => {
+    const m = new Map<string, Note>();
+    for (const n of vault.notes) {
+      if (!n.vault?.mime) continue;
+      const p = n.vault.path;
+      const c = index.byId.get('v:' + p.slice(0, p.lastIndexOf('.')) + '.md');
+      if (c) m.set(n.id, c);
+    }
+    return m;
+  }, [vault.notes, index]);
+  const treeVisible = useMemo(() => {
+    const cards = new Set([...cardOf.values()].map((c) => c.id));
+    const ids = showAll ? live.map((n) => n.id) : [...shown];
+    return new Set(ids.filter((id) => !cards.has(id)));
+  }, [cardOf, showAll, live, shown]);
+  const iconOf = useCallback(
+    (n: Note) => (n.props?.icon as string) || (cardOf.get(n.id)?.props?.icon as string) || (n.vault?.mime ? fileIcon({ type: n.vault.mime } as never) : ''),
+    [cardOf],
+  );
+  /** Записать в карточку файла; нет её — завести (`X.md` с `![[X.pdf]]`). */
+  function toCard(file: Note, patch: Partial<Note>) {
+    const c = cardOf.get(file.id);
+    if (c) return store.update(c.id, patch);
+    const p = file.vault!.path;
+    const base = p.slice(p.lastIndexOf('/') + 1, p.lastIndexOf('.'));
+    void vault.create(dirName(p), { title: base, body: `![[${file.title}]]\n`, ...patch }).catch(fail);
+  }
   noteRef.current = note?.id;
   useEffect(() => {
     const prev = prevNote.current;
@@ -494,9 +610,10 @@ function Desktop() {
     // Смотрим свежий указатель: последнее несохранённое уходит в базу как раз при уходе.
     const t = setTimeout(() => {
       const m = indexRef.current.byId.get(prev);
-      if (m && !m.title.trim() && !(m.body ?? '').trim() && !(m.tags ?? []).length) {
+      const blank = !m?.title.trim() || (inVault(prev) && m?.title === 'Без названия');
+      if (m && blank && !(m.body ?? '').trim() && !(m.tags ?? []).length) {
         madeHere.current.delete(prev);
-        actions.remove(prev);
+        storeRef.current.remove(prev);
       }
     }, 1500);
     return () => clearTimeout(t);
@@ -518,7 +635,12 @@ function Desktop() {
           status={status}
           activeId={target?.id}
           searchRef={searchRef}
-          relations={relations}
+          relations={treeRelations}
+          treeVisible={treeVisible}
+          iconOf={iconOf}
+          vault={vault}
+          vaultErr={vaultErr}
+          clearVaultErr={() => setVaultErr('')}
           isService={isService}
           sel={sel}
           setSel={setSel}
@@ -552,7 +674,7 @@ function Desktop() {
                     onContextMenu={(e) => tabMenu(e, t.key)}
                     title={n?.title}
                   >
-                    <span className="dk-tab-title">{f ? `${fileIcon(f)} ${f.name}` : n?.title || 'Без названия'}</span>
+                    <span className="dk-tab-title">{f ? `${fileIcon(f)} ${f.name}` : `${n && iconOf(n) ? iconOf(n) + ' ' : ''}${n?.title || 'Без названия'}`}</span>
                     <button
                       className="dk-tab-x"
                       onClick={(e) => {
@@ -571,7 +693,21 @@ function Desktop() {
             </div>
           </div>
           <div className="dk-page">
-            {note && target?.file && note.attachments?.some((a) => a.id === target.file) ? (
+            {note?.vault?.mime ? (
+              <FileView
+                meta={<CardBar file={note} card={cardOf.get(note.id)} onPatch={(p) => toCard(note, p)} onOpenCard={() => {
+                  const c = cardOf.get(note.id);
+                  if (c) go({ id: c.id });
+                  else {
+                    toCard(note, {});
+                    setVaultErr('Карточка заведена — откройте её ещё раз через «📝»');
+                  }
+                }} />}
+                note={note}
+                file={{ id: note.id, name: note.title, type: note.vault.mime, url: '/vault/' + note.vault.path.split('/').map(encodeURIComponent).join('/'), size: 0, path: note.vault.path, createdAt: 0 }}
+                onBack={() => step(-1)}
+              />
+            ) : note && target?.file && note.attachments?.some((a) => a.id === target.file) ? (
               <FileView note={note} file={note.attachments.find((a) => a.id === target.file)!} onBack={() => step(-1)} />
             ) : note ? (
               <Guard key={`${cur!.key}-${note.id}-${target!.n}`}>
@@ -584,9 +720,10 @@ function Desktop() {
                 onVoiceLeft={(vid, nid) => leftVoice.current.set(vid, nid)}
                 toolsSlot={toolsSlot}
                 onOpenFile={(fid, inNew) => go({ id: note.id, file: fid }, inNew)}
+                vaultImport={inVault(note.id) ? { files: vault.importFiles, data: vault.importData } : undefined}
                 picking={!!picking && picking.tab === cur?.key}
                 onDelete={() => {
-                  actions.remove(note.id);
+                  store.remove(note.id);
                   if (cur!.pos > 0) step(-1);
                   else closeTab(cur!.key);
                 }}
@@ -618,6 +755,7 @@ function Desktop() {
             <TagsPanel facets={facets} sel={sel} setSel={setSel} cards={cards} onCard={(tag) => {
               const c = cards.get(tag.toLowerCase());
               if (c) return go({ id: c.note.id });
+              // карточки тегов — в облаке: название — путь тега с «/», файлом такое не назвать
               const now = Date.now();
               const id = uid();
               actions.add({ id, type: 'tag', title: tag, body: '', date: null, createdAt: now, updatedAt: now });
@@ -689,7 +827,17 @@ function Sidebar({
   open,
   setOpen,
   onTreeMenu,
+  vault,
+  vaultErr,
+  clearVaultErr,
+  treeVisible,
+  iconOf,
 }: {
+  treeVisible: Set<string>;
+  iconOf: (n: Note) => string;
+  vault: Vault;
+  vaultErr: string;
+  clearVaultErr: () => void;
   notes: Note[];
   /** Видимые заметки; null — показывать всё. */
   scope: Set<string> | null;
@@ -747,8 +895,28 @@ function Sidebar({
   const hit = useMemo(() => new Map((found?.hits ?? []).map((h) => [h.note.id, h])), [found]);
   const total = found ? found.total : list.length;
 
+  const menu = useMenu();
+  const vaultMenu = (e: React.MouseEvent) =>
+    menu(e, [
+      { label: 'Открыть или создать папку-хранилище…', icon: '📂', run: () => void vault.choose().catch((x) => alert((x as Error).message)) },
+      ...(vault.info ? [{ label: 'Показать в проводнике', icon: '🗂', run: () => vaultApi.reveal('_') /* папка этого пути — корень хранилища */ }] : []),
+      'sep' as const,
+      ...(vault.info?.recent ?? [])
+        .filter((p) => p !== vault.info?.path)
+        .map((p) => ({ label: p.replace(/^\/home\/[^/]+/, '~'), icon: '🗄', run: () => void vault.open(p).catch((x) => alert((x as Error).message)) })),
+    ]);
   return (
     <aside className="dk-left">
+      {native.available() && (
+        <button className="dk-vault" title={vault.info?.path ?? 'Хранилище не выбрано'} onClick={vaultMenu}>
+          🗄 {vault.info ? vault.info.name : 'Выбрать хранилище'} {vault.loading ? '…' : '▾'}
+        </button>
+      )}
+      {(vaultErr || vault.error) && (
+        <div className="dk-msg small" onClick={clearVaultErr} title="Скрыть">
+          {vaultErr || vault.error}
+        </div>
+      )}
       <div className="dk-left-head">
         <input
           ref={searchRef}
@@ -817,7 +985,8 @@ function Sidebar({
         <FolderTree
           notes={notes}
           relations={relations}
-          visible={scope}
+          visible={treeVisible}
+          iconOf={iconOf}
           isService={isService}
           activeId={activeId}
           onOpen={onOpen}
@@ -965,6 +1134,54 @@ function Context({ note }: { note: Note }) {
         </section>
       )}
       <Backlinks noteId={note.id} anchor={anchor} setAnchor={setAnchor} />
+    </div>
+  );
+}
+
+const ICONS = ['📕', '📗', '📘', '📙', '📜', '📖', '🕌', '📿', '⭐', '💡', '❗', '❓', '🔖', '🧩', '🗂', '📝'];
+
+/** Шапка файла хранилища: иконка, теги, свойства — в его карточку (`X.md` рядом). */
+function CardBar({ file, card, onPatch, onOpenCard }: { file: Note; card?: Note; onPatch: (p: Partial<Note>) => void; onOpenCard: () => void }) {
+  const menu = useMenu();
+  const [tag, setTag] = useState('');
+  const tags = card?.tags ?? [];
+  const icon = (card?.props?.icon as string) || '';
+  const add = () => {
+    const t = tag.trim().replace(/^#/, '').replace(/\s+/g, '-');
+    setTag('');
+    if (t && !tags.includes(t)) onPatch({ tags: [...tags, t] });
+  };
+  return (
+    <div className="dk-cardbar" dir="auto">
+      <button
+        className="dk-icon"
+        title="Иконка файла"
+        onClick={(e) =>
+          menu(e, [
+            ...ICONS.map((i) => ({ label: i, icon: i, run: () => onPatch({ props: { ...(card?.props ?? {}), icon: i } }) })),
+            'sep' as const,
+            { label: 'Своя…', icon: '✏️', run: () => { const i = prompt('Иконка (любой значок)', icon)?.trim(); if (i) onPatch({ props: { ...(card?.props ?? {}), icon: i } }); } },
+            { label: 'Без своей иконки', icon: '✕', run: () => { const { icon: _i, ...rest } = card?.props ?? {}; void _i; onPatch({ props: rest }); }, disabled: !icon },
+          ])
+        }
+      >
+        {icon || '🙂'}
+      </button>
+      {tags.map((t) => (
+        <span key={t} className="kb-tag">
+          #{t}
+          <button className="tag-x" title="Убрать тег" onClick={() => onPatch({ tags: tags.filter((x) => x !== t) })}>
+            ×
+          </button>
+        </span>
+      ))}
+      <input className="dk-tag-input" list="dk-tag-names" placeholder="+ тег" value={tag} onChange={(e) => setTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} onBlur={() => tag.trim() && add()} />
+      {card && <PropsView note={card} />}
+      <span className="dk-spacer" />
+      <button className="dk-tool wide" title="Карточка файла: свойства, заметки о нём (обычная заметка рядом с ним)" onClick={onOpenCard}>
+        📝 {card ? 'Карточка' : 'Завести карточку'}
+      </button>
+      <span className="muted small">{file.vault?.path}</span>
     </div>
   );
 }

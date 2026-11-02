@@ -26,11 +26,13 @@ export interface TreeProps {
   /** Раскрытые папки (хранит окно: туда же раскрывает папку, куда создали заметку). */
   open: string[];
   setOpen: React.Dispatch<React.SetStateAction<string[]>>;
+  /** Иконка пункта (своя у заметки, у PDF — по виду файла); пусто — без иконки. */
+  iconOf?: (n: Note) => string;
   /** Правая кнопка: по заметке или папке (parent — в какой папке она здесь показана), по пустому месту — null. */
   onMenu: (e: React.MouseEvent, node: { id: string; folder: boolean; parent: string | null } | null) => void;
 }
 
-export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen, onMenu }: TreeProps) {
+export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen, onMenu, iconOf }: TreeProps) {
   const openSet = useMemo(() => new Set(open), [open]);
   const toggle = (id: string) => setOpen((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [over, setOver] = useState<string | null>(null);
@@ -100,7 +102,7 @@ export function FolderTree({ notes, relations, visible, isService, activeId, onO
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu };
+  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf };
   return (
     <div
       className={`dk-tree ${over === '' ? 'drop' : ''}`}
@@ -137,10 +139,11 @@ interface Ctx {
   onOpen: TreeProps['onOpen'];
   onCreate: TreeProps['onCreate'];
   onMenu: TreeProps['onMenu'];
+  iconOf?: TreeProps['iconOf'];
 }
 
 function Items({ parent, depth, path, ctx }: { parent: string | null; depth: number; path: string[]; ctx: Ctx }) {
-  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu } = ctx;
+  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf } = ctx;
   const { folders, items } = parent ? t.split(t.kids.get(parent) ?? []) : t.roots;
   const [limit, setLimit] = useState(PER_FOLDER);
   const pad = { paddingInlineStart: 6 + depth * 14 };
@@ -198,7 +201,7 @@ function Items({ parent, depth, path, ctx }: { parent: string | null; depth: num
           >
             <span className="dk-caret" />
             <span className="dk-node-title">
-              {type !== 'note' && <span className={`type-badge type-${type}`}>{TYPE_BADGE[type]}</span>}
+              {iconOf?.(n) ? <span className="dk-node-icon">{iconOf(n)}</span> : type !== 'note' && <span className={`type-badge type-${type}`}>{TYPE_BADGE[type]}</span>}
               {n.title || 'Без названия'}
             </span>
           </div>

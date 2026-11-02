@@ -77,7 +77,8 @@ export function PropsView({ note }: { note: Note }) {
   const hidden = new Set(OWN_KEYS[note.type ?? ''] ?? []);
   const { missing, wrong } = checkProps(props, fields);
   const inSchema = new Set(fields.map((f) => f.name.toLowerCase()));
-  const rest = Object.keys(props).filter((k) => !inSchema.has(k.toLowerCase()) && !hidden.has(k) && !isEmpty(props[k]));
+  // icon — иконка заметки в окне «База», видна в дереве и во вкладке; строкой не показываем
+  const rest = Object.keys(props).filter((k) => k !== 'icon' && !inSchema.has(k.toLowerCase()) && !hidden.has(k) && !isEmpty(props[k]));
   const shown = fields.filter((f) => !isEmpty(props[f.name]) || f.required);
   if (!shown.length && !rest.length) return null;
   return (

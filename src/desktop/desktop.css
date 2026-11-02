@@ -406,3 +406,23 @@
 .dk-file-add { color: var(--muted); border-style: dashed; }
 .dk-dropping { outline: 2px dashed var(--accent); outline-offset: 6px; border-radius: 8px; }
 .dk-local { font-size: 11px; }
+
+/* --- хранилище: какая папка открыта (./useVault.ts) --- */
+.dk-vault {
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13.5px;
+  text-align: start;
+  padding: 2px 4px;
+  border-radius: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dk-vault:hover { background: var(--surface-2); }
+.dk-cardbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.dk-cardbar .props-view { margin: 0; }
+.dk-node-icon { flex: none; }

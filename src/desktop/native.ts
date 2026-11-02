@@ -1,4 +1,5 @@
 import type { Attachment } from '../types';
+import type { VaultEntry } from '../lib/kb/vault';
 
 // Что умеет только окно на компьютере (~/projects/apps/zametki, baza.py): голос с микрофона,
 // кнопки Claude, команды ★ и кнопки на микрофоне. Связь — тот же объект QWebChannel `most`,
@@ -16,6 +17,19 @@ export interface QtLink {
   attachData: (s: string) => void;
   localUrl: (s: string, cb: (url: string) => void) => void;
   reveal: (path: string) => void;
+  vaultEvent: { connect: (cb: (s: string) => void) => void };
+  vaultInfo: (cb: (s: string) => void) => void;
+  vaultChoose: (cb: (s: string) => void) => void;
+  vaultOpen: (path: string, cb: (s: string) => void) => void;
+  vaultScan: (cb: (s: string) => void) => void;
+  vaultRead: (paths: string, cb: (s: string) => void) => void;
+  vaultWrite: (s: string, cb: (s: string) => void) => void;
+  vaultMove: (s: string, cb: (s: string) => void) => void;
+  vaultDelete: (path: string, cb: (s: string) => void) => void;
+  vaultMkdir: (path: string, cb: (s: string) => void) => void;
+  vaultImport: (cb: (s: string) => void) => void;
+  vaultImportData: (s: string, cb: (s: string) => void) => void;
+  vaultReveal: (path: string) => void;
   voice: (s: string) => void;
   process: (s: string) => void;
   mics: (cb: (s: string) => void) => void;
@@ -30,6 +44,18 @@ export type VoiceEvent =
   | { event: 'error'; message: string };
 
 let link: QtLink | null = null;
+const vaultListeners = new Set<(c: VaultChanges) => void>();
+
+/** Хранилище-папка (окно, papka.py). */
+export interface VaultInfo {
+  path: string;
+  name: string;
+  recent: string[];
+}
+export interface VaultChanges {
+  changed: VaultEntry[];
+  removed: string[];
+}
 const voiceListeners = new Set<(e: VoiceEvent) => void>();
 const commandListeners = new Set<(op: string) => void>();
 const waiting = new Map<string, (text: string) => void>();
@@ -69,6 +95,10 @@ export function attachNative(l: QtLink) {
     uploads.get(r.ref)?.(r);
     uploads.delete(r.ref);
   });
+  l.vaultEvent.connect((s) => {
+    const c = parse<VaultChanges>(s);
+    if (c) for (const cb of vaultListeners) cb(c);
+  });
   l.command.connect((s) => {
     const c = parse<{ op: string }>(s);
     if (c) for (const cb of commandListeners) cb(c.op);
@@ -80,6 +110,47 @@ export interface Mics {
   default: string;
   list: { name: string; title: string }[];
 }
+
+/** Вызов окна с ответом JSON; ошибка окна ({error}) — исключение. */
+function ask<T>(fn: (l: QtLink, done: (s: string) => void) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    if (!link) return reject(new Error('Хранилище — только в окне на компьютере'));
+    fn(link, (s) => {
+      const r = parse<T & { error?: string }>(s);
+      if (!r) return reject(new Error('окно ответило не JSON'));
+      if (r && typeof r === 'object' && 'error' in r && r.error) return reject(new Error(r.error));
+      resolve(r as T);
+    });
+  });
+}
+
+/** Хранилище-папка на компьютере: что открыто, список, чтение, запись, перемещение, корзина. */
+export const vaultApi = {
+  info: () => ask<VaultInfo>((l, d) => l.vaultInfo(d)),
+  choose: () => ask<VaultInfo>((l, d) => l.vaultChoose(d)),
+  open: (path: string) => ask<VaultInfo>((l, d) => l.vaultOpen(path, d)),
+  scan: () => ask<VaultEntry[]>((l, d) => l.vaultScan(d)),
+  read: (paths: string[]) => ask<Record<string, string>>((l, d) => l.vaultRead(JSON.stringify(paths), d)),
+  write: (path: string, text: string) => ask<{ mtime: number }>((l, d) => l.vaultWrite(JSON.stringify({ path, text }), d)),
+  move: (from: string, to: string) => ask<{ ok: true }>((l, d) => l.vaultMove(JSON.stringify({ from, to }), d)),
+  remove: (path: string) => ask<{ ok: true }>((l, d) => l.vaultDelete(path, d)),
+  mkdir: (path: string) => ask<{ ok: true }>((l, d) => l.vaultMkdir(path, d)),
+  /** 📎 — выбрать файлы, скопировать в `_файлы/`; пути в хранилище. */
+  importFiles: () => ask<string[]>((l, d) => l.vaultImport(d)),
+  importData: (file: File) =>
+    new Promise<string[]>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () =>
+        ask<string[]>((l, d) => l.vaultImportData(JSON.stringify({ name: file.name, data: String(r.result).split(',')[1] ?? '' }), d)).then(resolve, reject);
+      r.onerror = () => reject(new Error(`${file.name}: не прочитался`));
+      r.readAsDataURL(file);
+    }),
+  reveal: (path: string) => link?.vaultReveal(path),
+  onChange: (cb: (c: VaultChanges) => void) => {
+    vaultListeners.add(cb);
+    return () => void vaultListeners.delete(cb);
+  },
+};
 
 export const native = {
   available: () => !!link,

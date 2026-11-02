@@ -12,7 +12,18 @@ export const fileIcon = (a: Attachment) =>
 
 const size = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(b / 1e3))} КБ`);
 
-export function FileView({ note, file: att, onBack }: { note: Note; file: Attachment; onBack: () => void }) {
+export function FileView({
+  note,
+  file: att,
+  onBack,
+  meta,
+}: {
+  note: Note;
+  file: Attachment;
+  onBack: () => void;
+  /** Под шапкой: теги и свойства файла (карточка PDF в хранилище — DesktopApp, CardBar). */
+  meta?: React.ReactNode;
+}) {
   // файл «на компьютере» отдаёт само окно (baza.py, /local/<id>); нет его по пути — сказать
   const [localSrc, setLocalSrc] = useState<string | null>(att.local ? null : att.url);
   useEffect(() => {
@@ -49,6 +60,7 @@ export function FileView({ note, file: att, onBack }: { note: Note; file: Attach
           ⤓
         </a>
       </div>
+      {meta}
       {att.local && localSrc === '' ? (
         <div className="dk-file-body dk-file-pad muted">
           Файла нет по пути <code>{att.path}</code>. Его переместили или удалили — прикрепите заново.

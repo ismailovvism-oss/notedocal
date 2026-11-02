@@ -41,6 +41,7 @@ export function NotePane({
   onVoiceLeft,
   toolsSlot,
   onOpenFile,
+  vaultImport,
   onDelete,
 }: {
   note: Note;
@@ -58,6 +59,8 @@ export function NotePane({
   toolsSlot?: HTMLElement | null;
   /** Открыть вложение (PDF, картинку…) во вкладке. */
   onOpenFile: (fileId: string, inNew: boolean) => void;
+  /** Заметка из хранилища: файлы копируются в его `_файлы/`, в текст — `![[имя]]` (как в Obsidian). */
+  vaultImport?: { files: () => Promise<string[]>; data: (f: File) => Promise<string[]> };
   onDelete: () => void;
 }) {
   const kb = useKb()!;
@@ -232,6 +235,20 @@ export function NotePane({
     }
     setMsg(r.errors.length ? `Не прикрепилось: ${r.errors.join('; ')}` : '');
   }
+  /** Хранилище: скопировать файлы и вставить `![[имя]]` у курсора. */
+  async function embedFiles(p: Promise<string[]>) {
+    setUploading(true);
+    try {
+      const paths = await p;
+      const text = paths.map((x) => `![[${x.slice(x.lastIndexOf('/') + 1)}]]`).join('\n');
+      if (text) editor.current?.insertAtCursor(text + '\n');
+      setMsg('');
+    } catch (e) {
+      setMsg(`Не прикрепилось: ${(e as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  }
   const [dropping, setDropping] = useState(false);
   // ловим раньше редактора (capture): CodeMirror сам читает брошенный файл как текст и вставил
   // бы PDF мусором в заметку
@@ -243,8 +260,12 @@ export function NotePane({
     // большой файл через канал не гоним: страница читает его целиком в память и падает
     // (02.11.2026 большой PDF уронил её в белый экран). Большие — 📎 «только на компьютере».
     const big = [...e.dataTransfer.files].filter((f) => f.size > DROP_LIMIT);
-    if (big.length) setMsg(`Слишком большой для перетаскивания (${big.map((f) => f.name).join(', ')}) — прикрепите через 📎 → «Только на этом компьютере»`);
-    for (const f of e.dataTransfer.files) if (f.size <= DROP_LIMIT) void attach(native.attachFile(f));
+    if (big.length) setMsg(`Слишком большой для перетаскивания (${big.map((f) => f.name).join(', ')}) — прикрепите кнопкой 📎`);
+    for (const f of e.dataTransfer.files) {
+      if (f.size > DROP_LIMIT) continue;
+      if (vaultImport) void embedFiles(vaultImport.data(f));
+      else void attach(native.attachFile(f));
+    }
   };
 
   // --- меню по правой кнопке в тексте (./Menu.tsx) ---
@@ -362,6 +383,40 @@ export function NotePane({
             </option>
           ))}
         </select>
+        <button
+          className="dk-icon"
+          title="Иконка заметки — видна в дереве и во вкладке"
+          onClick={(e) =>
+            menu(e, [
+              ...['📕', '📗', '📘', '📜', '📖', '🕌', '📿', '⭐', '💡', '❗', '❓', '🔖', '🧩', '📝'].map((i) => ({
+                label: i,
+                icon: i,
+                run: () => kb.updateNote(note.id, { props: { ...(note.props ?? {}), icon: i } }),
+              })),
+              'sep' as const,
+              {
+                label: 'Своя…',
+                icon: '✏️',
+                run: () => {
+                  const i = prompt('Иконка (любой значок)', String(note.props?.icon ?? ''))?.trim();
+                  if (i) kb.updateNote(note.id, { props: { ...(note.props ?? {}), icon: i } });
+                },
+              },
+              {
+                label: 'Без иконки',
+                icon: '✕',
+                disabled: !note.props?.icon,
+                run: () => {
+                  const { icon: _i, ...rest } = note.props ?? {};
+                  void _i;
+                  kb.updateNote(note.id, { props: rest });
+                },
+              },
+            ])
+          }
+        >
+          {String(note.props?.icon ?? '') || '🙂'}
+        </button>
         {scope && !scope.shown && (
           <span className="dk-hidden-note small" title="В списке, поиске и тегах Базы её не видно">
             служебная{scope.why !== 'отметка' ? ` · ${scope.why}` : ''}
@@ -499,10 +554,13 @@ export function NotePane({
               className="dk-file-chip dk-file-add"
               title="Прикрепить файлы: в облако (видно на телефоне) или только на этом компьютере (для больших)"
               onClick={(e) =>
-                menu(e, [
-                  { label: 'В облако — видно и на телефоне', icon: '☁', run: () => attach(native.attach()) },
-                  { label: 'Только на этом компьютере — для больших', icon: '💻', run: () => attach(native.attachLocal()) },
-                ])
+                // заметка хранилища: файл — в его папку `_файлы/`; облачная — выбор, куда
+                vaultImport
+                  ? void embedFiles(vaultImport.files())
+                  : menu(e, [
+                      { label: 'В облако — видно и на телефоне', icon: '☁', run: () => attach(native.attach()) },
+                      { label: 'Только на этом компьютере — для больших', icon: '💻', run: () => attach(native.attachLocal()) },
+                    ])
               }
             >
               {uploading ? 'загружаю…' : '📎 Прикрепить'}

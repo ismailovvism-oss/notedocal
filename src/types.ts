@@ -142,6 +142,10 @@ export interface Note {
   dictations?: { id: string; path: string; type: string; lang: string; at: number }[];
   /** Что распознано по диктовкам (id → текст): поле правки, открытое со старым текстом, подставит сам. */
   voiceResults?: Record<string, string>;
+  /** Заметка из хранилища-папки на компьютере (окно «База», src/lib/kb/vault.ts), не из облака:
+   *  путь файла; у не-md файла (PDF и т.п.) — его вид; `front`/`key` — заголовок файла как был,
+   *  чтобы не переписывать его без нужды. В облако не уходит. */
+  vault?: { path: string; mime?: string; front?: string; key?: string };
   /** Показывать ли в базе знаний (окно «База»): true/false — решение хозяина, сильнее правил
    *  по роли и папке; нет поля — по правилам (src/lib/kb/scope.ts). */
   inBase?: boolean;
