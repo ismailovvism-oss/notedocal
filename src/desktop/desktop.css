@@ -405,3 +405,4 @@
 .dk-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .dk-file-add { color: var(--muted); border-style: dashed; }
 .dk-dropping { outline: 2px dashed var(--accent); outline-offset: 6px; border-radius: 8px; }
+.dk-local { font-size: 11px; }

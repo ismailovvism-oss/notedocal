@@ -58,6 +58,9 @@ function connect(onMsg: (m: Msg) => void): Promise<Transport> {
   return Promise.resolve({ send, ready: false });
 }
 
+/** Разовая команда мосту (стереть файл из хранилища и т.п.); ответ не ждём. */
+export let sendBridge: (cmd: Record<string, unknown>) => void = () => {};
+
 export type BridgeStatus = 'подключаюсь' | 'загружаю' | 'есть' | 'нет связи';
 
 interface Meta {
@@ -170,6 +173,7 @@ export function useBridgeSync(
       });
       if (!alive) return;
       tr.current = t;
+      sendBridge = (cmd) => t.send({ ref: `b-x${Date.now()}`, ...cmd });
       if (t.ready) subscribe();
     })();
     return () => {

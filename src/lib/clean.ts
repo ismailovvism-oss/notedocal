@@ -12,6 +12,7 @@ export function cleanAttachment(a: Attachment): Attachment {
     url: a.url ?? '',
     path: a.path ?? '',
     createdAt: a.createdAt ?? 0,
+    ...(a.local ? { local: true } : {}),
   };
 }
 

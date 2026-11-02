@@ -12,7 +12,10 @@ export interface QtLink {
   attached: { connect: (cb: (s: string) => void) => void };
   send: (s: string) => void;
   attach: (ref: string) => void;
+  attachLocal: (ref: string) => void;
   attachData: (s: string) => void;
+  localUrl: (s: string, cb: (url: string) => void) => void;
+  reveal: (path: string) => void;
   voice: (s: string) => void;
   process: (s: string) => void;
   mics: (cb: (s: string) => void) => void;
@@ -104,6 +107,22 @@ export const native = {
       uploads.set(ref, resolve);
       link.attach(ref);
     }),
+  /** 📎 «только на этом компьютере»: файл остаётся на диске, в заметку — ссылка на него. */
+  attachLocal: () =>
+    new Promise<Attached>((resolve) => {
+      if (!link) return resolve({ attachments: [], errors: ['Только в окне на компьютере'] });
+      const ref = `a${++num}`;
+      uploads.set(ref, resolve);
+      link.attachLocal(ref);
+    }),
+  /** Адрес для просмотра файла «на компьютере»; пусто — по этому пути его нет. */
+  localUrl: (a: Attachment) =>
+    new Promise<string>((resolve) => {
+      if (!link) return resolve('');
+      link.localUrl(JSON.stringify({ id: a.id, path: a.path }), resolve);
+    }),
+  /** Показать файл в папке (проводник). */
+  reveal: (path: string) => link?.reveal(path),
   /** Файл перетащили в заметку: содержимое — окну, оно положит в хранилище. */
   attachFile: (file: File) =>
     new Promise<Attached>((resolve) => {

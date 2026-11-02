@@ -57,7 +57,8 @@ export async function uploadAttachment(file: File): Promise<Attachment> {
 
 /** Удалить файл из Storage. Ошибки глушим — метаданные уберём в любом случае. */
 export async function deleteAttachment(att: Attachment): Promise<void> {
-  if (!storage || !att.path) return;
+  // файл «на компьютере» (окно «База») в облаке не лежит — стирать нечего
+  if (!storage || !att.path || att.local) return;
   try {
     await deleteObject(ref(storage, att.path));
   } catch {

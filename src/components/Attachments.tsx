@@ -15,11 +15,20 @@ export function AttachmentList({
     <ul className="att-list">
       {items.map((a) => (
         <li key={a.id} className="att-item">
-          <a className="att-link" href={a.url} target="_blank" rel="noreferrer" title={a.name}>
-            <span className="att-ic">{fileIcon(a.type)}</span>
-            <span className="att-name">{a.name}</span>
-            <span className="att-size muted small">{formatSize(a.size)}</span>
-          </a>
+          {a.local ? (
+            // файл лежит только на компьютере (окно «База»): здесь его не открыть — только видно, что есть
+            <span className="att-link" title={`Только на компьютере: ${a.path}`}>
+              <span className="att-ic">💻</span>
+              <span className="att-name">{a.name}</span>
+              <span className="att-size muted small">на компьютере · {formatSize(a.size)}</span>
+            </span>
+          ) : (
+            <a className="att-link" href={a.url} target="_blank" rel="noreferrer" title={a.name}>
+              <span className="att-ic">{fileIcon(a.type)}</span>
+              <span className="att-name">{a.name}</span>
+              <span className="att-size muted small">{formatSize(a.size)}</span>
+            </a>
+          )}
           {onRemove && (
             <button className="icon-btn" onClick={() => onRemove(a)} aria-label="Удалить файл">
               ✕

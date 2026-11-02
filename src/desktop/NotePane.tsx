@@ -13,6 +13,7 @@ import { useLocalStorage } from '../lib/storage';
 import { native, type Mics, type VoiceEvent } from './native';
 import { useMenu, type MenuItem } from './Menu';
 import { fileIcon } from './FileView';
+import { sendBridge } from './bridge';
 import { PropsView, SchemaView, ViewResult } from '../components/Props';
 import { PropsEditor, SchemaEditor, ViewEditor } from '../components/PropsEdit';
 import { TYPE_LABELS } from '../lib/noteTypes';
@@ -239,7 +240,11 @@ export function NotePane({
     e.preventDefault();
     e.stopPropagation();
     setDropping(false);
-    for (const f of e.dataTransfer.files) void attach(native.attachFile(f));
+    // большой файл через канал не гоним: страница читает его целиком в память и падает
+    // (02.11.2026 большой PDF уронил её в белый экран). Большие — 📎 «только на компьютере».
+    const big = [...e.dataTransfer.files].filter((f) => f.size > DROP_LIMIT);
+    if (big.length) setMsg(`Слишком большой для перетаскивания (${big.map((f) => f.name).join(', ')}) — прикрепите через 📎 → «Только на этом компьютере»`);
+    for (const f of e.dataTransfer.files) if (f.size <= DROP_LIMIT) void attach(native.attachFile(f));
   };
 
   // --- меню по правой кнопке в тексте (./Menu.tsx) ---
@@ -446,7 +451,7 @@ export function NotePane({
       {/* вложения: 📎 — выбрать файлы, или перетащить их в заметку */}
       {((note.attachments ?? []).length > 0 || native.available()) && (
         <div className="dk-files">
-          {note.attachments!.map((a) => (
+          {(note.attachments ?? []).map((a) => (
             <button
               key={a.id}
               className="dk-file-chip"
@@ -457,14 +462,28 @@ export function NotePane({
                 menu(e, [
                   { label: 'Открыть', icon: fileIcon(a), run: () => onOpenFile(a.id, false) },
                   { label: 'Открыть в новой вкладке', icon: '⧉', run: () => onOpenFile(a.id, true) },
+                  a.local
+                    ? { label: 'Показать в папке', icon: '📂', run: () => native.reveal(a.path) }
+                    : {
+                        label: 'Скачать в «Загрузки»',
+                        icon: '⤓',
+                        run: () => {
+                          const l = document.createElement('a');
+                          l.href = a.url;
+                          l.download = a.name;
+                          l.click();
+                        },
+                      },
+                  'sep',
                   {
-                    label: 'Скачать в «Загрузки»',
-                    icon: '⤓',
+                    label: 'Убрать из заметки',
+                    icon: '✕',
+                    danger: true,
                     run: () => {
-                      const l = document.createElement('a');
-                      l.href = a.url;
-                      l.download = a.name;
-                      l.click();
+                      if (!confirm(a.local ? `Убрать «${a.name}» из заметки? Сам файл на диске останется.` : `Убрать «${a.name}» из заметки и стереть из облака?`)) return;
+                      const was = kb.index.byId.get(note.id)?.attachments ?? note.attachments ?? [];
+                      kb.updateNote(note.id, { attachments: was.filter((x) => x.id !== a.id) });
+                      if (!a.local && a.path) sendBridge({ op: 'rmfile', path: a.path });
                     },
                   },
                 ])
@@ -472,10 +491,20 @@ export function NotePane({
               dir="auto"
             >
               {fileIcon(a)} {a.name}
+              {a.local && <span className="dk-local" title="Только на этом компьютере"> 💻</span>}
             </button>
           ))}
           {native.available() && (
-            <button className="dk-file-chip dk-file-add" title="Прикрепить файлы (PDF, картинки, звук…). Можно и перетащить их в заметку" onClick={() => attach(native.attach())}>
+            <button
+              className="dk-file-chip dk-file-add"
+              title="Прикрепить файлы: в облако (видно на телефоне) или только на этом компьютере (для больших)"
+              onClick={(e) =>
+                menu(e, [
+                  { label: 'В облако — видно и на телефоне', icon: '☁', run: () => attach(native.attach()) },
+                  { label: 'Только на этом компьютере — для больших', icon: '💻', run: () => attach(native.attachLocal()) },
+                ])
+              }
+            >
               {uploading ? 'загружаю…' : '📎 Прикрепить'}
             </button>
           )}
@@ -606,6 +635,9 @@ const LANGS: [string, string][] = [
   ['ar-dia', 'диалект'],
   ['en', 'англ'],
 ];
+
+/** Больше — перетаскиванием не прикрепляем: файл идёт через канал целиком в памяти. */
+const DROP_LIMIT = 20 * 1024 * 1024;
 
 const keep = (e: React.MouseEvent) => e.preventDefault();
 

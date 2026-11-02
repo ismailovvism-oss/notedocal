@@ -5,17 +5,24 @@
 import { useEffect, useState } from 'react';
 import type { Attachment, Note } from '../types';
 import { renderMarkdown } from '../lib/markdown';
+import { native } from './native';
 
 export const fileIcon = (a: Attachment) =>
   a.type === 'application/pdf' ? '📕' : a.type.startsWith('image/') ? '🖼' : a.type.startsWith('audio/') ? '🎧' : a.type.startsWith('text/') ? '📄' : '📎';
 
 const size = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(b / 1e3))} КБ`);
 
-export function FileView({ note, file, onBack }: { note: Note; file: Attachment; onBack: () => void }) {
+export function FileView({ note, file: att, onBack }: { note: Note; file: Attachment; onBack: () => void }) {
+  // файл «на компьютере» отдаёт само окно (baza.py, /local/<id>); нет его по пути — сказать
+  const [localSrc, setLocalSrc] = useState<string | null>(att.local ? null : att.url);
+  useEffect(() => {
+    if (att.local) void native.localUrl(att).then(setLocalSrc);
+  }, [att]);
+  const file = { ...att, url: localSrc ?? '' };
   const isText = file.type.startsWith('text/') || /\.(md|txt)$/i.test(file.name);
   const [text, setText] = useState<string | null>(null);
   useEffect(() => {
-    if (!isText) return;
+    if (!isText || !file.url) return;
     let alive = true;
     fetch(file.url)
       .then((r) => r.text())
@@ -34,15 +41,21 @@ export function FileView({ note, file, onBack }: { note: Note; file: Attachment;
         <span className="dk-file-name" dir="auto">
           {fileIcon(file)} {file.name}
         </span>
-        <span className="muted small">
-          {size(file.size)} · из «{note.title || 'Без названия'}»
+        <span className="muted small" title={att.local ? att.path : undefined}>
+          {size(file.size)} · {att.local ? '💻 на этом компьютере · ' : ''}из «{note.title || 'Без названия'}»
         </span>
         <span className="dk-spacer" />
         <a className="dk-icon" href={file.url} download={file.name} title="Скачать">
           ⤓
         </a>
       </div>
-      {file.type === 'application/pdf' ? (
+      {att.local && localSrc === '' ? (
+        <div className="dk-file-body dk-file-pad muted">
+          Файла нет по пути <code>{att.path}</code>. Его переместили или удалили — прикрепите заново.
+        </div>
+      ) : !file.url ? (
+        <div className="dk-file-body dk-file-pad muted">Открываю…</div>
+      ) : file.type === 'application/pdf' ? (
         <iframe className="dk-file-body" src={file.url} title={file.name} />
       ) : file.type.startsWith('image/') ? (
         <div className="dk-file-body dk-file-img">
