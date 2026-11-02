@@ -51,11 +51,12 @@ export function prepareMarkdown(
   const repl: Repl[] = [];
   const embeds = new Map<string, string>();
 
-  // %%скрытое%% — убрать (только вне кода)
+  // %%скрытое%% — убрать (только вне кода); метка диктовки %%🎤:id%% — видна: туда встанет текст
   for (let i = codeOnly.indexOf('%%'); i >= 0; ) {
     const j = codeOnly.indexOf('%%', i + 2);
     const end = j < 0 ? src.length : j + 2;
-    repl.push({ start: i, end, html: '' });
+    const voice = /^%%🎤:[a-z0-9]+%%$/.test(src.slice(i, end));
+    repl.push({ start: i, end, html: voice ? '<span class="kb-voice" title="Сюда встанет надиктованное">🎤 распознаётся…</span>' : '' });
     i = j < 0 ? -1 : codeOnly.indexOf('%%', end);
   }
 

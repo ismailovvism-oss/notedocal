@@ -137,6 +137,19 @@ class HtmlBlock extends WidgetType {
   }
 }
 
+class VoiceMark extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const s = document.createElement('span');
+    s.className = 'kb-voice';
+    s.textContent = '🎤 …';
+    s.title = 'Сюда встанет надиктованное, когда окно на компьютере его распознает';
+    return s;
+  }
+}
+
 const hide = Decoration.replace({});
 const mark = (cls: string, attrs?: Record<string, string>) => Decoration.mark({ class: cls, attributes: attrs });
 
@@ -305,6 +318,11 @@ function build(state: EditorState): Built {
       hideRange(from, from + 2);
       hideRange(to - 2, to);
     }
+  }
+
+  // метка диктовки %%🎤:id%% — сюда окно поставит распознанное
+  for (const m of masked.matchAll(/%%🎤:([a-z0-9]+)%%/g)) {
+    out.push(Decoration.replace({ widget: new VoiceMark() }).range(m.index!, m.index! + m[0].length));
   }
 
   for (let i = doc.indexOf('%%'); i >= 0; ) {

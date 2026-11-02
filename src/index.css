@@ -4638,3 +4638,29 @@ button.chip {
 }
 
 /* ---------- диктовка с места курсора (🎤 в поле правки) ---------- */
+.voice-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.voice-msg { margin-right: auto; }
+.voice-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 0.86rem;
+}
+.voice-btn:hover { background: var(--surface-2); }
+.voice-ok { background: var(--accent); border-color: var(--accent); color: #fff; }
+.voice-rec { font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.voice-rec.recording { color: var(--danger); }
+.voice-rec.paused { color: var(--warn); }
+.voice-lang { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; padding: 3px 6px; font-size: 0.82rem; }
+.kb-voice {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 0.85em;
+  animation: kb-voice-pulse 1.6s ease-in-out infinite;
+}
+@keyframes kb-voice-pulse { 50% { opacity: 0.55; } }

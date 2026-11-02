@@ -17,6 +17,10 @@ import { FragmentButtons } from './FragmentButtons';
 import type { LiveEditorProps } from './liveEditorTypes';
 import { useKb, type KbApi } from '../lib/kb/ui';
 import { anchorsAt, dropEmptyAnchors } from '../lib/kb/edit';
+import { fmtSeconds, useRecorder } from '../lib/recorder';
+import { attachmentsReady, uploadAttachment } from '../lib/attachments';
+import { useLocalStorage } from '../lib/storage';
+import { LANGS } from '../lib/quick';
 
 /** Минимальная правка вместо замены всего текста: курсор и история не прыгают. */
 function diff(a: string, b: string) {
@@ -118,6 +122,11 @@ export default function LiveEditor({
   keysRef.current = keys;
   const [bar, setBar] = useState<{ top: number; left: number; below: boolean; pieces: number; inAnchor: boolean } | null>(null);
   const [error, setError] = useState('');
+  // Диктовка с места курсора: метка %%🎤:id%% в тексте, запись — окну на компьютере
+  const recorder = useRecorder();
+  const [voiceId, setVoiceId] = useState<string | null>(null);
+  const [voiceMsg, setVoiceMsg] = useState('');
+  const [lang, setLang] = useLocalStorage<string>('ndc.quickLang', 'ru');
 
   useEffect(() => {
     const extra: Extension = keymap.of(
@@ -224,6 +233,74 @@ export default function LiveEditor({
     });
   }, [kb, noteId]);
 
+  // окно распознало диктовку, а здесь ещё старый текст с меткой — подставить распознанное
+  useEffect(() => {
+    const v = viewRef.current;
+    const results = noteId ? kb?.index.byId.get(noteId)?.voiceResults : undefined;
+    if (!v || !results) return;
+    let doc = v.state.doc.toString();
+    for (const [id, text] of Object.entries(results)) doc = doc.replace(`%%🎤:${id}%%`, text);
+    setEditorText(v, doc);
+  }, [kb, noteId]);
+
+  const marker = (id: string) => `%%🎤:${id}%%`;
+  function dropMarker(id: string) {
+    const v = viewRef.current;
+    if (!v) return;
+    const doc = v.state.doc.toString();
+    const at = doc.indexOf(marker(id));
+    if (at < 0) return;
+    const to = at + marker(id).length + (doc[at + marker(id).length] === ' ' ? 1 : 0);
+    v.dispatch({ changes: { from: at, to }, filter: false });
+  }
+  async function startVoice() {
+    const v = viewRef.current;
+    if (!v || !noteId) return;
+    setVoiceMsg('');
+    if (!attachmentsReady()) {
+      setVoiceMsg('Войдите через Google: запись уходит в хранилище, а распознаёт её окно на компьютере');
+      return;
+    }
+    const id = Math.random().toString(36).slice(2, 8);
+    const pos = v.state.selection.main.to;
+    const left = v.state.sliceDoc(pos - 1, pos);
+    const right = v.state.sliceDoc(pos, pos + 1);
+    const insert = (left && !/\s/.test(left) ? ' ' : '') + marker(id) + (right && !/[\s.,!?:;)»]/.test(right) ? ' ' : '');
+    try {
+      await recorder.start();
+    } catch (e) {
+      setVoiceMsg(`Микрофон: ${(e as Error).message}`);
+      return;
+    }
+    v.dispatch({ changes: { from: pos, insert }, selection: { anchor: pos + insert.length }, filter: false });
+    setVoiceId(id);
+  }
+  async function finishVoice() {
+    const id = voiceId;
+    const k = kbRef.current;
+    setVoiceId(null);
+    const file = await recorder.stop();
+    if (!id || !file || !noteId || !k) return;
+    setVoiceMsg('Загружаю запись…');
+    try {
+      const att = await uploadAttachment(file);
+      const v = viewRef.current;
+      // текст с меткой — в базу сразу: окно ставит распознанное на место метки
+      if (v && onCommit) onCommit(dropEmptyAnchors(v.state.doc.toString()));
+      const job = { id, path: att.path ?? '', type: att.type, lang, at: Date.now() };
+      k.updateNote(noteId, { dictations: [...(k.index.byId.get(noteId)?.dictations ?? []), job] });
+      setVoiceMsg('Запись ушла окну на компьютере — текст встанет на место 🎤');
+    } catch (e) {
+      dropMarker(id);
+      setVoiceMsg(`Не загрузилась запись: ${(e as Error).message}`);
+    }
+  }
+  function cancelVoice() {
+    recorder.cancel();
+    if (voiceId) dropMarker(voiceId);
+    setVoiceId(null);
+  }
+
   function updateBar(view: EditorView) {
     if (!actions) return;
     const sel = view.state.selection;
@@ -296,6 +373,38 @@ export default function LiveEditor({
             format={(f) => viewRef.current && wrap(viewRef.current, ...f)}
           />
           {error && <div className="fragment-err">{error}</div>}
+        </div>
+      )}
+      {noteId && (
+        <div className="voice-row" onMouseDown={(e) => e.preventDefault()}>
+          {voiceMsg && <span className="small muted voice-msg">{voiceMsg}</span>}
+          {recorder.state === 'idle' ? (
+            <button className="voice-btn" title="Диктовать сюда — с места курсора" onClick={startVoice}>
+              🎤 Диктовать
+            </button>
+          ) : (
+            <>
+              <span className={`voice-rec ${recorder.state}`}>
+                {recorder.state === 'recording' ? '● запись' : '⏸ пауза'} {fmtSeconds(recorder.seconds)}
+              </span>
+              <button className="voice-btn" onClick={recorder.state === 'recording' ? recorder.pause : recorder.resume}>
+                {recorder.state === 'recording' ? '⏸' : '▶'}
+              </button>
+              <button className="voice-btn voice-ok" onClick={finishVoice} title="Готово — распознать">
+                ✓ Готово
+              </button>
+              <button className="voice-btn" onClick={cancelVoice} title="Выбросить запись">
+                ✕
+              </button>
+            </>
+          )}
+          <select className="voice-lang" value={lang} onChange={(e) => setLang(e.target.value)} title="Язык диктовки">
+            {LANGS.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
         </div>
       )}
     </div>

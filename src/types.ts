@@ -134,6 +134,11 @@ export interface Note {
   request?: QuickRequest | null;
   /** Почему последний заказ не удался — показывается в приложении. */
   requestError?: string;
+  /** Диктовка из приложения в эту заметку: запись в хранилище, в тексте — метка `%%🎤:id%%`.
+   *  Окно распознаёт и ставит текст на место метки (секретарь, notesBridge, команда dictated). */
+  dictations?: { id: string; path: string; type: string; lang: string; at: number }[];
+  /** Что распознано по диктовкам (id → текст): поле правки, открытое со старым текстом, подставит сам. */
+  voiceResults?: Record<string, string>;
   createdAt: number;
   updatedAt: number;
   /** Мягкое удаление (надгробие) — чтобы удаление доезжало до других устройств. */

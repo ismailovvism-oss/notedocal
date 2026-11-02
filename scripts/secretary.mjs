@@ -1553,6 +1553,8 @@ const VOICE_FOLDER = 'Голосом';
  * и {op:'rmfile', ref, path} (стереть файл из хранилища: звук после распознавания не храним).
  * Выход — JSON-строки: {event:'ready'}, {event:'ok', ref}, {event:'fail', ref, message},
  * {event:'notes', notes:[…, folder]} — весь список обеих папок при каждом его изменении,
+ * {event:'dictations', jobs:[{noteId, id, path, type, lang}]} — диктовки из приложения в любые заметки
+ * (окно отвечает {op:'dictated', ref, noteId, id, text, error?}),
  * в том числе после правки с телефона.
  */
 async function notesBridge(db, uid, bucket) {
@@ -1583,10 +1585,26 @@ async function notesBridge(db, uid, bucket) {
     last = text;
     say({ event: 'notes', notes: list });
   };
+  // Диктовка в любую заметку из приложения: запись лежит в хранилище, в тексте — метка
+  // `%%🎤:id%%` на месте курсора, в заметке — `dictations: [{id, path, type, lang, at}]`.
+  // Окно распознаёт и отвечает командой `dictated` (ниже) — текст встаёт на место метки.
+  let lastJobs = '';
+  const publishJobs = () => {
+    const jobs = [];
+    for (const n of notes.values()) {
+      if (n.deleted || !Array.isArray(n.dictations)) continue;
+      for (const d of n.dictations) if (d?.id && d?.path) jobs.push({ noteId: n.id, ...d });
+    }
+    const text = JSON.stringify(jobs);
+    if (text === lastJobs) return;
+    lastJobs = text;
+    say({ event: 'dictations', jobs });
+  };
   const fail = (err) => say({ event: 'error', message: String(err?.message ?? err) });
   db.collection(`users/${uid}/notes`).onSnapshot((snap) => {
     notes = new Map(snap.docs.map((d) => [d.id, d.data()]));
     publish();
+    publishJobs();
   }, fail);
   db.collection(`users/${uid}/relations`).onSnapshot((snap) => {
     rels = snap.docs.map((d) => d.data());
@@ -1623,6 +1641,33 @@ async function notesBridge(db, uid, bucket) {
         if (oldTitle && cmd.fields.title && oldTitle !== cmd.fields.title && notes) {
           await rewriteLinks(db, uid, notes, cmd.id, oldTitle, cmd.fields.title);
         }
+      } else if (cmd.op === 'dictated') {
+        // распознанная диктовка — на место метки; нет метки (текст уже сохранили без неё) — в конец
+        const noteRef = db.doc(`users/${uid}/notes/${cmd.noteId}`);
+        let path = '';
+        await db.runTransaction(async (tr) => {
+          const doc = await tr.get(noteRef);
+          if (!doc.exists) return;
+          const n = doc.data();
+          const job = (n.dictations ?? []).find((d) => d.id === cmd.id);
+          if (!job) return;
+          path = job.path ?? '';
+          const text = String(cmd.text ?? '').trim();
+          const marker = `%%🎤:${cmd.id}%%`;
+          const old = n.body ?? '';
+          const body = old.includes(marker) ? old.replace(marker, text) : text ? `${old.trimEnd()}${old.trim() ? '\n\n' : ''}${text}` : old;
+          const patch = {
+            body,
+            dictations: (n.dictations ?? []).filter((d) => d.id !== cmd.id),
+            voiceResults: Object.fromEntries([...Object.entries(n.voiceResults ?? {}), [cmd.id, text]].slice(-20)),
+            updatedAt: Date.now(),
+          };
+          const cv = n.currentVersion;
+          if (n.versions && cv && n.versions[cv] === old) patch.versions = { ...n.versions, [cv]: body };
+          if (cmd.error) patch.requestError = `Голос не распознан: ${cmd.error}`;
+          tr.set(noteRef, patch, { merge: true });
+        });
+        if (path && bucket && path.startsWith(`users/${uid}/files/`)) await bucket.file(path).delete({ ignoreNotFound: true });
       } else if (cmd.op === 'delete') {
         await ref.set({ deleted: true, updatedAt: cmd.updatedAt ?? Date.now() }, { merge: true });
       } else if (cmd.op === 'download' || cmd.op === 'rmfile') {
