@@ -30,6 +30,8 @@ export interface QtLink {
   vaultImport: (cb: (s: string) => void) => void;
   vaultImportData: (s: string, cb: (s: string) => void) => void;
   vaultReveal: (path: string) => void;
+  vaultUpload: (s: string) => void;
+  vaultDownload: (s: string) => void;
   voice: (s: string) => void;
   process: (s: string) => void;
   mics: (cb: (s: string) => void) => void;
@@ -65,6 +67,8 @@ const uploads = new Map<string, (r: Attached) => void>();
 export interface Attached {
   attachments: Attachment[];
   errors: string[];
+  /** Скачанное в хранилище (vaultDownload): пути в нём. */
+  paths?: string[];
 }
 let num = 0;
 
@@ -146,6 +150,22 @@ export const vaultApi = {
       r.readAsDataURL(file);
     }),
   reveal: (path: string) => link?.vaultReveal(path),
+  /** Файл хранилища — в облако (для «📱 текст и файлы»). */
+  upload: (path: string) =>
+    new Promise<Attached>((resolve) => {
+      if (!link) return resolve({ attachments: [], errors: ['нет окна'] });
+      const ref = `u${++num}`;
+      uploads.set(ref, resolve);
+      link.vaultUpload(JSON.stringify({ ref, path }));
+    }),
+  /** Файл из облака (прикреплённый на телефоне) — в `_файлы/` хранилища. */
+  download: (storagePath: string, name: string) =>
+    new Promise<Attached>((resolve) => {
+      if (!link) return resolve({ attachments: [], errors: ['нет окна'] });
+      const ref = `w${++num}`;
+      uploads.set(ref, resolve);
+      link.vaultDownload(JSON.stringify({ ref, storagePath, name }));
+    }),
   onChange: (cb: (c: VaultChanges) => void) => {
     vaultListeners.add(cb);
     return () => void vaultListeners.delete(cb);

@@ -42,8 +42,11 @@ export function NotePane({
   toolsSlot,
   onOpenFile,
   vaultImport,
+  phone,
   onDelete,
 }: {
+  /** Заметка хранилища: «📱 на телефон» — действующий режим, своя отметка, поставить. */
+  phone?: { mode: 'text' | 'files' | null; own?: 'text' | 'files' | 'off'; set: (v: 'text' | 'files' | 'off' | null) => void };
   note: Note;
   focus?: PaneFocus;
   allNotes: Note[];
@@ -417,6 +420,22 @@ export function NotePane({
         >
           {String(note.props?.icon ?? '') || '🙂'}
         </button>
+        {phone && (
+          <button
+            className={`dk-icon ${phone.mode ? 'on' : ''}`}
+            title={phone.mode ? `На телефоне — ${phone.mode === 'files' ? 'текст и файлы' : 'только текст'}${phone.own ? '' : ' (как у папки)'}` : 'Не на телефоне'}
+            onClick={(e) =>
+              menu(e, [
+                { label: `📱 На телефон — только текст${phone.own === 'text' ? ' ✓' : ''}`, icon: '📱', run: () => phone.set('text') },
+                { label: `📱 На телефон — текст и файлы${phone.own === 'files' ? ' ✓' : ''}`, icon: '📎', run: () => phone.set('files') },
+                { label: `Не на телефон${phone.own === 'off' ? ' ✓' : ''}`, icon: '🚫', run: () => phone.set('off') },
+                { label: `Как у папки${!phone.own ? ' ✓' : ''}`, icon: '↺', run: () => phone.set(null) },
+              ])
+            }
+          >
+            {phone.mode === 'files' ? '📱📎' : phone.mode ? '📱' : '📵'}
+          </button>
+        )}
         {scope && !scope.shown && (
           <span className="dk-hidden-note small" title="В списке, поиске и тегах Базы её не видно">
             служебная{scope.why !== 'отметка' ? ` · ${scope.why}` : ''}

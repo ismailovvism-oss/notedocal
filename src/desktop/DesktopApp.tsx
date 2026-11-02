@@ -30,6 +30,8 @@ import { native, vaultApi } from './native';
 import { MenuHost, useMenu, type MenuItem } from './Menu';
 import { FileView, fileIcon } from './FileView';
 import { useVault, type Vault } from './useVault';
+import { usePhoneSync } from './usePhoneSync';
+import { phoneMode, type PhoneMode } from '../lib/kb/phone';
 import { dirName, inVault, pathOfId } from '../lib/kb/vault';
 
 interface Target extends PaneFocus {
@@ -80,7 +82,14 @@ function Desktop() {
     }),
     [vault, actions, fail],
   );
-  const cloudLive = useMemo(() => visible(notes), [notes]);
+  // облачные копии заметок хранилища («📱 на телефон») в «Базе» не показываем: заметка есть файлом
+  const cloudLive = useMemo(
+    () => visible(notes).filter((n) => !n.vaultSync && !(vault.info && n.type === 'folder' && n.title === `🗄 ${vault.info.name}`)),
+    [notes, vault.info],
+  );
+  const phone = usePhoneSync(vault, notes, setNotes, relations, relActions.add, status === 'есть');
+  /** Режим «📱» заметки хранилища: свой или папки. */
+  const phoneOf = useCallback((n: Note) => (n.vault && !n.vault.mime ? phoneMode(n, phone.folders) : null), [phone.folders]);
   const live = useMemo(
     () =>
       vault.info
@@ -490,7 +499,21 @@ function Desktop() {
         { label: 'Новая подпапка', icon: '📁', run: () => createFolder(n.id) },
         'sep',
         ...common,
-        { label: 'Открыть папку как заметку', icon: '📄', run: () => go({ id: n.id }) },
+        ...(n.id.startsWith('d:')
+          ? (() => {
+              const dir = n.id.slice(2);
+              const cur = phone.folders[dir];
+              const set = (m: PhoneMode | 'off' | null) => () => phone.setFolder(dir, m);
+              return [
+                'sep' as const,
+                { label: `📱 Папку на телефон — только текст${cur === 'text' ? ' ✓' : ''}`, icon: '📱', run: set('text') },
+                { label: `📱 Папку на телефон — текст и файлы${cur === 'files' ? ' ✓' : ''}`, icon: '📎', run: set('files') },
+                { label: `Не на телефон${cur === 'off' ? ' ✓' : ''}`, icon: '🚫', run: set('off') },
+                ...(cur ? [{ label: 'Как у папки выше', icon: '↺', run: set(null) }] : []),
+                'sep' as const,
+              ];
+            })()
+          : [{ label: 'Открыть папку как заметку', icon: '📄', run: () => go({ id: n.id }) }]),
         'sep',
         {
           label: 'Удалить папку',
@@ -650,6 +673,8 @@ function Desktop() {
           treeVisible={treeVisible}
           iconOf={iconOf}
           filesOf={filesOf}
+          phoneOf={phoneOf}
+          phoneBusy={phone.busy}
           vault={vault}
           vaultErr={vaultErr}
           clearVaultErr={() => setVaultErr('')}
@@ -733,6 +758,11 @@ function Desktop() {
                 toolsSlot={toolsSlot}
                 onOpenFile={(fid, inNew) => go({ id: note.id, file: fid }, inNew)}
                 vaultImport={inVault(note.id) ? { files: vault.importFiles, data: vault.importData } : undefined}
+                phone={
+                  note.vault && !note.vault.mime
+                    ? { mode: phoneOf(note), own: note.toPhone, set: (v) => store.update(note.id, { toPhone: v ?? undefined }) }
+                    : undefined
+                }
                 picking={!!picking && picking.tab === cur?.key}
                 onDelete={() => {
                   store.remove(note.id);
@@ -845,7 +875,11 @@ function Sidebar({
   treeVisible,
   iconOf,
   filesOf,
+  phoneOf,
+  phoneBusy,
 }: {
+  phoneOf: (n: Note) => PhoneMode | null;
+  phoneBusy: string;
   treeVisible: Set<string>;
   iconOf: (n: Note) => string;
   filesOf: Map<string, number>;
@@ -1017,6 +1051,7 @@ function Sidebar({
           visible={treeVisible}
           iconOf={iconOf}
           filesOf={filesOf}
+          phoneOf={phoneOf}
           sortBy={sortBy}
           isService={isService}
           activeId={activeId}
@@ -1055,7 +1090,10 @@ function Sidebar({
           <div className="muted">Отдельную заметку можно показать или спрятать кнопкой 👁 у неё самой.</div>
         </div>
       )}
-      <div className="dk-status small muted">{STATUS[status]}</div>
+      <div className="dk-status small muted">
+        {STATUS[status]}
+        {phoneBusy ? ` · 📱 ${phoneBusy}` : ''}
+      </div>
     </aside>
   );
 }

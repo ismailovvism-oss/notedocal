@@ -54,7 +54,7 @@ const MIME: Record<string, string> = {
 export const mimeOf = (name: string) => MIME[name.slice(name.lastIndexOf('.') + 1).toLowerCase()] ?? 'application/octet-stream';
 
 /** Поля приложения, которые идут в ключ `notedocal:` заголовка (как у markdownFile.ts). */
-const SERVICE = ['type', 'versions', 'currentVersion', 'lang', 'inBase', 'dictations', 'voiceResults'] as const;
+const SERVICE = ['type', 'versions', 'currentVersion', 'lang', 'inBase', 'dictations', 'voiceResults', 'toPhone', 'cloud'] as const;
 
 /** Сравнение без учёта порядка ключей. */
 function canon(v: unknown): string {

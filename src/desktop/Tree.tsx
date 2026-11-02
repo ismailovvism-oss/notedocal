@@ -33,6 +33,8 @@ export interface TreeProps {
   /** Раскрытые папки (хранит окно: туда же раскрывает папку, куда создали заметку). */
   open: string[];
   setOpen: React.Dispatch<React.SetStateAction<string[]>>;
+  /** Заметка на телефоне («📱»): режим или null. */
+  phoneOf?: (n: Note) => 'text' | 'files' | null;
   /** Сколько файлов у заметки (📎 в строке) и порядок пунктов в папке. */
   filesOf?: Map<string, number>;
   sortBy?: 'title' | 'updated' | 'files';
@@ -42,7 +44,7 @@ export interface TreeProps {
   onMenu: (e: React.MouseEvent, node: { id: string; folder: boolean; parent: string | null } | null) => void;
 }
 
-export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen, onMenu, iconOf, filesOf, sortBy = 'title' }: TreeProps) {
+export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen, onMenu, iconOf, filesOf, phoneOf, sortBy = 'title' }: TreeProps) {
   const openSet = useMemo(() => new Set(open), [open]);
   const toggle = (id: string) => setOpen((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [over, setOver] = useState<string | null>(null);
@@ -112,7 +114,7 @@ export function FolderTree({ notes, relations, visible, isService, activeId, onO
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf, filesOf };
+  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf, filesOf, phoneOf };
   return (
     <div
       className={`dk-tree ${over === '' ? 'drop' : ''}`}
@@ -151,10 +153,11 @@ interface Ctx {
   onMenu: TreeProps['onMenu'];
   iconOf?: TreeProps['iconOf'];
   filesOf?: TreeProps['filesOf'];
+  phoneOf?: TreeProps['phoneOf'];
 }
 
 function Items({ parent, depth, path, ctx }: { parent: string | null; depth: number; path: string[]; ctx: Ctx }) {
-  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf, filesOf } = ctx;
+  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf, filesOf, phoneOf } = ctx;
   const { folders, items } = parent ? t.split(t.kids.get(parent) ?? []) : t.roots;
   const [limit, setLimit] = useState(PER_FOLDER);
   const pad = { paddingInlineStart: 6 + depth * 14 };
@@ -216,6 +219,7 @@ function Items({ parent, depth, path, ctx }: { parent: string | null; depth: num
               {n.title || 'Без названия'}
             </span>
             {filesOf?.get(n.id) ? <span className="dk-files-badge" title="Файлов в заметке">📎{filesOf.get(n.id)}</span> : null}
+            {phoneOf?.(n) ? <span className="dk-files-badge" title={phoneOf(n) === 'files' ? 'На телефоне — с файлами' : 'На телефоне — только текст'}>📱</span> : null}
           </div>
         );
       })}

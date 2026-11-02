@@ -13,6 +13,7 @@ export function cleanAttachment(a: Attachment): Attachment {
     path: a.path ?? '',
     createdAt: a.createdAt ?? 0,
     ...(a.local ? { local: true } : {}),
+    ...(a.vaultFile ? { vaultFile: a.vaultFile } : {}),
   };
 }
 
