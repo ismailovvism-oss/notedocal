@@ -584,6 +584,17 @@ function Desktop() {
     }
     return m;
   }, [vault.notes, index]);
+  // Сколько файлов у заметки — видно в дереве и списке до открытия: облачные вложения или
+  // встроенные в текст файлы хранилища (`![[книга.pdf]]` — не .md)
+  const filesOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const n of live) {
+      const embeds = (index.parsed.get(n.id)?.links ?? []).filter((l) => l.embed && /\.(?!md$)[a-z0-9]{2,5}$/i.test(l.target)).length;
+      const k = (n.attachments?.length ?? 0) + embeds;
+      if (k) m.set(n.id, k);
+    }
+    return m;
+  }, [live, index]);
   const treeVisible = useMemo(() => {
     const cards = new Set([...cardOf.values()].map((c) => c.id));
     const ids = showAll ? live.map((n) => n.id) : [...shown];
@@ -638,6 +649,7 @@ function Desktop() {
           relations={treeRelations}
           treeVisible={treeVisible}
           iconOf={iconOf}
+          filesOf={filesOf}
           vault={vault}
           vaultErr={vaultErr}
           clearVaultErr={() => setVaultErr('')}
@@ -832,9 +844,11 @@ function Sidebar({
   clearVaultErr,
   treeVisible,
   iconOf,
+  filesOf,
 }: {
   treeVisible: Set<string>;
   iconOf: (n: Note) => string;
+  filesOf: Map<string, number>;
   vault: Vault;
   vaultErr: string;
   clearVaultErr: () => void;
@@ -872,25 +886,29 @@ function Sidebar({
   const [foldersOpen, setFoldersOpen] = useState(false);
   const isHidden = (f: string) => hiddenFolders.some((x) => x.toLowerCase() === f.toLowerCase());
   const chosen = selectedTags(sel);
-  const filtering = chosen.length > 0;
+  // отбор «с файлами» и порядок — запоминаются
+  const [onlyFiles, setOnlyFiles] = useLocalStorage<boolean>('dk.onlyFiles', false);
+  const [sortBy, setSortBy] = useLocalStorage<SortBy>('dk.sort', 'title');
+  const filtering = chosen.length > 0 || onlyFiles;
   const [shown, setShown] = useState(PAGE);
   useEffect(() => setShown(PAGE), [query, sel]);
 
   const pool = useMemo(
     () =>
-      filtering
+      (chosen.length
         ? facets.matching.map((id) => kb.index.byId.get(id)).filter((n): n is Note => !!n)
         : scope
           ? notes.filter((n) => scope.has(n.id))
-          : notes,
-    [filtering, facets, notes, kb.index, scope],
+          : notes
+      ).filter((n) => !onlyFiles || filesOf.has(n.id) || !!n.vault?.mime),
+    [chosen.length, facets, notes, kb.index, scope, onlyFiles, filesOf],
   );
   const found = useMemo(() => (query ? searchNotes(pool, query, shown) : null), [query, pool, shown]);
   // поиск или отбор по тегам — плоский список; иначе дерево папок
   const flat = found || filtering;
   const list = useMemo(
-    () => (found ? found.hits.map((h) => h.note) : [...pool].filter((n) => n.type !== 'folder').sort((a, b) => b.updatedAt - a.updatedAt)),
-    [found, pool],
+    () => (found ? found.hits.map((h) => h.note) : [...pool].filter((n) => n.type !== 'folder').sort(sorter(sortBy, filesOf))),
+    [found, pool, sortBy, filesOf],
   );
   const hit = useMemo(() => new Map((found?.hits ?? []).map((h) => [h.note.id, h])), [found]);
   const total = found ? found.total : list.length;
@@ -947,9 +965,19 @@ function Sidebar({
           </button>
         </div>
       )}
+      <div className="dk-filters">
+        <button className={`dk-chip ${onlyFiles ? 'on' : ''}`} title="Только заметки с файлами и сами файлы" onClick={() => setOnlyFiles(!onlyFiles)}>
+          📎 с файлами
+        </button>
+        <select className="dk-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} title="Порядок в дереве и списке">
+          <option value="title">↕ по названию</option>
+          <option value="updated">↕ сначала свежие</option>
+          <option value="files">↕ больше файлов</option>
+        </select>
+      </div>
       {flat ? (
         <>
-          <div className="dk-count muted small">{found ? `найдено: ${total}` : `по тегам: ${total}`}</div>
+          <div className="dk-count muted small">{found ? `найдено: ${total}` : onlyFiles && !chosen.length ? `с файлами: ${total}` : `отобрано: ${total}`}</div>
           <div className="dk-list">
             {list.slice(0, shown).map((n) => {
               const h = hit.get(n.id);
@@ -965,6 +993,7 @@ function Sidebar({
                   <span className="dk-row-title">
                     {t !== 'note' && <span className={`type-badge type-${t}`}>{TYPE_BADGE[t]}</span>}
                     {n.title || 'Без названия'}
+                    {filesOf.get(n.id) ? <span className="dk-files-badge" title="Файлов в заметке">📎{filesOf.get(n.id)}</span> : null}
                   </span>
                   {h?.snippet && (
                     <span className="dk-snippet">
@@ -987,6 +1016,8 @@ function Sidebar({
           relations={relations}
           visible={treeVisible}
           iconOf={iconOf}
+          filesOf={filesOf}
+          sortBy={sortBy}
           isService={isService}
           activeId={activeId}
           onOpen={onOpen}
@@ -1184,4 +1215,13 @@ function CardBar({ file, card, onPatch, onOpenCard }: { file: Note; card?: Note;
       <span className="muted small">{file.vault?.path}</span>
     </div>
   );
+}
+
+export type SortBy = 'title' | 'updated' | 'files';
+/** Порядок заметок: по названию, по свежести, по числу файлов (поровну — по названию). */
+export function sorter(by: SortBy, filesOf: Map<string, number>) {
+  const t = (a: Note, b: Note) => (a.title || '').localeCompare(b.title || '', 'ru');
+  if (by === 'updated') return (a: Note, b: Note) => b.updatedAt - a.updatedAt || t(a, b);
+  if (by === 'files') return (a: Note, b: Note) => (filesOf.get(b.id) ?? 0) - (filesOf.get(a.id) ?? 0) || t(a, b);
+  return t;
 }

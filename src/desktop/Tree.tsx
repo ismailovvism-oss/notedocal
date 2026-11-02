@@ -8,6 +8,13 @@ import type { Note, Relation } from '../types';
 import { TYPE_BADGE } from '../lib/noteTypes';
 
 const ru = (a: Note, b: Note) => (a.title || '').localeCompare(b.title || '', 'ru');
+/** Порядок заметок в папке (папки — всегда по названию). */
+const order = (by: TreeProps['sortBy'], files?: Map<string, number>) =>
+  by === 'updated'
+    ? (a: Note, b: Note) => b.updatedAt - a.updatedAt || ru(a, b)
+    : by === 'files'
+      ? (a: Note, b: Note) => (files?.get(b.id) ?? 0) - (files?.get(a.id) ?? 0) || ru(a, b)
+      : ru;
 const PER_FOLDER = 300;
 
 export interface TreeProps {
@@ -26,13 +33,16 @@ export interface TreeProps {
   /** Раскрытые папки (хранит окно: туда же раскрывает папку, куда создали заметку). */
   open: string[];
   setOpen: React.Dispatch<React.SetStateAction<string[]>>;
+  /** Сколько файлов у заметки (📎 в строке) и порядок пунктов в папке. */
+  filesOf?: Map<string, number>;
+  sortBy?: 'title' | 'updated' | 'files';
   /** Иконка пункта (своя у заметки, у PDF — по виду файла); пусто — без иконки. */
   iconOf?: (n: Note) => string;
   /** Правая кнопка: по заметке или папке (parent — в какой папке она здесь показана), по пустому месту — null. */
   onMenu: (e: React.MouseEvent, node: { id: string; folder: boolean; parent: string | null } | null) => void;
 }
 
-export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen, onMenu, iconOf }: TreeProps) {
+export function FolderTree({ notes, relations, visible, isService, activeId, onOpen, onCreate, onMove, open, setOpen, onMenu, iconOf, filesOf, sortBy = 'title' }: TreeProps) {
   const openSet = useMemo(() => new Set(open), [open]);
   const toggle = (id: string) => setOpen((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [over, setOver] = useState<string | null>(null);
@@ -73,12 +83,12 @@ export function FolderTree({ notes, relations, visible, isService, activeId, onO
       const list = ids.map((id) => byId.get(id)!).filter(Boolean);
       return {
         folders: list.filter((n) => n.type === 'folder' && folderShown(n.id)).sort(ru),
-        items: list.filter(seen).sort(ru),
+        items: list.filter(seen).sort(order(sortBy, filesOf)),
       };
     };
     const roots = split(notes.filter((n) => !hasParent.has(n.id)).map((n) => n.id));
     return { kids, split, roots };
-  }, [notes, relations, visible, isService]);
+  }, [notes, relations, visible, isService, sortBy, filesOf]);
 
   const drop = (to: string | null) => (e: React.DragEvent) => {
     e.preventDefault();
@@ -102,7 +112,7 @@ export function FolderTree({ notes, relations, visible, isService, activeId, onO
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf };
+  const ctx: Ctx = { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf, filesOf };
   return (
     <div
       className={`dk-tree ${over === '' ? 'drop' : ''}`}
@@ -140,10 +150,11 @@ interface Ctx {
   onCreate: TreeProps['onCreate'];
   onMenu: TreeProps['onMenu'];
   iconOf?: TreeProps['iconOf'];
+  filesOf?: TreeProps['filesOf'];
 }
 
 function Items({ parent, depth, path, ctx }: { parent: string | null; depth: number; path: string[]; ctx: Ctx }) {
-  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf } = ctx;
+  const { t, openSet, toggle, over, setOver, drag, dragOver, drop, activeId, onOpen, onCreate, onMenu, iconOf, filesOf } = ctx;
   const { folders, items } = parent ? t.split(t.kids.get(parent) ?? []) : t.roots;
   const [limit, setLimit] = useState(PER_FOLDER);
   const pad = { paddingInlineStart: 6 + depth * 14 };
@@ -204,6 +215,7 @@ function Items({ parent, depth, path, ctx }: { parent: string | null; depth: num
               {iconOf?.(n) ? <span className="dk-node-icon">{iconOf(n)}</span> : type !== 'note' && <span className={`type-badge type-${type}`}>{TYPE_BADGE[type]}</span>}
               {n.title || 'Без названия'}
             </span>
+            {filesOf?.get(n.id) ? <span className="dk-files-badge" title="Файлов в заметке">📎{filesOf.get(n.id)}</span> : null}
           </div>
         );
       })}
