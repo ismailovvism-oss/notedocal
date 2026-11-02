@@ -7,7 +7,7 @@
 // что у приложения на телефоне.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Note, Relation } from '../types';
+import type { Attachment, Note, Relation } from '../types';
 import { uid, useListActions, useLocalStorage, visible } from '../lib/storage';
 import { persistParse, useNotesStore } from '../lib/notesStore';
 import { buildIndex, planRename } from '../lib/kb/index';
@@ -24,14 +24,14 @@ import { Backlinks } from '../components/Backlinks';
 import { CommentComposer, LinkPicker, SetPicker } from '../components/KbDialogs';
 import { PropsView } from '../components/Props';
 import { NotePane, type PaneFocus } from './NotePane';
-import { useBridgeSync, type BridgeStatus } from './bridge';
+import { sendBridge, useBridgeSync, type BridgeStatus } from './bridge';
 import { Guard } from './Guard';
 import { native, vaultApi } from './native';
 import { MenuHost, useMenu, type MenuItem } from './Menu';
 import { FileView, fileIcon } from './FileView';
 import { useVault, type Vault } from './useVault';
 import { usePhoneSync } from './usePhoneSync';
-import { phoneMode, type PhoneMode } from '../lib/kb/phone';
+import { phoneMode, type PhoneMode, type VaultSync } from '../lib/kb/phone';
 import { dirName, inVault, pathOfId } from '../lib/kb/vault';
 
 interface Target extends PaneFocus {
@@ -342,11 +342,13 @@ function Desktop() {
       if (to === null || to.startsWith('d:')) {
         void vault.move(id, to ? pathOfId(to) : '').catch(fail);
         if (to) setOpenFolder(to);
-      } else setVaultErr('Из хранилища в облако — отметкой «📱 на телефон» (следующий шаг), не перетаскиванием');
+      } else setVaultErr('Из хранилища на телефон — отметкой 📱 в шапке заметки или в меню папки, не перетаскиванием');
       return;
     }
+    // облачную — в папку хранилища: забрать (и оставить на телефоне)
     if (to !== null && to.startsWith('d:')) {
-      setVaultErr('Забрать облачную заметку в хранилище — следующим шагом');
+      const dir = pathOfId(to);
+      void takeToVault([id], () => dir, true);
       return;
     }
     if (from === CLOUD) from = null;
@@ -446,6 +448,90 @@ function Desktop() {
   const madeHere = useRef(new Set<string>());
   const prevNote = useRef<string | undefined>(undefined);
 
+  // --- забрать облачные заметки в хранилище ---
+  /** Путь облачной заметки по папкам (от верхней к ближайшей) — так же ляжет в хранилище. */
+  function cloudPath(id: string): string {
+    const parts: string[] = [];
+    const seen = new Set<string>();
+    for (let cur = id; ; ) {
+      const r = relations.find((x) => !x.deleted && x.type === 'child' && x.to === cur && index.byId.has(x.from));
+      if (!r || seen.has(r.from)) break;
+      seen.add(r.from);
+      parts.unshift((index.byId.get(r.from)?.title || 'Без названия').replace(/[\\/:*?"<>|]/g, ' ').trim());
+      cur = r.from;
+    }
+    return parts.join('/');
+  }
+  /** Облачные заметки — файлами в хранилище. Вложения — скачиваются в `_файлы/` и встают
+   *  в текст `![[имя]]`. keep: облачная заметка становится «📱» копией (телефон её видит) —
+   *  иначе она и её файлы убираются из облака. */
+  async function takeToVault(ids: string[], dirOf: (n: Note) => string, keep: boolean) {
+    if (!vault.info) return setVaultErr('Сначала выберите хранилище (🗄 вверху слева)');
+    const list = ids.map((id) => index.byId.get(id)).filter((n): n is Note => !!n && !inVault(n.id) && n.type !== 'folder');
+    let done = 0;
+    for (const n of list) {
+      setVaultErr(`Забираю в хранилище: ${++done} из ${list.length} — ${n.title || 'Без названия'}`);
+      const embeds: string[] = [];
+      const atts = (n.attachments ?? []).filter((a) => !a.local && a.path);
+      const marked: Attachment[] = [];
+      for (const a of atts) {
+        const r = await vaultApi.download(a.path, a.name);
+        const rel = r.paths?.[0];
+        if (rel) {
+          const name = rel.slice(rel.lastIndexOf('/') + 1);
+          embeds.push(`![[${name}]]`);
+          marked.push({ ...a, vaultFile: name });
+        } else marked.push(a);
+      }
+      const b = (n.body ?? '').trimEnd();
+      const body = embeds.length ? `${b}${b ? '\n\n' : ''}${embeds.join('\n')}\n` : n.body ?? '';
+      const mode: PhoneMode = embeds.length ? 'files' : 'text';
+      try {
+        const vid = await vault.create(dirOf(n), {
+          title: n.title || 'Без названия',
+          body,
+          tags: n.tags,
+          props: n.props,
+          aliases: n.aliases,
+          type: n.type && n.type !== 'note' ? n.type : undefined,
+          versions: n.versions,
+          currentVersion: n.currentVersion,
+          lang: n.lang,
+          ...(keep ? { toPhone: mode, cloud: n.id } : {}),
+        });
+        if (keep) {
+          // облачная — теперь копия: сверка возьмёт новое время файла за точку отсчёта
+          const t = Date.now();
+          const sync: VaultSync = { vault: vault.info.name, path: pathOfId(vid), at: -1, cloudAt: t, mode };
+          setNotes((l) => l.map((x) => (x.id === n.id ? { ...x, attachments: [...marked, ...(x.attachments ?? []).filter((a) => a.local)], vaultSync: sync, updatedAt: t } : x)));
+        } else {
+          for (const a of atts) sendBridge({ op: 'rmfile', path: a.path });
+          actions.remove(n.id);
+        }
+      } catch (e) {
+        setVaultErr(`«${n.title}» не забрана: ${(e as Error).message}`);
+        return;
+      }
+    }
+    await vault.refresh().catch(() => {});
+    setVaultErr(list.length ? `Забрано в хранилище: ${list.length}${keep ? ' — на телефоне остаются (📱)' : ' — из облака убраны'}` : '');
+  }
+  /** Все заметки облачной папки (с подпапками) — с путями от неё. */
+  function cloudFolderNotes(fid: string): string[] {
+    const out: string[] = [];
+    const walk = (id: string, seen: Set<string>) => {
+      for (const r of relations) {
+        if (r.deleted || r.type !== 'child' || r.from !== id || seen.has(r.to)) continue;
+        const n = index.byId.get(r.to);
+        if (!n) continue;
+        if (n.type === 'folder') walk(n.id, new Set([...seen, n.id]));
+        else if (scope.get(n.id)?.shown || showAll) out.push(n.id);
+      }
+    };
+    walk(fid, new Set([fid]));
+    return out;
+  }
+
   // --- меню по правой кнопке (./Menu.tsx) ---
   const menu = useMenu();
   /** Скопировать текст: буфер обмена, а нет доступа — через выделение. */
@@ -493,6 +579,27 @@ function Desktop() {
       { label: 'Переименовать', icon: '✏️', run: () => renameNote(n.id) },
       { label: 'Переложить в папку…', icon: '↪', run: () => setTimeout(() => moveMenu(at, n.id, node.parent), 0) },
     ];
+    const cloud = !inVault(n.id) && n.id !== CLOUD && !!vault.info;
+    const take: MenuItem[] = cloud
+      ? node.folder
+        ? [
+            'sep',
+            { label: 'Забрать папку в хранилище — оставить на телефоне', icon: '⬇', run: () => void takeToVault(cloudFolderNotes(n.id), (x) => cloudPath(x.id), true) },
+            { label: 'Забрать папку в хранилище — убрать из облака', icon: '⬇', run: () => confirm(`Забрать «${n.title}» в хранилище и убрать эти заметки из облака (с телефона они пропадут)?`) && void takeToVault(cloudFolderNotes(n.id), (x) => cloudPath(x.id), false) },
+          ]
+        : [
+            'sep',
+            { label: 'Забрать в хранилище — оставить на телефоне', icon: '⬇', run: () => void takeToVault([n.id], (x) => cloudPath(x.id), true) },
+            { label: 'Забрать в хранилище — убрать из облака', icon: '⬇', run: () => confirm(`Забрать «${n.title}» в хранилище и убрать из облака?`) && void takeToVault([n.id], (x) => cloudPath(x.id), false) },
+          ]
+      : [];
+    if (n.id === CLOUD) {
+      const all = cloudLive.filter((x) => x.type !== 'folder' && scope.get(x.id)?.shown).map((x) => x.id);
+      return menu(e, [
+        { label: `Забрать все рабочие заметки (${all.length}) — оставить на телефоне`, icon: '⬇', run: () => confirm(`Забрать ${all.length} заметок в хранилище? На телефоне они останутся (📱). Служебное не трогаю.`) && void takeToVault(all, (x) => cloudPath(x.id), true) },
+        { label: 'Новая заметка в облаке', icon: '✎', run: () => createNote(false, CLOUD) },
+      ]);
+    }
     if (node.folder) {
       return menu(e, [
         { label: 'Новая заметка здесь', icon: '✎', run: () => createNote(false, n.id) },
@@ -514,6 +621,7 @@ function Desktop() {
               ];
             })()
           : [{ label: 'Открыть папку как заметку', icon: '📄', run: () => go({ id: n.id }) }]),
+        ...take,
         'sep',
         {
           label: 'Удалить папку',
@@ -537,6 +645,7 @@ function Desktop() {
       'sep',
       ...common,
       { label: 'Скопировать ссылку [[…]]', icon: '🔗', run: () => copyText(`[[${n.title}]]`), disabled: !n.title },
+      ...take,
       {
         label: hidden ? 'Показывать в Базе' : 'Спрятать из Базы',
         icon: hidden ? '👁' : '🙈',

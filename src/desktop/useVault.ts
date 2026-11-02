@@ -32,6 +32,8 @@ export interface Vault {
   update: (id: string, patch: Partial<Note>) => Promise<void>;
   remove: (id: string) => Promise<void>;
   mkdir: (dir: string, name: string) => Promise<void>;
+  /** Перечитать список файлов (после скачивания в `_файлы/` — не ждать опроса). */
+  refresh: () => Promise<void>;
   /** Переложить заметку, файл или папку в другую папку ('' — корень). */
   move: (id: string, toDir: string) => Promise<void>;
   importFiles: () => Promise<string[]>;
@@ -199,6 +201,8 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
   const create = useCallback(async (dir: string, fields: Partial<Note>) => {
     const path = newNotePath(dir, fields.title?.trim() || 'Без названия', taken);
     const note = { id: vid.md(path), title: '', body: '', date: null, createdAt: 0, updatedAt: 0, ...fields, vault: { path } } as Note;
+    // папки, которых ещё нет, окно создаст само; в дереве их видно сразу, не через опрос
+    for (let d = dirName(path); d; d = dirName(d)) if (!entries.current.has(d)) entries.current.set(d, { path: d, kind: 'dir' });
     await write(path, vaultMarkdown(note));
     return vid.md(path);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -251,6 +255,11 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     const kind: VaultEntry['kind'] = id.startsWith('v:') ? 'md' : id.startsWith('d:') ? 'dir' : 'file';
     await relocate(path, target, kind);
   };
+  const refresh = async () => {
+    const list = await vaultApi.scan();
+    for (const e of list) if (!entries.current.has(e.path) || e.kind !== 'md') entries.current.set(e.path, e);
+    bump();
+  };
   const importFiles = async () => {
     const got = await vaultApi.importFiles();
     const list = await vaultApi.scan();
@@ -267,8 +276,8 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
   };
 
   // один объект, пока данные те же: окно строит от него правки и указатель — без лишних пересчётов
-  const fns = useRef({ create, update, remove, mkdir, move, importFiles, importData });
-  fns.current = { create, update, remove, mkdir, move, importFiles, importData };
+  const fns = useRef({ create, update, remove, mkdir, move, importFiles, importData, refresh });
+  fns.current = { create, update, remove, mkdir, move, importFiles, importData, refresh };
   return useMemo(
     () => ({
       info,
@@ -285,6 +294,7 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
       move: (id: string, to: string) => fns.current.move(id, to),
       importFiles: () => fns.current.importFiles(),
       importData: (f: File) => fns.current.importData(f),
+      refresh: () => fns.current.refresh(),
     }),
     [info, built, loading, error, choose, open],
   );

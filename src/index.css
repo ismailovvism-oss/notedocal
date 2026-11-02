@@ -2212,6 +2212,15 @@ button {
 .callout-danger, .callout-error, .callout-bug { border-left-color: var(--danger); }
 .callout-success, .callout-check, .callout-tip, .callout-hint { border-left-color: var(--accent); }
 
+/* те же выноски в редакторе «как видишь» (src/lib/kb/livePreview.ts) — построчно */
+.live-host .cm-callout { background: var(--surface-2); border-left: 4px solid var(--normal); padding-left: 12px !important; }
+.live-host .cm-callout-head { font-weight: 600; border-top-right-radius: 8px; padding-top: 4px; }
+.live-host .cm-callout-last { border-bottom-right-radius: 8px; padding-bottom: 4px; }
+.live-host .cm-callout-warning, .live-host .cm-callout-caution { border-left-color: var(--note); }
+.live-host .cm-callout-danger, .live-host .cm-callout-error, .live-host .cm-callout-bug { border-left-color: var(--danger); }
+.live-host .cm-callout-success, .live-host .cm-callout-check, .live-host .cm-callout-tip, .live-host .cm-callout-hint { border-left-color: var(--accent); }
+.cm-callout-icon { font-weight: 600; }
+
 /* Карточка заметки — превью с обрезкой */
 .note-card { cursor: pointer; }
 .note-preview {

@@ -128,7 +128,8 @@ export function usePhoneSync(
         attachments: [...attachments, ...(prev?.attachments ?? []).filter((a) => !a.vaultFile)],
       };
       putCopy(copy, { vault: name, path: note.vault!.path, at: note.updatedAt, mode });
-      if (fid && !relations.some((r) => !r.deleted && r.from === fid && r.to === cid)) {
+      // в папку «🗄 хранилище» — если копия ещё ни в какой папке (забранная из облака остаётся в своей)
+      if (fid && !relations.some((r) => !r.deleted && r.type === 'child' && r.to === cid)) {
         addRelation({ id: uid(), from: fid, to: cid, type: 'child', position: 0, createdAt: Date.now(), updatedAt: Date.now() });
       }
       if (mode === 'files') for (const n of names) if (!keep.some((a) => a.vaultFile === n)) void uploadFile(cid, n);

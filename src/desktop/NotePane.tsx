@@ -13,6 +13,7 @@ import { useLocalStorage } from '../lib/storage';
 import { native, type Mics, type VoiceEvent } from './native';
 import { useMenu, type MenuItem } from './Menu';
 import { fileIcon } from './FileView';
+import { calloutMeta } from '../lib/kb/callouts';
 import { sendBridge } from './bridge';
 import { PropsView, SchemaView, ViewResult } from '../components/Props';
 import { PropsEditor, SchemaEditor, ViewEditor } from '../components/PropsEdit';
@@ -783,6 +784,7 @@ function Tools({
   setMsg: (m: string) => void;
 }) {
   const h = () => editor.current;
+  const menu = useMenu();
   /** Действие над словами — только когда они выделены. */
   const onWords = (a: Parameters<LiveEditorHandle['run']>[0]) => () => {
     if (!h()?.selected()) return setMsg('Сначала выделите слова в тексте');
@@ -839,7 +841,23 @@ function Tools({
           <B t="1." title="Нумерованный список" on={() => h()?.prefixLine('1. ')} />
           <B t="☐" title="Задача" on={() => h()?.prefixLine('- [ ] ')} />
           <B t="❝" title="Цитата" on={() => h()?.prefixLine('> ')} />
-          <B t="💡" title="Выноска (callout)" on={() => h()?.replaceSelection((sel) => `> [!note] Заметка\n> ${sel || 'текст'}\n`)} />
+          <button
+            className="dk-tool"
+            title="Выноска (callout): заметка, совет, важно, внимание…"
+            onMouseDown={keep}
+            onClick={(e) =>
+              menu(
+                e,
+                ['note', 'tip', 'important', 'warning', 'question', 'example', 'quote', 'danger', 'success'].map((type) => ({
+                  label: calloutMeta(type).title,
+                  icon: calloutMeta(type).icon,
+                  run: () => h()?.replaceSelection((sel) => `> [!${type}] ${calloutMeta(type).title}\n> ${sel.split('\n').join('\n> ') || 'текст'}\n`),
+                })),
+              )
+            }
+          >
+            💡
+          </button>
           <B t="—" title="Черта-разделитель" on={() => h()?.insertAtCursor('\n\n---\n\n')} />
           <B t="%%" title="Скрытый текст (виден только в правке)" on={() => h()?.wrap('%%')} />
         </div>

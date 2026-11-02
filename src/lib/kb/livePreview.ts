@@ -13,6 +13,7 @@ import { syntaxTree } from '@codemirror/language';
 import type { KbIndex } from './index.ts';
 import { anchorCounts, fragmentOf, resolveName } from './index.ts';
 import { maskInert, splitLinkInner } from './syntax.ts';
+import { calloutMeta } from './callouts.ts';
 
 /** Что редактор знает о базе: указатель (для ссылок и встраиваний) и чья это заметка. */
 export interface LiveCtx {
@@ -89,6 +90,27 @@ class Checkbox extends WidgetType {
   }
   ignoreEvent() {
     return false;
+  }
+}
+
+/** Иконка выноски (и заголовок по умолчанию, если своего нет) вместо `[!type]`. */
+class CalloutHead extends WidgetType {
+  readonly type: string;
+  readonly withTitle: boolean;
+  constructor(type: string, withTitle: boolean) {
+    super();
+    this.type = type;
+    this.withTitle = withTitle;
+  }
+  eq(o: CalloutHead) {
+    return o.type === this.type && o.withTitle === this.withTitle;
+  }
+  toDOM() {
+    const s = document.createElement('span');
+    s.className = 'cm-callout-icon';
+    const m = calloutMeta(this.type);
+    s.textContent = this.withTitle ? `${m.icon} ${m.title}` : `${m.icon} `;
+    return s;
   }
 }
 
@@ -198,8 +220,21 @@ function build(state: EditorState): Built {
           return;
         }
         case 'Blockquote': {
-          for (let l = lineOf(n.from).number; l <= lineOf(n.to).number; l++) {
-            out.push(Decoration.line({ class: 'cm-quote' }).range(state.doc.line(l).from));
+          // выноска Obsidian `> [!type] Заголовок`: рамка с иконкой; разметка видна, только когда
+          // курсор внутри неё
+          const first = lineOf(n.from);
+          const co = /^(\s*>\s?)\[!([\w-]+)\]([+-]?)[ \t]*/.exec(first.text);
+          const last = lineOf(n.to).number;
+          for (let l = first.number; l <= last; l++) {
+            const cls = co
+              ? `cm-callout cm-callout-${co[2].toLowerCase()}${l === first.number ? ' cm-callout-head' : ''}${l === last ? ' cm-callout-last' : ''}`
+              : 'cm-quote';
+            out.push(Decoration.line({ class: cls }).range(state.doc.line(l).from));
+          }
+          if (co && !touches(state, n.from, n.to)) {
+            const start = first.from + co[1].length;
+            const own = first.text.slice(co[0].length).trim();
+            out.push(Decoration.replace({ widget: new CalloutHead(co[2], !own) }).range(start, first.from + co[0].length));
           }
           return;
         }

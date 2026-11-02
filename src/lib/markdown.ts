@@ -1,28 +1,9 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { prepareMarkdown, type RenderCtx } from './kb/render';
+import { calloutMeta } from './kb/callouts';
 
 marked.setOptions({ gfm: true, breaks: true });
-
-/** Тип коллаута -> иконка и заголовок по умолчанию (стиль Obsidian). */
-const CALLOUTS: Record<string, { icon: string; title: string }> = {
-  note: { icon: '📝', title: 'Заметка' },
-  info: { icon: 'ℹ️', title: 'Инфо' },
-  tip: { icon: '💡', title: 'Совет' },
-  hint: { icon: '💡', title: 'Совет' },
-  important: { icon: '❗', title: 'Важно' },
-  success: { icon: '✅', title: 'Готово' },
-  check: { icon: '✅', title: 'Готово' },
-  question: { icon: '❓', title: 'Вопрос' },
-  help: { icon: '❓', title: 'Вопрос' },
-  warning: { icon: '⚠️', title: 'Внимание' },
-  caution: { icon: '⚠️', title: 'Внимание' },
-  danger: { icon: '🔥', title: 'Опасно' },
-  error: { icon: '🛑', title: 'Ошибка' },
-  bug: { icon: '🐞', title: 'Баг' },
-  example: { icon: '📌', title: 'Пример' },
-  quote: { icon: '❝', title: 'Цитата' },
-};
 
 function escapeHtml(s: string): string {
   return s
@@ -59,7 +40,7 @@ export function renderMarkdown(src: string, kb?: RenderCtx): string {
     if (head) {
       flush();
       const type = head[1].toLowerCase();
-      const meta = CALLOUTS[type] ?? { icon: '📌', title: type };
+      const meta = calloutMeta(type);
       const title = head[2].trim() || meta.title;
       const body: string[] = [];
       i++;
