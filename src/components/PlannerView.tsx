@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { Checklist, ChecklistItem, DayPlan, PomodoroSession, Project } from '../types';
+import type {
+  Checklist,
+  ChecklistItem,
+  DayPlan,
+  PomodoroSession,
+  PomodoroSettings,
+  Project,
+} from '../types';
 import { useListActions, useLocalStorage } from '../lib/storage';
 import { todayKey } from '../lib/dates';
 import type { PomodoroApi } from '../lib/pomodoro';
@@ -27,7 +34,8 @@ interface Props {
   sessions: PomodoroSession[];
   setSessions: React.Dispatch<React.SetStateAction<PomodoroSession[]>>;
   pomodoro: PomodoroApi;
-  workMin: number;
+  settings: PomodoroSettings;
+  setSettings: React.Dispatch<React.SetStateAction<PomodoroSettings>>;
   logPomodoro: (
     startedAt: number,
     durationMin: number,
@@ -73,7 +81,8 @@ export function PlannerView({
   sessions,
   setSessions,
   pomodoro,
-  workMin,
+  settings,
+  setSettings,
   logPomodoro,
 }: Props) {
   const { update } = useListActions(setChecklists);
@@ -152,7 +161,8 @@ export function PlannerView({
         sessions={sessions}
         setSessions={setSessions}
         pomodoro={pomodoro}
-        workMin={workMin}
+        settings={settings}
+        setSettings={setSettings}
         logPomodoro={logPomodoro}
       />
 

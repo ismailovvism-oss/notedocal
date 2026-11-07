@@ -342,6 +342,9 @@ export type HealthKind =
 /** Фаза помидоро-таймера: работа, короткий или длинный перерыв. */
 export type PomodoroPhase = 'work' | 'short' | 'long';
 
+/** Фон на время помидора. */
+export type Ambient = 'off' | 'tick' | 'rain' | 'sea' | 'wind';
+
 /** Настройки помидоро-таймера (длительности в минутах). */
 export interface PomodoroSettings {
   workMin: number;
@@ -351,6 +354,10 @@ export interface PomodoroSettings {
   cyclesToLong: number;
   /** Сигнал в конце помидора и перерыва; не задано — включён. */
   sound?: boolean;
+  /** Что играет во время работы; не задано — тишина. */
+  background?: Ambient;
+  /** Громкость фона, 5–100. */
+  backgroundVolume?: number;
 }
 
 /** Завершённая рабочая помидорка — запись журнала (синхронизируется). */

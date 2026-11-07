@@ -6,7 +6,9 @@ import type {
   PomodoroSession,
   PomodoroSettings,
 } from '../types';
-import { PHASE_META, WORK_DONE_NOTES, chime, formatLeft, type PomodoroApi } from '../lib/pomodoro';
+import { PHASE_META, formatLeft, type PomodoroApi } from '../lib/pomodoro';
+import { WORK_DONE_NOTES, chime } from '../lib/sound';
+import { AmbientPicker } from './AmbientPicker';
 import { todayKey } from '../lib/dates';
 
 interface Props {
@@ -171,6 +173,11 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
                   />
                   <span>Звук в конце помидора и перерыва</span>
                 </label>
+                <AmbientPicker
+                  settings={settings}
+                  setSettings={setSettings}
+                  working={run?.phase === 'work' && !paused}
+                />
               </div>
             )}
 

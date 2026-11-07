@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { DayPlan, DayPlanSlot, PomodoroSession, Project } from '../types';
+import type { DayPlan, DayPlanSlot, PomodoroSession, PomodoroSettings, Project } from '../types';
 import { SPHERES, openSteps, sortProjects } from '../lib/projects';
 import { todayKey } from '../lib/dates';
 import { PHASE_META, formatLeft, type PomodoroApi } from '../lib/pomodoro';
@@ -14,6 +14,7 @@ import {
   planSlots,
   withSlots,
 } from '../lib/dayplan';
+import { AmbientPicker } from './AmbientPicker';
 
 interface Props {
   projects: Project[];
@@ -22,7 +23,8 @@ interface Props {
   sessions: PomodoroSession[];
   setSessions: React.Dispatch<React.SetStateAction<PomodoroSession[]>>;
   pomodoro: PomodoroApi;
-  workMin: number;
+  settings: PomodoroSettings;
+  setSettings: React.Dispatch<React.SetStateAction<PomodoroSettings>>;
   logPomodoro: (
     startedAt: number,
     durationMin: number,
@@ -44,10 +46,12 @@ export function DayPlanBoard({
   sessions,
   setSessions,
   pomodoro,
-  workMin,
+  settings,
+  setSettings,
   logPomodoro,
 }: Props) {
   const today = todayKey();
+  const { workMin } = settings;
   const slots = planSlots(plans, today);
   const counts = useMemo(() => doneCounts(sessions, today), [sessions, today]);
   const { run, leftMs, paused } = pomodoro;
@@ -93,6 +97,7 @@ export function DayPlanBoard({
         ) : (
           <span className="muted small">Выбери три проекта. Каждому три помидора, короткому хватит одного.</span>
         )}
+        <AmbientPicker settings={settings} setSettings={setSettings} working={working && !paused} />
       </div>
 
       <div className="dp-grid">

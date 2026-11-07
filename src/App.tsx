@@ -431,7 +431,8 @@ export default function App() {
             sessions={visiblePomodoros}
             setSessions={setPomodoros}
             pomodoro={pomodoro}
-            workMin={pomodoroSettings.workMin}
+            settings={pomodoroSettings}
+            setSettings={setPomodoroSettings}
             logPomodoro={logPomodoro}
           />
         )}

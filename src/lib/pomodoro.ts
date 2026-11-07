@@ -8,6 +8,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { PomodoroPhase, PomodoroSettings } from '../types';
+import {
+  AMBIENT_VOLUME,
+  BREAK_DONE_NOTES,
+  WORK_DONE_NOTES,
+  chime,
+  playAmbient,
+  setAmbientVolume,
+  stopAmbient,
+  wakeAudio,
+} from './sound';
 import { useLocalStorage } from './storage';
 
 export const DEFAULT_POMODORO: PomodoroSettings = {
@@ -49,41 +59,6 @@ function notify(title: string, body: string): void {
   } catch {
     /* игнорируем */
   }
-}
-
-// Сигнал собирается прямо в браузере, файл не нужен. Браузер разрешает звук только
-// после нажатия, поэтому контекст будят кнопки «старт» и «продолжить».
-export const WORK_DONE_NOTES = [659.25, 783.99, 1046.5]; // вверх: помидор готов
-const BREAK_DONE_NOTES = [1046.5, 783.99]; // вниз: перерыв кончился
-
-let audio: AudioContext | null = null;
-
-function wakeAudio(): AudioContext | null {
-  if (typeof AudioContext === 'undefined') return null;
-  audio ??= new AudioContext();
-  return audio;
-}
-
-export function chime(notes: number[]): void {
-  const ctx = wakeAudio();
-  if (!ctx) return;
-  const asked = Date.now();
-  void ctx.resume().then(() => {
-    // Браузер не дал звук сразу — запоздавший сигнал по следующему нажатию не нужен.
-    if (Date.now() - asked > 5000) return;
-    notes.forEach((hz, i) => {
-      const at = ctx.currentTime + i * 0.22;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = hz;
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.35, at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 1.1);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(at);
-      osc.stop(at + 1.15);
-    });
-  });
 }
 
 /** Тик из воркера: в свёрнутом окне браузер душит setInterval до раза в минуту. */
@@ -180,6 +155,17 @@ export function usePomodoro(
     return () => worker.terminate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
+
+  // Фон играет только во время работы: в перерыве и на паузе тихо.
+  const working = !!run && run.phase === 'work' && run.pausedLeft === null;
+  const background = working ? (settings.background ?? 'off') : 'off';
+  const volume = settings.backgroundVolume ?? AMBIENT_VOLUME;
+  useEffect(() => {
+    if (background === 'off') stopAmbient();
+    else playAmbient(background, volume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [background]);
+  useEffect(() => setAmbientVolume(volume), [volume]);
 
   const start: PomodoroApi['start'] = (item, projectId) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
