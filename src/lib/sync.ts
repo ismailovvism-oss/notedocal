@@ -22,6 +22,7 @@ import { collection, doc, onSnapshot, query, setDoc, where, writeBatch } from 'f
 import { ADMIN_EMAIL, SHARED_DOC, auth, db, firebaseEnabled, googleProvider } from './firebase';
 import { mergeById } from './storage';
 import { cleanAttachment, cleanNote, cleanRelation } from './clean';
+import type { PomodoroRun } from './pomodoro';
 import { loadMeta, saveMeta } from './notesStore';
 import type {
   CalEvent,
@@ -82,6 +83,25 @@ interface Result {
   isAdmin: boolean;
   signIn: () => Promise<void>;
   signOutUser: () => Promise<void>;
+}
+
+/**
+ * Идущий помидор — в users/{uid}/live/pomodoro: его рисует значок в трее компьютера
+ * (~/projects/apps/zametki/pomidor.py). Пишем только при смене фазы, паузе и остановке;
+ * пустое при запуске не пишем, иначе открытое на телефоне приложение сбросит чужой таймер.
+ */
+export function useLivePomodoro(user: User | null, run: PomodoroRun | null): void {
+  const sig = run ? `${run.phase}:${run.endsAt}:${run.pausedLeft}:${run.itemText}` : '';
+  const written = useRef('');
+  useEffect(() => {
+    if (!firebaseEnabled || !db || !user || sig === written.current) return;
+    written.current = sig;
+    const live = run
+      ? { phase: run.phase, endsAt: run.endsAt, pausedLeft: run.pausedLeft, text: run.itemText }
+      : { phase: null };
+    setDoc(doc(db, 'users', user.uid, 'live', 'pomodoro'), { ...live, updatedAt: Date.now() }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, sig]);
 }
 
 /** Подпись одного списка — стабильна независимо от порядка элементов.

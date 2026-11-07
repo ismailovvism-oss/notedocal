@@ -6,7 +6,7 @@ import type {
   PomodoroSession,
   PomodoroSettings,
 } from '../types';
-import { PHASE_META, formatLeft, type PomodoroApi } from '../lib/pomodoro';
+import { PHASE_META, WORK_DONE_NOTES, chime, formatLeft, type PomodoroApi } from '../lib/pomodoro';
 import { todayKey } from '../lib/dates';
 
 interface Props {
@@ -158,6 +158,18 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
                       setSettings((s) => ({ ...s, cyclesToLong: num(e.target.value, s.cyclesToLong) }))
                     }
                   />
+                </label>
+                <label className="pomo-sound">
+                  <input
+                    type="checkbox"
+                    checked={settings.sound !== false}
+                    onChange={(e) => {
+                      const sound = e.target.checked;
+                      setSettings((s) => ({ ...s, sound }));
+                      if (sound) chime(WORK_DONE_NOTES);
+                    }}
+                  />
+                  <span>Звук в конце помидора и перерыва</span>
                 </label>
               </div>
             )}

@@ -21,7 +21,7 @@ import { NoteModal } from './components/NotesView';
 import { CommentComposer, LinkPicker, SetPicker } from './components/KbDialogs';
 import { linkText } from './lib/kb/edit';
 import { planTagRename } from './lib/kb/tags';
-import { useCloudSync, type SyncStatus } from './lib/sync';
+import { useCloudSync, useLivePomodoro, type SyncStatus } from './lib/sync';
 import { useDocReminder, useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
 import { VAULT_META_ID, useVault } from './lib/vault';
@@ -189,6 +189,7 @@ export default function App() {
     setAdminSightings,
   });
   const isAdmin = sync.isAdmin;
+  useLivePomodoro(sync.user, pomodoro.run);
 
   // Хранилище секретов (мастер-пароль). Работает поверх «сырых» заметок.
   const vault = useVault(notes, setNotes);

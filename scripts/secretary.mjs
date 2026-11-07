@@ -1602,6 +1602,9 @@ const VOICE_FOLDER = 'Голосом';
  * тем же событием. {op:'base-put', ref, notes?, relations?} — записать целиком, если в базе
  * не новее (последнее изменение побеждает). {op:'upload', ref, file} — файл с диска в хранилище,
  * в ответе ok — `attachment` для заметки.
+ *
+ * Значок помидора в трее: {event:'pomodoro', run} — идущий таймер приложения
+ * (users/{uid}/live/pomodoro: phase, endsAt, pausedLeft, text), при каждом его изменении.
  */
 async function notesBridge(db, uid, bucket) {
   const say = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
@@ -1679,6 +1682,9 @@ async function notesBridge(db, uid, bucket) {
       const list = changed(snap);
       if (list.length) say({ event: 'base', relations: list });
     }
+  }, fail);
+  db.doc(`users/${uid}/live/pomodoro`).onSnapshot((snap) => {
+    say({ event: 'pomodoro', run: snap.data() ?? null });
   }, fail);
   /** Записать целиком, если в базе не новее. */
   const putNewer = async (path, items) => {

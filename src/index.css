@@ -2694,6 +2694,15 @@ a.fin-contact-chip:hover {
   color: var(--muted);
 }
 
+.pomo-sound {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .pomo-today {
   display: flex;
   align-items: center;

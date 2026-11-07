@@ -51,6 +51,49 @@ function notify(title: string, body: string): void {
   }
 }
 
+// Сигнал собирается прямо в браузере, файл не нужен. Браузер разрешает звук только
+// после нажатия, поэтому контекст будят кнопки «старт» и «продолжить».
+export const WORK_DONE_NOTES = [659.25, 783.99, 1046.5]; // вверх: помидор готов
+const BREAK_DONE_NOTES = [1046.5, 783.99]; // вниз: перерыв кончился
+
+let audio: AudioContext | null = null;
+
+function wakeAudio(): AudioContext | null {
+  if (typeof AudioContext === 'undefined') return null;
+  audio ??= new AudioContext();
+  return audio;
+}
+
+export function chime(notes: number[]): void {
+  const ctx = wakeAudio();
+  if (!ctx) return;
+  const asked = Date.now();
+  void ctx.resume().then(() => {
+    // Браузер не дал звук сразу — запоздавший сигнал по следующему нажатию не нужен.
+    if (Date.now() - asked > 5000) return;
+    notes.forEach((hz, i) => {
+      const at = ctx.currentTime + i * 0.22;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = hz;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.35, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 1.1);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 1.15);
+    });
+  });
+}
+
+/** Тик из воркера: в свёрнутом окне браузер душит setInterval до раза в минуту. */
+function startTicker(tick: () => void): Worker {
+  const code = 'setInterval(() => postMessage(0), 500)';
+  const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+  worker.onmessage = tick;
+  return worker;
+}
+
 export function formatLeft(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const m = Math.floor(total / 60);
@@ -99,11 +142,16 @@ export function usePomodoro(
    *  `leftMs` > 0 — фаза завершена досрочно, пишем фактическую длительность. */
   const complete = (r: PomodoroRun, leftMs = 0) => {
     const s = settingsRef.current;
+    // Досрочно завершённую фазу пользователь видит сам, сигнал не нужен.
+    const ring = (notes: number[]) => {
+      if (leftMs === 0 && s.sound !== false) chime(notes);
+    };
     if (r.phase === 'work') {
       const workedMin = Math.max(1, Math.round((phaseMin('work', s) * 60_000 - leftMs) / 60_000));
       doneRef.current(r.startedAt, workedMin, r.itemId, r.itemText, r.projectId ?? null);
       const next: PomodoroPhase = r.cycle % s.cyclesToLong === 0 ? 'long' : 'short';
       notify(`Помидорка готова ${PHASE_META.work.icon}`, `${PHASE_META[next].label} — ${phaseMin(next, s)} мин.`);
+      ring(WORK_DONE_NOTES);
       const now = Date.now();
       setRun({
         ...r,
@@ -115,20 +163,21 @@ export function usePomodoro(
     } else {
       // Перерыв кончился — следующую работу пользователь запускает сам.
       notify('Перерыв окончен 🍅', 'Готов к следующей помидорке?');
+      ring(BREAK_DONE_NOTES);
       setRun(null);
     }
   };
 
-  // Тик раз в полсекунды — только для отрисовки; окончание фазы ловим здесь же.
+  // Тик раз в полсекунды — для отрисовки; окончание фазы ловим здесь же.
   // Если endsAt прошёл, пока вкладка была закрыта, фаза досчитается при открытии.
   useEffect(() => {
     if (!run || run.pausedLeft !== null) return;
-    const id = setInterval(() => {
+    const worker = startTicker(() => {
       if (Date.now() >= run.endsAt) complete(run);
       else setTick((t) => t + 1);
-    }, 500);
+    });
     if (Date.now() >= run.endsAt) complete(run);
-    return () => clearInterval(id);
+    return () => worker.terminate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
 
@@ -136,6 +185,7 @@ export function usePomodoro(
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
     }
+    wakeAudio()?.resume();
     const s = settingsRef.current;
     const now = Date.now();
     // Продолжаем счёт циклов, если стартуем после перерыва того же захода.
@@ -159,6 +209,7 @@ export function usePomodoro(
 
   const resume = () => {
     if (!run || run.pausedLeft === null) return;
+    wakeAudio()?.resume();
     setRun({ ...run, endsAt: Date.now() + run.pausedLeft, pausedLeft: null });
   };
 
