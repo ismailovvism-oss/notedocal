@@ -6,9 +6,11 @@ import {
   addStep,
   findByPlace,
   findProject,
+  fmtDay,
   markDone,
   normalizeProject,
   parsePriority,
+  parseSlots,
   sortProjects,
   tidy,
 } from './projects.mjs';
@@ -89,4 +91,26 @@ test('findProject и порядок: фокус, приоритет, этап', 
   assert.equal(findProject(list, 'бет').id, 'b');
   assert.throws(() => findProject(list, 'а'), /несколько/);
   assert.equal(addStep(list[0], 'шаг', 'claude').next[0].who, 'claude');
+});
+
+test('план дня: по три помидора, через двоеточие своё число', () => {
+  const list = [proj(), proj({ id: 'qada', title: 'Када' })];
+  assert.deepEqual(parseSlots(list, ['voennaya', 'qada:1']), [
+    { projectId: 'voennaya', goal: 3 },
+    { projectId: 'qada', goal: 1 },
+  ]);
+  assert.deepEqual(parseSlots(list, ['Када'], 2), [{ projectId: 'qada', goal: 2 }]);
+});
+
+test('план дня: дубль, неверное число и лишние проекты — ошибка', () => {
+  const list = [proj()];
+  assert.throws(() => parseSlots(list, ['voennaya', 'voennaya:1']), /дважды/);
+  assert.throws(() => parseSlots(list, ['voennaya:0']), /от 1/);
+  assert.throws(() => parseSlots(list, Array(7).fill('voennaya')), /не больше 6/);
+});
+
+test('план дня: вывод считает сделанное из журнала', () => {
+  const text = fmtDay([proj()], [{ projectId: 'voennaya', goal: 3 }], { voennaya: 3 });
+  assert.match(text, /3 из 3 🍅 ✓/);
+  assert.equal(fmtDay([], [], {}), 'План дня пуст.');
 });

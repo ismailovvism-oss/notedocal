@@ -337,6 +337,63 @@ export async function saveProject(db, uid, p, by) {
   return doc;
 }
 
+// ---------- План дня: проекты и помидоры ----------
+// Те же правила — в src/lib/dayplan.ts: документ на день, а сделанное считается
+// из журнала помидоров (users/{uid}/pomodoros) по projectId.
+
+export const GOAL_DEFAULT = 3;
+export const GOAL_MAX = 6;
+export const SLOTS_MAX = 6;
+
+/** «tafsir-app» или «tafsir-app:1» (после двоеточия — сколько помидоров). */
+export function parseSlots(projects, args, goal = GOAL_DEFAULT) {
+  if (args.length > SLOTS_MAX) throw new Error(`в плане дня не больше ${SLOTS_MAX} проектов`);
+  const slots = args.map((raw) => {
+    const m = /^(.*?)(?::(\d+))?$/.exec(raw);
+    const n = Number(m[2] ?? goal);
+    if (!(n >= 1 && n <= GOAL_MAX)) throw new Error(`помидоров от 1 до ${GOAL_MAX}: ${raw}`);
+    return { projectId: findProject(projects, m[1]).id, goal: n };
+  });
+  if (new Set(slots.map((s) => s.projectId)).size < slots.length) throw new Error('проект указан дважды');
+  return slots;
+}
+
+export async function loadDayPlan(db, uid, day) {
+  const snap = await db.doc(`users/${uid}/dayplans/${day}`).get();
+  const data = snap.exists ? snap.data() : null;
+  return data && !data.deleted ? data.slots ?? [] : [];
+}
+
+export async function saveDayPlan(db, uid, day, slots) {
+  const ref = db.doc(`users/${uid}/dayplans/${day}`);
+  const old = await ref.get();
+  const now = Date.now();
+  const doc = { id: day, slots, createdAt: old.data()?.createdAt ?? now, updatedAt: now, deleted: false };
+  await ref.set(doc);
+  return doc;
+}
+
+export async function dayCounts(db, uid, day) {
+  const snap = await db.collection(`users/${uid}/pomodoros`).where('date', '==', day).get();
+  const counts = {};
+  for (const d of snap.docs) {
+    const s = d.data();
+    if (!s.deleted && s.projectId) counts[s.projectId] = (counts[s.projectId] ?? 0) + 1;
+  }
+  return counts;
+}
+
+export function fmtDay(projects, slots, counts) {
+  if (!slots.length) return 'План дня пуст.';
+  return slots
+    .map((s, i) => {
+      const done = counts[s.projectId] ?? 0;
+      const title = projects.find((p) => p.id === s.projectId)?.title ?? s.projectId;
+      return `  ${i + 1}. ${title}: ${done} из ${s.goal} 🍅${done >= s.goal ? ' ✓' : ''}`;
+    })
+    .join('\n');
+}
+
 // ---------- Вывод ----------
 
 export function fmtProject(p, full = false) {
@@ -379,6 +436,9 @@ export const PROJECT_HELP = `
   project comment-done <id> <n|note> --reply "что сделано"  сессия сделала
   project reopen <id> <n>      снять отметку с шага (нажал по ошибке)
   project tidy [<id>]          отмеченные хозяином шаги → в «сделано»
+  project day [<id>[:помидоры] …] [--date ГГГГ-ММ-ДД] [--goal 3]
+                       план дня в «Карте дел»: без id — показать, с id — заменить
+                       (пример: project day uchet tafsir-app qada:1; --clear — очистить)
   project import файл.json     {id: проект, …} — перенос пачкой (заменяет целиком)
   project rm <id>
   Общие флаги: --by "сессия «…»" (кто правил), --json.`;

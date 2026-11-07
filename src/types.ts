@@ -364,9 +364,26 @@ export interface PomodoroSession {
   itemId?: string | null;
   /** Название задачи на момент сессии — чтобы история читалась и после её удаления. */
   itemText?: string;
+  /** Проект, в счёт которого идёт помидор (план дня в «Карте дел»). */
+  projectId?: string | null;
   createdAt: number;
   updatedAt: number;
   /** Мягкое удаление (надгробие) — для синхронизации. */
+  deleted?: boolean;
+}
+
+/** Проект в плане дня: сколько помидоров ему отведено. */
+export interface DayPlanSlot {
+  projectId: string;
+  goal: number;
+}
+
+/** План дня: id — сам день (YYYY-MM-DD), порядок мест — порядок работы. */
+export interface DayPlan {
+  id: string;
+  slots: DayPlanSlot[];
+  createdAt: number;
+  updatedAt: number;
   deleted?: boolean;
 }
 

@@ -3,6 +3,7 @@ import type {
   CalEvent,
   Checklist,
   ClipItem,
+  DayPlan,
   FinanceEntry,
   MoonSighting,
   PomodoroSession,
@@ -25,7 +26,8 @@ import { useDocReminder, useMealReminder, useReminders } from './lib/reminders';
 import { DEFAULT_MEAL_GAP_H } from './lib/health';
 import { VAULT_META_ID, useVault } from './lib/vault';
 import { DEFAULT_POMODORO, usePomodoro } from './lib/pomodoro';
-import { dayKey, formatHijri, hijriFor } from './lib/dates';
+import { dayKey, formatHijri, hijriFor, todayKey } from './lib/dates';
+import { doneCounts, nextSlot, planSlots } from './lib/dayplan';
 import { CalendarView } from './components/CalendarView';
 import { ChecklistBoard } from './components/ChecklistBoard';
 import { NotesExplorer } from './components/NotesExplorer';
@@ -89,6 +91,7 @@ export default function App() {
   const [currency, setCurrency] = useLocalStorage<string>('ndc.currency', '');
   const [mealGap, setMealGap] = useLocalStorage<number>('ndc.mealGapH', DEFAULT_MEAL_GAP_H);
   const [pomodoros, setPomodoros] = useLocalStorage<PomodoroSession[]>('ndc.pomodoros', []);
+  const [dayPlans, setDayPlans] = useLocalStorage<DayPlan[]>('ndc.dayPlans', []);
   const [pomodoroSettings, setPomodoroSettings] = useLocalStorage<PomodoroSettings>(
     'ndc.pomodoroSettings',
     DEFAULT_POMODORO,
@@ -128,22 +131,32 @@ export default function App() {
 
   // Завершённая рабочая помидорка → запись в журнал (синхронизируемый).
   const logPomodoro = useCallback(
-    (startedAt: number, durationMin: number, itemId: string | null, itemText: string) => {
+    (
+      startedAt: number,
+      durationMin: number,
+      itemId: string | null,
+      itemText: string,
+      projectId: string | null,
+    ) => {
       const d = new Date(startedAt);
       const now = Date.now();
-      setPomodoros((l) => [
+      // id от момента старта: конец фазы могут поймать дважды (второе окно приложения,
+      // повторный запуск эффекта) — помидор всё равно один.
+      const id = `run-${startedAt}`;
+      setPomodoros((l) => (l.some((p) => p.id === id) ? l : [
         {
-          id: uid(),
+          id,
           date: dayKey(d),
           start: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
           durationMin,
           itemId,
           itemText,
+          projectId,
           createdAt: now,
           updatedAt: now,
         },
         ...l,
-      ]);
+      ]));
     },
     [setPomodoros],
   );
@@ -170,6 +183,8 @@ export default function App() {
     setProjects,
     pomodoros,
     setPomodoros,
+    dayPlans,
+    setDayPlans,
     adminSightings,
     setAdminSightings,
   });
@@ -194,6 +209,18 @@ export default function App() {
   const visibleProjects = useMemo(() => visible(projects), [projects]);
   const visibleAdmin = useMemo(() => visible(adminSightings), [adminSightings]);
   const visiblePomodoros = useMemo(() => visible(pomodoros), [pomodoros]);
+
+  // Проекты плана дня для таймера в шапке: кто на очереди — первым.
+  const dayKeyNow = todayKey();
+  const dayProjects = useMemo(() => {
+    const slots = planSlots(dayPlans, dayKeyNow);
+    const next = nextSlot(slots, doneCounts(visiblePomodoros, dayKeyNow));
+    const ordered = next ? [next, ...slots.filter((s) => s !== next)] : slots;
+    return ordered.flatMap((s) => {
+      const p = visibleProjects.find((x) => x.id === s.projectId);
+      return p ? [{ id: p.id, title: p.title }] : [];
+    });
+  }, [dayPlans, dayKeyNow, visiblePomodoros, visibleProjects]);
 
   // База знаний: указатель связей из текстов всех заметок (src/lib/kb, docs/ЗАМЕТКИ.md).
   // Собирается при каждом изменении заметок; заново разбираются только изменённые, а разбор
@@ -351,6 +378,7 @@ export default function App() {
             sessions={visiblePomodoros}
             settings={pomodoroSettings}
             setSettings={setPomodoroSettings}
+            dayProjects={dayProjects}
             checklists={visibleChecklists}
           />
           <button
@@ -393,7 +421,18 @@ export default function App() {
         )}
         {tab === 'projects' && <ProjectsView projects={visibleProjects} setProjects={setProjects} />}
         {tab === 'planner' && (
-          <PlannerView checklists={visibleChecklists} setChecklists={setChecklists} />
+          <PlannerView
+            checklists={visibleChecklists}
+            setChecklists={setChecklists}
+            projects={visibleProjects}
+            plans={dayPlans}
+            setPlans={setDayPlans}
+            sessions={visiblePomodoros}
+            setSessions={setPomodoros}
+            pomodoro={pomodoro}
+            workMin={pomodoroSettings.workMin}
+            logPomodoro={logPomodoro}
+          />
         )}
         {tab === 'dashboard' && (
           <DashboardView

@@ -3004,6 +3004,190 @@ button.chip {
   margin: 6px 0 0;
 }
 
+/* ---- Карта дел: проекты дня с помидорами ---- */
+.dp {
+  margin-bottom: 14px;
+}
+.dp-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+}
+.dp-head h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.dp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.dp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  box-shadow: var(--shadow);
+}
+.dp-current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+}
+.dp-closed:not(.dp-current) {
+  background: var(--bg);
+  box-shadow: none;
+}
+.dp-empty {
+  flex-direction: row;
+  align-items: center;
+  background: none;
+  border-style: dashed;
+  box-shadow: none;
+}
+.dp-empty .input {
+  flex: 1;
+  min-width: 0;
+}
+.dp-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.dp-card-head h4 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+.dp-card-head .icon-btn {
+  flex: none;
+  opacity: 0.5;
+}
+.dp-num {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--accent-soft);
+}
+.dp-current .dp-num {
+  color: var(--surface);
+  background: var(--accent);
+}
+.dp-step {
+  margin: 0;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dp-tomatoes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+}
+.dp-tomato {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 25px;
+  line-height: 1;
+  cursor: pointer;
+  filter: grayscale(1);
+  opacity: 0.3;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.dp-tomato:hover {
+  opacity: 0.5;
+}
+.dp-tomato:active {
+  transform: scale(0.92);
+}
+.dp-t-done,
+.dp-t-done:hover {
+  filter: none;
+  opacity: 1;
+}
+.dp-t-live {
+  filter: none;
+  opacity: 1;
+  cursor: default;
+  background: conic-gradient(var(--accent) var(--share), var(--border) 0);
+}
+.dp-t-live span {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+}
+.dp-goal {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+}
+.dp-goal .icon-btn {
+  opacity: 0.45;
+  font-size: 13px;
+}
+.dp-goal .icon-btn:hover:not(:disabled) {
+  opacity: 1;
+}
+.dp-timer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.dp-paused {
+  opacity: 0.6;
+}
+.dp-time {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.dp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dp-actions .btn {
+  flex: 1;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dp-tomato {
+    transition: none;
+  }
+}
+
 /* ---- Карта дел: матрица важно/срочно и три дела на сегодня ---- */
 .pl-focus {
   background: var(--surface);

@@ -31,6 +31,8 @@ export interface PomodoroRun {
   /** Задача, над которой идёт работа. */
   itemId: string | null;
   itemText: string;
+  /** Проект из плана дня, в счёт которого идёт помидор. */
+  projectId?: string | null;
 }
 
 export const PHASE_META: Record<PomodoroPhase, { label: string; icon: string }> = {
@@ -61,7 +63,8 @@ export interface PomodoroApi {
   /** Остаток текущей фазы, мс (0, если таймер не идёт). */
   leftMs: number;
   paused: boolean;
-  start: (item?: { id: string; text: string } | null) => void;
+  /** `projectId` не передан — проект остаётся прежним (следующий помидор после перерыва). */
+  start: (item?: { id: string | null; text: string } | null, projectId?: string | null) => void;
   pause: () => void;
   resume: () => void;
   /** Полностью остановить (без записи в журнал). */
@@ -69,12 +72,18 @@ export interface PomodoroApi {
   /** Досрочно завершить фазу (работа при этом попадает в журнал). */
   finishPhase: () => void;
   /** Сменить задачу на лету (без перезапуска таймера). */
-  setTask: (item: { id: string; text: string } | null) => void;
+  setTask: (item: { id: string | null; text: string } | null, projectId?: string | null) => void;
 }
 
 export function usePomodoro(
   settings: PomodoroSettings,
-  onWorkDone: (startedAt: number, durationMin: number, itemId: string | null, itemText: string) => void,
+  onWorkDone: (
+    startedAt: number,
+    durationMin: number,
+    itemId: string | null,
+    itemText: string,
+    projectId: string | null,
+  ) => void,
 ): PomodoroApi {
   const [run, setRun] = useLocalStorage<PomodoroRun | null>('ndc.pomodoroRun', null);
   const [, setTick] = useState(0);
@@ -92,7 +101,7 @@ export function usePomodoro(
     const s = settingsRef.current;
     if (r.phase === 'work') {
       const workedMin = Math.max(1, Math.round((phaseMin('work', s) * 60_000 - leftMs) / 60_000));
-      doneRef.current(r.startedAt, workedMin, r.itemId, r.itemText);
+      doneRef.current(r.startedAt, workedMin, r.itemId, r.itemText, r.projectId ?? null);
       const next: PomodoroPhase = r.cycle % s.cyclesToLong === 0 ? 'long' : 'short';
       notify(`Помидорка готова ${PHASE_META.work.icon}`, `${PHASE_META[next].label} — ${phaseMin(next, s)} мин.`);
       const now = Date.now();
@@ -123,7 +132,7 @@ export function usePomodoro(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
 
-  const start: PomodoroApi['start'] = (item) => {
+  const start: PomodoroApi['start'] = (item, projectId) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
     }
@@ -137,8 +146,9 @@ export function usePomodoro(
       endsAt: now + s.workMin * 60_000,
       pausedLeft: null,
       cycle,
-      itemId: item?.id ?? run?.itemId ?? null,
-      itemText: item?.text ?? run?.itemText ?? '',
+      itemId: item ? item.id : (run?.itemId ?? null),
+      itemText: item ? item.text : (run?.itemText ?? ''),
+      projectId: projectId === undefined ? (run?.projectId ?? null) : projectId,
     });
   };
 
@@ -160,9 +170,9 @@ export function usePomodoro(
     if (run) complete(run, leftMs);
   };
 
-  const setTask: PomodoroApi['setTask'] = (item) => {
+  const setTask: PomodoroApi['setTask'] = (item, projectId = null) => {
     if (!run) return;
-    setRun({ ...run, itemId: item?.id ?? null, itemText: item?.text ?? '' });
+    setRun({ ...run, itemId: item?.id ?? null, itemText: item?.text ?? '', projectId });
   };
 
   return {

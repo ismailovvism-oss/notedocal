@@ -31,6 +31,7 @@ import type {
   FinanceEntry,
   MoonSighting,
   Note,
+  DayPlan,
   PomodoroSession,
   Project,
   Relation,
@@ -56,6 +57,9 @@ interface Params {
   /** Журнал помидорок (подколлекция users/{uid}/pomodoros). */
   pomodoros: PomodoroSession[];
   setPomodoros: React.Dispatch<React.SetStateAction<PomodoroSession[]>>;
+  /** Планы дня (подколлекция users/{uid}/dayplans, id документа — день). */
+  dayPlans: DayPlan[];
+  setDayPlans: React.Dispatch<React.SetStateAction<DayPlan[]>>;
   /** Домашняя бухгалтерия (подколлекция users/{uid}/finance). */
   finance: FinanceEntry[];
   setFinance: React.Dispatch<React.SetStateAction<FinanceEntry[]>>;
@@ -187,6 +191,17 @@ function cleanPomodoro(p: PomodoroSession): PomodoroSession {
     durationMin: p.durationMin ?? 0,
     itemId: p.itemId ?? null,
     itemText: p.itemText ?? '',
+    ...(p.projectId ? { projectId: p.projectId } : {}),
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt ?? p.createdAt ?? 0,
+    deleted: p.deleted ?? false,
+  };
+}
+
+function cleanDayPlan(p: DayPlan): DayPlan {
+  return {
+    id: p.id,
+    slots: (p.slots ?? []).map((s) => ({ projectId: s.projectId, goal: s.goal })),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt ?? p.createdAt ?? 0,
     deleted: p.deleted ?? false,
@@ -406,6 +421,8 @@ export function useCloudSync({
   setRelations,
   pomodoros,
   setPomodoros,
+  dayPlans,
+  setDayPlans,
   finance,
   setFinance,
   clipboard,
@@ -426,6 +443,7 @@ export function useCloudSync({
   useCollectionSync(user, 'notes', notes, setNotes, cleanNote, true);
   useCollectionSync(user, 'relations', relations, setRelations, cleanRelation);
   useCollectionSync(user, 'pomodoros', pomodoros, setPomodoros, cleanPomodoro);
+  useCollectionSync(user, 'dayplans', dayPlans, setDayPlans, cleanDayPlan);
   useCollectionSync(user, 'finance', finance, setFinance, cleanFinance);
   useCollectionSync(user, 'clipboard', clipboard, setClipboard, cleanClip);
   useCollectionSync(user, 'projects', projects, setProjects, cleanProject);

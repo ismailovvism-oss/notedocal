@@ -2823,6 +2823,16 @@ async function projectCommand(db, uid, action, rest, flags, json) {
     }
     return say(changed, changed.length ? `Отмеченное перенёс в «сделано»: ${changed.map((p) => p.title).join(', ')}` : 'Отмеченных шагов нет.');
   }
+  if (action === 'day') {
+    const day = typeof flags.date === 'string' ? flags.date : toKey(new Date());
+    if (flags.clear || rest.length) {
+      const goal = typeof flags.goal === 'string' ? Number(flags.goal) : undefined;
+      await P.saveDayPlan(db, uid, day, flags.clear ? [] : P.parseSlots(all, rest, goal));
+    }
+    const slots = await P.loadDayPlan(db, uid, day);
+    const counts = await P.dayCounts(db, uid, day);
+    return say({ day, slots, counts }, `План дня ${day}:\n${P.fmtDay(all, slots, counts)}`);
+  }
   if (action === 'add') {
     const id = rest[0];
     if (!id || !/^[a-z0-9-]+$/.test(id)) throw new Error('нужен id латиницей через дефис: project add my-project --title "…" --sphere tools');

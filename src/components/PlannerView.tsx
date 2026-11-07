@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { Checklist, ChecklistItem } from '../types';
+import type { Checklist, ChecklistItem, DayPlan, PomodoroSession, Project } from '../types';
 import { useListActions, useLocalStorage } from '../lib/storage';
 import { todayKey } from '../lib/dates';
+import type { PomodoroApi } from '../lib/pomodoro';
 import { PRIORITY_META, sizeLabel, taskPriority, toggleWithRepeat } from '../lib/tasks';
 import type { TaskRef } from '../lib/tasks';
 import {
@@ -15,10 +16,25 @@ import {
   moveToQuadrant,
   toggleFocus,
 } from '../lib/planner';
+import { DayPlanBoard } from './DayPlanBoard';
 
 interface Props {
   checklists: Checklist[];
   setChecklists: React.Dispatch<React.SetStateAction<Checklist[]>>;
+  projects: Project[];
+  plans: DayPlan[];
+  setPlans: React.Dispatch<React.SetStateAction<DayPlan[]>>;
+  sessions: PomodoroSession[];
+  setSessions: React.Dispatch<React.SetStateAction<PomodoroSession[]>>;
+  pomodoro: PomodoroApi;
+  workMin: number;
+  logPomodoro: (
+    startedAt: number,
+    durationMin: number,
+    itemId: string | null,
+    itemText: string,
+    projectId: string | null,
+  ) => void;
 }
 
 /** Сколько карточек показываем в квадранте, пока не попросили «все». */
@@ -37,7 +53,8 @@ function treeUpdate(
 }
 
 /**
- * «Карта дел» — матрица важно/срочно плюс три дела на сегодня.
+ * «Карта дел» — проекты дня с помидорами (DayPlanBoard), ниже матрица важно/срочно
+ * и три дела на сегодня.
  *
  * Экран «Сегодня» отвечает, что делать в ближайший час; здесь решается, что
  * вообще заслуживает дня. Квадрант — не отдельное поле, а проекция важности и
@@ -47,7 +64,18 @@ function treeUpdate(
  * Перетаскивание работает мышкой, а на телефоне — кнопками на карточке:
  * HTML5-drag в мобильных браузерах не срабатывает, а доска нужна и там.
  */
-export function PlannerView({ checklists, setChecklists }: Props) {
+export function PlannerView({
+  checklists,
+  setChecklists,
+  projects,
+  plans,
+  setPlans,
+  sessions,
+  setSessions,
+  pomodoro,
+  workMin,
+  logPomodoro,
+}: Props) {
   const { update } = useListActions(setChecklists);
   const today = todayKey();
   const [listFilter, setListFilter] = useLocalStorage<string>('ndc.plannerList', '');
@@ -117,13 +145,24 @@ export function PlannerView({ checklists, setChecklists }: Props) {
         </span>
       </div>
 
+      <DayPlanBoard
+        projects={projects}
+        plans={plans}
+        setPlans={setPlans}
+        sessions={sessions}
+        setSessions={setSessions}
+        pomodoro={pomodoro}
+        workMin={workMin}
+        logPomodoro={logPomodoro}
+      />
+
       <div className="pl-focus">
         <h3 className="pl-focus-title">
-          Сегодня делаю <span className="muted small">{board.focus.length} из {FOCUS_MAX}</span>
+          Мелкие дела дня <span className="muted small">{board.focus.length} из {FOCUS_MAX}</span>
         </h3>
         {board.focus.length === 0 ? (
           <p className="muted small pl-focus-empty">
-            Пусто. Возьми звёздочкой ⭐ не больше трёх дел — это и есть план дня.
+            Пусто. Мелочь без проекта бери звёздочкой ⭐ в карточках ниже, не больше трёх.
           </p>
         ) : (
           <ol className="pl-focus-list">

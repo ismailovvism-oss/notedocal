@@ -15,6 +15,8 @@ interface Props {
   settings: PomodoroSettings;
   setSettings: React.Dispatch<React.SetStateAction<PomodoroSettings>>;
   checklists: Checklist[];
+  /** Проекты плана дня, первым — тот, что на очереди. */
+  dayProjects: { id: string; title: string }[];
 }
 
 interface TaskOption {
@@ -31,7 +33,7 @@ function collectOpen(items: ChecklistItem[], listTitle: string, acc: TaskOption[
 }
 
 /** Мини-таймер в топбаре + раскрывающаяся панель управления помидоро. */
-export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, checklists }: Props) {
+export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, checklists, dayProjects }: Props) {
   const [open, setOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const { run, leftMs, paused } = pomodoro;
@@ -51,7 +53,15 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
 
   const phase = run ? PHASE_META[run.phase] : null;
 
+  function pickProject(p: { id: string; title: string }) {
+    const item = { id: null, text: p.title };
+    if (run) pomodoro.setTask(item, p.id);
+    else pomodoro.start(item, p.id);
+  }
+
   function pickTask(id: string) {
+    const project = dayProjects.find((p) => `project:${p.id}` === id);
+    if (project) return pickProject(project);
     const t = tasks.find((x) => x.id === id) ?? null;
     const item = t ? { id: t.id, text: t.text } : null;
     // Если таймер идёт — просто меняем задачу; иначе выбор задачи запускает работу.
@@ -162,8 +172,11 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
 
             <div className="pomo-controls">
               {!run && (
-                <button className="btn btn-primary" onClick={() => pomodoro.start()}>
-                  ▶ Начать
+                <button
+                  className="btn btn-primary"
+                  onClick={() => (dayProjects[0] ? pickProject(dayProjects[0]) : pomodoro.start())}
+                >
+                  ▶ Начать{dayProjects[0] ? ` · ${dayProjects[0].title}` : ''}
                 </button>
               )}
               {run && !paused && (
@@ -188,15 +201,24 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
               )}
             </div>
 
-            {tasks.length > 0 && (
+            {(tasks.length > 0 || dayProjects.length > 0) && (
               <label className="field">
                 <span>Над чем работаю</span>
                 <select
                   className="input"
-                  value={run?.itemId ?? ''}
+                  value={run?.projectId ? `project:${run.projectId}` : (run?.itemId ?? '')}
                   onChange={(e) => pickTask(e.target.value)}
                 >
                   <option value="">— без задачи —</option>
+                  {dayProjects.length > 0 && (
+                    <optgroup label="Проекты дня">
+                      {dayProjects.map((p) => (
+                        <option key={p.id} value={`project:${p.id}`}>
+                          {p.title}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                   {tasks.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.text} · {t.listTitle}
