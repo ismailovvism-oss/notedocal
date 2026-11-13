@@ -8,16 +8,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { PomodoroPhase, PomodoroSettings } from '../types';
-import {
-  AMBIENT_VOLUME,
-  BREAK_DONE_NOTES,
-  WORK_DONE_NOTES,
-  chime,
-  playAmbient,
-  setAmbientVolume,
-  stopAmbient,
-  wakeAudio,
-} from './sound';
+import { BREAK_DONE_NOTES, WORK_DONE_NOTES, chime, wakeAudio } from './sound';
+import { MIX_VOLUME, currentMix } from './ambient';
+import { setMixVolume, setTimerMix } from './mixer';
 import { useLocalStorage } from './storage';
 
 export const DEFAULT_POMODORO: PomodoroSettings = {
@@ -158,14 +151,14 @@ export function usePomodoro(
 
   // Фон играет только во время работы: в перерыве и на паузе тихо.
   const working = !!run && run.phase === 'work' && run.pausedLeft === null;
-  const background = working ? (settings.background ?? 'off') : 'off';
-  const volume = settings.backgroundVolume ?? AMBIENT_VOLUME;
+  const mix = working ? currentMix(settings) : null;
+  const mixKey = JSON.stringify(mix);
+  const volume = settings.backgroundVolume ?? MIX_VOLUME;
+  useEffect(() => setMixVolume(volume), [volume]);
   useEffect(() => {
-    if (background === 'off') stopAmbient();
-    else playAmbient(background, volume);
+    setTimerMix(mix);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [background]);
-  useEffect(() => setAmbientVolume(volume), [volume]);
+  }, [mixKey]);
 
   const start: PomodoroApi['start'] = (item, projectId) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {

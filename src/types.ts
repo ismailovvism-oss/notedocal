@@ -342,8 +342,18 @@ export type HealthKind =
 /** Фаза помидоро-таймера: работа, короткий или длинный перерыв. */
 export type PomodoroPhase = 'work' | 'short' | 'long';
 
-/** Фон на время помидора. */
+/** Фон на время помидора до 13.11.26 — один звук; читается только при переходе на смесь. */
 export type Ambient = 'off' | 'tick' | 'rain' | 'sea' | 'wind';
+
+/** Смесь фона: звук (id из SOUNDS в lib/ambient.ts) → громкость 5–100; нет звука — молчит. */
+export type AmbientMix = Record<string, number>;
+
+/** Смесь, сохранённая хозяином под своим названием. */
+export interface SavedMix {
+  id: string;
+  name: string;
+  levels: AmbientMix;
+}
 
 /** Настройки помидоро-таймера (длительности в минутах). */
 export interface PomodoroSettings {
@@ -354,9 +364,13 @@ export interface PomodoroSettings {
   cyclesToLong: number;
   /** Сигнал в конце помидора и перерыва; не задано — включён. */
   sound?: boolean;
-  /** Что играет во время работы; не задано — тишина. */
+  /** Прежний один звук фона; не задана смесь — берётся из него (lib/ambient.ts → currentMix). */
   background?: Ambient;
-  /** Громкость фона, 5–100. */
+  /** Что играет во время работы: смесь звуков; пустая — тишина. */
+  mix?: AmbientMix;
+  /** Свои сохранённые смеси. */
+  mixes?: SavedMix[];
+  /** Общая громкость фона, 5–100. */
   backgroundVolume?: number;
 }
 

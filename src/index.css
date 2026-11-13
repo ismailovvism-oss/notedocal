@@ -2704,6 +2704,7 @@ a.fin-contact-chip:hover {
 }
 
 .ambient {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2715,21 +2716,199 @@ a.fin-contact-chip:hover {
 .dp-head .ambient {
   margin-left: auto;
 }
-.ambient-kind {
-  display: flex;
+.amb-toggle {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 4px 10px;
   white-space: nowrap;
+  cursor: pointer;
 }
-.ambient .input {
-  width: auto;
-  padding-block: 2px;
+.amb-toggle.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
-.ambient input[type='range'] {
+.amb-caret {
+  color: var(--muted);
+  font-size: 11px;
+}
+.amb-volume {
   flex: 1;
   width: 90px;
   min-width: 60px;
   accent-color: var(--accent);
+}
+/* Панель выбора: поверх содержимого под кнопкой; на телефоне не шире экрана. */
+.amb-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(72vh, 600px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
+}
+.pomo-settings .amb-panel {
+  left: 0;
+  right: auto;
+}
+/* Телефон: панель выезжает снизу над полосой вкладок, иначе её низ уходит под неё. */
+@media (max-width: 759px) {
+  .amb-panel,
+  .pomo-settings .amb-panel {
+    position: fixed;
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: calc(100dvh - 160px - env(safe-area-inset-bottom));
+  }
+}
+.amb-sec {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.amb-hint {
+  font-weight: 400;
+}
+.amb-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.amb-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.amb-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.amb-saved {
+  display: inline-flex;
+}
+.amb-saved .amb-chip {
+  border-radius: 999px 0 0 999px;
+}
+.amb-x {
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 999px 999px 0;
+  background: var(--surface-2);
+  color: var(--muted);
+  font: inherit;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.amb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(122px, 1fr));
+  gap: 6px;
+}
+.amb-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.amb-tile.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.amb-tile-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 7px 8px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.amb-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.amb-label {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+}
+.amb-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+.amb-tile.error .amb-note {
+  color: var(--danger);
+}
+.amb-tile.loading .amb-icon {
+  animation: amb-pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes amb-pulse {
+  to {
+    opacity: 0.3;
+  }
+}
+.amb-tile input[type='range'] {
+  margin: 0 8px 8px;
+  accent-color: var(--accent);
+}
+.amb-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.amb-master {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 200px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.amb-credits {
+  font-size: 12px;
+  color: var(--muted);
+}
+.amb-credits summary {
+  cursor: pointer;
+}
+.amb-credits p {
+  margin: 6px 0 0;
 }
 
 .pomo-today {
