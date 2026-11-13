@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PomodoroPhase, PomodoroSettings } from '../types';
 import { BREAK_DONE_NOTES, WORK_DONE_NOTES, chime, wakeAudio } from './sound';
 import { MIX_VOLUME, currentMix } from './ambient';
-import { setMixVolume, setTimerMix } from './mixer';
+import { setChosenMix, setMixVolume, setWorking } from './mixer';
 import { useLocalStorage } from './storage';
 
 export const DEFAULT_POMODORO: PomodoroSettings = {
@@ -149,16 +149,17 @@ export function usePomodoro(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
 
-  // Фон играет только во время работы: в перерыве и на паузе тихо.
+  // Во время работы фон играет сам; в перерыве и на паузе — только если включён вручную (lib/mixer.ts).
   const working = !!run && run.phase === 'work' && run.pausedLeft === null;
-  const mix = working ? currentMix(settings) : null;
+  const mix = currentMix(settings);
   const mixKey = JSON.stringify(mix);
   const volume = settings.backgroundVolume ?? MIX_VOLUME;
   useEffect(() => setMixVolume(volume), [volume]);
   useEffect(() => {
-    setTimerMix(mix);
+    setChosenMix(mix);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mixKey]);
+  useEffect(() => setWorking(working), [working]);
 
   const start: PomodoroApi['start'] = (item, projectId) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {

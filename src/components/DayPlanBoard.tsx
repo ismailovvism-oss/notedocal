@@ -99,7 +99,7 @@ export function DayPlanBoard({
         ) : (
           <span className="muted small">Выбери три проекта. Каждому три помидора, короткому хватит одного.</span>
         )}
-        <AmbientPicker settings={settings} setSettings={setSettings} working={working && !paused} />
+        <AmbientPicker settings={settings} setSettings={setSettings} />
       </div>
 
       <div className="dp-grid">

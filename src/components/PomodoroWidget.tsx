@@ -173,11 +173,7 @@ export function PomodoroWidget({ pomodoro, sessions, settings, setSettings, chec
                   />
                   <span>Звук в конце помидора и перерыва</span>
                 </label>
-                <AmbientPicker
-                  settings={settings}
-                  setSettings={setSettings}
-                  working={run?.phase === 'work' && !paused}
-                />
+                <AmbientPicker settings={settings} setSettings={setSettings} />
               </div>
             )}
 

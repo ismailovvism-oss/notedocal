@@ -1,4 +1,4 @@
-import { useEffect, useId, useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import type { AmbientMix, PomodoroSettings } from '../types';
 import {
   LEVEL_MIN,
@@ -13,35 +13,31 @@ import {
   setLevel,
   toggleSound,
 } from '../lib/ambient';
-import { onSoundStatus, setPreviewMix, soundStatus } from '../lib/mixer';
+import { isHeard, onSoundStatus, playByHand, soundStatus } from '../lib/mixer';
 
 /**
- * Фон на время помидора: кнопка с названием смеси и общая громкость, по нажатию — панель
- * с наборами и звуками (у каждого свой ползунок). Пока панель открыта, смесь звучит, чтобы
- * подобрать её на слух; закрыл — играет только во время работы.
+ * Фон: ▶/⏸, кнопка с названием смеси и общая громкость; по нажатию на название — панель
+ * с наборами и звуками (у каждого свой ползунок). Открыл панель — звук включается и играет
+ * и после «Готово», пока не нажмёшь ⏸; во время работы помидора играет сам (lib/mixer.ts).
  */
 export function AmbientPicker({
   settings,
   setSettings,
-  working,
 }: {
   settings: PomodoroSettings;
   setSettings: React.Dispatch<React.SetStateAction<PomodoroSettings>>;
-  /** Идёт работа: фон уже играет и сам сменится вслед за настройкой. */
-  working: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [, refresh] = useReducer((n: number) => n + 1, 0);
-  const key = useId();
   const box = useRef<HTMLDivElement>(null);
 
   const mix = currentMix(settings);
-  const mixKey = JSON.stringify(mix);
   const saved = settings.mixes ?? [];
   const volume = settings.backgroundVolume ?? MIX_VOLUME;
   const name = mixName(mix, saved);
   const silent = isSilent(mix);
   const status = soundStatus();
+  const heard = isHeard();
 
   const setMix = (next: AmbientMix) => setSettings((s) => ({ ...s, mix: next }));
   const volumeSlider = (
@@ -63,15 +59,11 @@ export function AmbientPicker({
 
   useEffect(() => onSoundStatus(refresh), []);
 
-  // Панель открыта — смесь звучит; закрыл — тихо (или снова таймер, если идёт работа).
-  useEffect(() => {
-    if (open) setPreviewMix(key, mix);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, mixKey]);
-  useEffect(() => {
-    if (!open) return;
-    return () => setPreviewMix(key, null);
-  }, [open, key]);
+  /** Открыл панель — звук включился: подбирать на слух, и дальше играет. */
+  function toggleOpen() {
+    if (!open) playByHand(true);
+    setOpen(!open);
+  }
 
   // Нажал мимо панели или Esc — закрыть.
   useEffect(() => {
@@ -102,13 +94,23 @@ export function AmbientPicker({
 
   return (
     <div className="ambient" ref={box}>
+      {!silent && (
+        <button
+          className={`amb-play ${heard ? 'on' : ''}`}
+          onClick={() => playByHand(!heard)}
+          aria-label={heard ? 'Остановить фон' : 'Включить фон'}
+          title={heard ? 'Остановить фон' : 'Включить фон'}
+        >
+          {heard ? '⏸' : '▶'}
+        </button>
+      )}
       <button
         className={`amb-toggle ${silent ? '' : 'on'}`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
         aria-expanded={open}
-        title="Фон на время помидора"
+        title="Выбрать фон"
       >
-        <span aria-hidden>{silent ? '🔇' : '🔈'}</span>
+        <span aria-hidden>{silent ? '🔇' : heard ? '🔊' : '🔈'}</span>
         <span>{name}</span>
         <span className="amb-caret" aria-hidden>
           ▾
@@ -149,7 +151,7 @@ export function AmbientPicker({
 
           <div className="amb-sec">
             <span>Звуки</span>
-            <span className="amb-hint">{working ? 'играет, пока идёт помидор' : 'слышно, пока панель открыта'}</span>
+            <span className="amb-hint">играет, пока не нажмёшь ⏸</span>
           </div>
           <div className="amb-grid">
             {SOUNDS.map((s) => {

@@ -6,9 +6,11 @@
 // Всё расписание — по часам Web Audio и событиям конца куска, без таймеров страницы:
 // в свёрнутом окне браузер душит setTimeout, а звук продолжает идти ровно.
 //
-// Кто хочет звука: таймер (во время работы) и открытая панель выбора (послушать).
-// Играет панель, если она открыта, иначе таймер; смесь меняется по разнице — общие слои
-// не перезапускаются.
+// Когда играет (как в Noisli: выбрал — играет, пока не остановишь; хозяин 13.11.26):
+// - во время работы помидора — сама;
+// - включил вручную (открыл панель выбора или ▶) — и после «Готово», до ⏸;
+// - ⏸ во время работы глушит до следующего начала работы.
+// Смесь меняется по разнице — общие слои не перезапускаются.
 
 import type { AmbientMix } from '../types';
 import { SOUNDS, cleanMix, MIX_VOLUME, type SoundDef } from './ambient';
@@ -28,8 +30,11 @@ interface Layer {
 
 let master: GainNode | null = null;
 let volume = MIX_VOLUME;
-let timerMix: AmbientMix | null = null;
-const previews = new Map<string, AmbientMix>();
+/** Выбранная смесь (настройка), идёт ли работа помидора, включено ли вручную, заглушено ли. */
+let chosen: AmbientMix = {};
+let working = false;
+let byHand = false;
+let muted = false;
 const layers = new Map<string, Layer>();
 const buffers = new Map<string, Promise<AudioBuffer>>();
 const status = new Map<string, Status>();
@@ -64,10 +69,14 @@ function loadBuffer(ctx: AudioContext, file: string): Promise<AudioBuffer> {
   return p;
 }
 
+function notify(): void {
+  for (const fn of listeners) fn();
+}
+
 function setStatus(id: string, s: Status | null): void {
   if (s) status.set(id, s);
   else status.delete(id);
-  for (const fn of listeners) fn();
+  notify();
 }
 
 /** Звуки, которые грузятся или не загрузились (нет сети), — для подсказки в панели. */
@@ -75,6 +84,7 @@ export function soundStatus(): ReadonlyMap<string, Status> {
   return status;
 }
 
+/** Подписка на перемены: загрузка звуков, «играет / не играет». */
 export function onSoundStatus(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
@@ -275,9 +285,13 @@ const masterGain = (v: number) => ((v / 100) * MAKEUP) / HEADROOM;
 
 // ---------- смесь ----------
 
+/** Звучит ли фон сейчас (если в смеси что-то есть). */
+export function isHeard(): boolean {
+  return !muted && (byHand || working);
+}
+
 function wanted(): AmbientMix {
-  const preview = [...previews.values()].pop();
-  return cleanMix(preview ?? timerMix ?? {});
+  return isHeard() ? cleanMix(chosen) : {};
 }
 
 function apply(): void {
@@ -309,16 +323,25 @@ function apply(): void {
   }
 }
 
-/** Смесь от таймера: во время работы — выбранная, иначе null (тишина). */
-export function setTimerMix(mix: AmbientMix | null): void {
-  timerMix = mix;
+/** Выбранная смесь из настроек. */
+export function setChosenMix(mix: AmbientMix): void {
+  chosen = mix;
   apply();
 }
 
-/** Открытая панель выбора играет свою смесь, пока открыта (key — какая панель; null — закрыта). */
-export function setPreviewMix(key: string, mix: AmbientMix | null): void {
-  if (mix) previews.set(key, mix);
-  else previews.delete(key);
+/** Идёт ли работа помидора (не перерыв, не пауза). Началась работа — заглушка снимается. */
+export function setWorking(next: boolean): void {
+  if (next && !working) muted = false;
+  working = next;
+  notify();
+  apply();
+}
+
+/** ▶ — играть и без таймера, пока не остановишь; ⏸ — тишина (во время работы — до следующей). */
+export function playByHand(on: boolean): void {
+  byHand = on;
+  muted = !on && working;
+  notify();
   apply();
 }
 
