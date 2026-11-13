@@ -58,10 +58,12 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
   const renamedRef = useRef(onRenamed);
   renamedRef.current = onRenamed;
   // старый id → новый: правка, посланная под прежним именем (заметку переименовали, пока
-  // в ней печатали), идёт в новый файл, а не пропадает
+  // в ней печатали), идёт в новый файл, а не пропадает. Только пока по старому пути пусто:
+  // 13.11.2026 новая «Без названия» (то же имя, что было у переименованной) уводила свои правки
+  // в старую заметку — та переименовывалась, её текст затирался, удаление стирало её.
   const renames = useRef(new Map<string, string>());
   const resolve = (id: string) => {
-    for (let i = 0; i < 20 && renames.current.has(id); i++) id = renames.current.get(id)!;
+    for (let i = 0; i < 20 && !entries.current.has(pathOfId(id)) && renames.current.has(id); i++) id = renames.current.get(id)!;
     return id;
   };
   // своя запись по пути: чтение правки со стороны, начатое до неё, её не затирает
@@ -231,6 +233,7 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     const note = { id: vid.md(path), title: '', body: '', date: null, createdAt: 0, updatedAt: 0, ...fields, vault: { path } } as Note;
     // папки, которых ещё нет, окно создаст само; в дереве их видно сразу, не через опрос
     for (let d = dirName(path); d; d = dirName(d)) if (!entries.current.has(d)) entries.current.set(d, { path: d, kind: 'dir' });
+    renames.current.delete(vid.md(path));
     await write(path, vaultMarkdown(note));
     return vid.md(path);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -282,7 +285,8 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     await write(path, vaultMarkdown({ ...fresh, ...rest, vault: { ...n.vault, path } }));
   };
 
-  const remove = (id: string) => queued(() => doRemove(resolve(id)));
+  // удалить и переложить — только то, что названо: по старому имени — ничего, а не «куда переехало»
+  const remove = (id: string) => queued(() => doRemove(id));
   const doRemove = async (id: string) => {
     const path = pathOfId(id);
     await vaultApi.remove(path);
@@ -296,7 +300,7 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     entries.current.set(path, { path, kind: 'dir' });
     bump();
   };
-  const move = (id: string, toDir: string) => queued(() => doMove(resolve(id), toDir));
+  const move = (id: string, toDir: string) => queued(() => doMove(id, toDir));
   const doMove = async (id: string, toDir: string) => {
     const path = pathOfId(id);
     const target = (toDir ? toDir + '/' : '') + baseName(path);

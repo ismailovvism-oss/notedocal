@@ -23,6 +23,7 @@ import { dropEmptyAnchors } from '../lib/kb/edit';
 import { checkNewTag, tagCards } from '../lib/kb/tags';
 import { OWN_KEYS, fieldsOf, schemas } from '../lib/kb/schema';
 import type { ScopeWhy } from '../lib/kb/scope';
+import { onFlush } from './flush';
 
 // не лениво: окно держит страницу открытой часами, а пересборка стирает старые куски —
 // догружаемый потом файл мог бы уже исчезнуть (так 02.11.2026 «Свойства» роняли страницу)
@@ -114,6 +115,15 @@ export function NotePane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [note.id],
   );
+  // перезагрузка, окно спрятали, программа выходит — сохранить сразу (./flush.ts)
+  const titleRef = useRef(title);
+  titleRef.current = title;
+  const flushRef = useRef(() => {});
+  flushRef.current = () => {
+    if (titleRef.current.trim() !== (note.title ?? '').trim()) commitTitle();
+    if (timer.current) save(bodyRef.current);
+  };
+  useEffect(() => onFlush(() => flushRef.current()), []);
 
   // --- голос: метка %%🎤:id%% на месте курсора, распознанное встаёт перед ней ---
   const editor = useRef<LiveEditorHandle | null>(null);
