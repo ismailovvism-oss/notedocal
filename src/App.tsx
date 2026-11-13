@@ -27,7 +27,7 @@ import { DEFAULT_MEAL_GAP_H } from './lib/health';
 import { VAULT_META_ID, useVault } from './lib/vault';
 import { DEFAULT_POMODORO, usePomodoro } from './lib/pomodoro';
 import { dayKey, formatHijri, hijriFor, todayKey } from './lib/dates';
-import { doneCounts, nextSlot, planSlots } from './lib/dayplan';
+import { doneCounts, lastProject, nextSlot, planSlots } from './lib/dayplan';
 import { CalendarView } from './components/CalendarView';
 import { ChecklistBoard } from './components/ChecklistBoard';
 import { NotesExplorer } from './components/NotesExplorer';
@@ -215,7 +215,11 @@ export default function App() {
   const dayKeyNow = todayKey();
   const dayProjects = useMemo(() => {
     const slots = planSlots(dayPlans, dayKeyNow);
-    const next = nextSlot(slots, doneCounts(visiblePomodoros, dayKeyNow));
+    const next = nextSlot(
+      slots,
+      doneCounts(visiblePomodoros, dayKeyNow),
+      lastProject(visiblePomodoros, dayKeyNow),
+    );
     const ordered = next ? [next, ...slots.filter((s) => s !== next)] : slots;
     return ordered.flatMap((s) => {
       const p = visibleProjects.find((x) => x.id === s.projectId);

@@ -9,6 +9,7 @@ import {
   SLOTS_MAX,
   SLOTS_MIN,
   doneCounts,
+  lastProject,
   nextSlot,
   pickable,
   planSlots,
@@ -54,6 +55,7 @@ export function DayPlanBoard({
   const { workMin } = settings;
   const slots = planSlots(plans, today);
   const counts = useMemo(() => doneCounts(sessions, today), [sessions, today]);
+  const lastId = useMemo(() => lastProject(sessions, today), [sessions, today]);
   const { run, leftMs, paused } = pomodoro;
   const working = run?.phase === 'work';
 
@@ -66,7 +68,7 @@ export function DayPlanBoard({
 
   // Идёт помидор проекта — выделен он; иначе тот, что на очереди.
   const runSlot = slots.find((s) => s.projectId === run?.projectId) ?? null;
-  const next = nextSlot(slots, counts);
+  const next = nextSlot(slots, counts, lastId);
   const current =
     runSlot && (working || (counts.get(runSlot.projectId) ?? 0) < runSlot.goal) ? runSlot : next;
 
