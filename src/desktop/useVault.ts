@@ -193,6 +193,9 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
   /** Переименовать на диске; вложенное в папку — тоже переезжает. */
   const relocate = async (from: string, to: string, kind: VaultEntry['kind']) => {
     await vaultApi.move(from, to);
+    // папки, которых не было (под заметку — её папка дочерних), окно создало само; опрос о них
+    // не скажет (свои изменения он не приносит) — завести здесь
+    for (let d = dirName(to); d; d = dirName(d)) if (!entries.current.has(d)) entries.current.set(d, { path: d, kind: 'dir' });
     const moved: [string, VaultEntry][] = [];
     for (const [p, e] of entries.current) {
       if (p === from || p.startsWith(from + '/')) moved.push([p, e]);
@@ -211,7 +214,12 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
       renames.current.delete(prefix + np);
       renamedRef.current(prefix + p, prefix + np);
     }
-    void kind;
+    // у заметки есть дочерние (папка с тем же именем рядом, как в Obsidian) — папка едет следом
+    if (kind === 'md') {
+      const a = from.replace(/\.md$/i, '');
+      const b = to.replace(/\.md$/i, '');
+      if (entries.current.get(a)?.kind === 'dir' && !entries.current.has(b)) await relocate(a, b, 'dir');
+    }
     bump();
   };
 
@@ -248,6 +256,15 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     if (!texts.current.has(path)) texts.current.set(path, got[path]);
   };
 
+  /** Папка дочерних (`А/` рядом с `А.md`) опустела — убрать её: заметка снова без дочерних. */
+  const pruneEmpty = async (dir: string) => {
+    if (!dir || entries.current.get(dir)?.kind !== 'dir' || !entries.current.has(dir + '.md')) return;
+    for (const p of entries.current.keys()) if (p.startsWith(dir + '/')) return;
+    await vaultApi.remove(dir).catch(() => {});
+    entries.current.delete(dir);
+    bump();
+  };
+
   const update = (id: string, patch: Partial<Note>) => queued(() => doUpdate(resolve(id), patch));
   const append = (id: string, text: string) =>
     queued(async () => {
@@ -277,9 +294,21 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
         path = target;
       }
     }
-    if (kind !== 'md') return;
     const { title: _t, ...rest } = patch;
     void _t;
+    // папке написали текст (теги, свойства) — она становится заметкой с дочерними: рядом `А.md`
+    if (kind === 'dir' && Object.keys(rest).some((k) => k !== 'inBase' && k !== 'toPhone')) {
+      const mdPath = path + '.md';
+      if (!entries.current.has(mdPath)) {
+        const note = { id: vid.md(mdPath), title: baseName(path), body: '', date: null, createdAt: 0, updatedAt: 0, ...rest, vault: { path: mdPath } } as Note;
+        delete (note as Partial<Note>).type; // роль «папка» — у самой папки, у заметки обычная
+        await write(mdPath, vaultMarkdown(note));
+        renamedRef.current(vid.dir(path), vid.md(mdPath));
+        return;
+      }
+      return doUpdate(vid.md(mdPath), rest);
+    }
+    if (kind !== 'md') return;
     if (!Object.keys(rest).length) return;
     const fresh = byId(vid.md(path)) ?? { ...n, vault: { ...n.vault, path } };
     await write(path, vaultMarkdown({ ...fresh, ...rest, vault: { ...n.vault, path } }));
@@ -293,6 +322,7 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     for (const p of [...entries.current.keys()]) if (p === path || p.startsWith(path + '/')) entries.current.delete(p);
     texts.current.delete(path);
     bump();
+    await pruneEmpty(dirName(path));
   };
   const mkdir = async (dir: string, name: string) => {
     const path = (dir ? dir + '/' : '') + name.replace(/[\\/:*?"<>|]/g, ' ').trim();
@@ -305,8 +335,12 @@ export function useVault(onRenamed: (from: string, to: string) => void): Vault {
     const path = pathOfId(id);
     const target = (toDir ? toDir + '/' : '') + baseName(path);
     if (target === path || toDir === path || toDir.startsWith(path + '/')) return;
+    // заметку — не в собственные дочерние
+    const stem = path.replace(/\.md$/i, '');
+    if (id.startsWith('v:') && (toDir === stem || toDir.startsWith(stem + '/'))) throw new Error('Заметку нельзя сделать дочерней к её собственной дочерней');
     const kind: VaultEntry['kind'] = id.startsWith('v:') ? 'md' : id.startsWith('d:') ? 'dir' : 'file';
     await relocate(path, target, kind);
+    await pruneEmpty(dirName(path));
   };
   /** Перечитать список; новые и изменённые .md — вместе с текстом (иначе были бы пустыми,
    *  а у изменённых — новое время при старом тексте). */

@@ -34,6 +34,7 @@ import { usePhoneSync } from './usePhoneSync';
 import { phoneMode, type PhoneMode, type VaultSync } from '../lib/kb/phone';
 import { dirName, inVault, pathOfId } from '../lib/kb/vault';
 import { extPath, isExt, useExternal } from './useExternal';
+import { EditorView } from '@codemirror/view';
 
 interface Target extends PaneFocus {
   id: string;
@@ -107,6 +108,19 @@ function Desktop() {
       ? [...vault.notes, ...extPart, { id: CLOUD, title: '☁ notedocal', body: '', type: 'folder' as const, date: null, createdAt: 0, updatedAt: 0 }, ...cloudLive]
       : [...extPart, ...cloudLive];
   }, [vault.info, vault.notes, cloudLive, ext.notes]);
+  // Заметка с дочерними в хранилище — как в Obsidian: `А.md` и рядом папка `А/` с дочерними.
+  // В дереве это один пункт — заметка, которая раскрывается; папку отдельно не показываем.
+  const paired = useMemo(() => {
+    const dirs = new Set(vault.notes.filter((n) => n.id.startsWith('d:')).map((n) => n.id));
+    const noteOfDir = new Map<string, string>();
+    for (const n of vault.notes) {
+      if (!n.id.startsWith('v:')) continue;
+      const d = 'd:' + pathOfId(n.id).replace(/\.md$/i, '');
+      if (dirs.has(d)) noteOfDir.set(d, n.id);
+    }
+    return noteOfDir;
+  }, [vault.notes]);
+  const treeHide = useMemo(() => new Set(paired.keys()), [paired]);
   // связи для дерева: папки хранилища по путям, облачное — внутри ☁
   const treeRelations = useMemo(() => {
     const toExt: Relation[] = ext.notes.map((n) => ({ id: `xr:${n.id}`, from: EXTDIR, to: n.id, type: 'child', position: 0, createdAt: 0, updatedAt: 0 }));
@@ -115,8 +129,12 @@ function Desktop() {
     const toCloud: Relation[] = cloudLive
       .filter((n) => !hasParent.has(n.id))
       .map((n) => ({ id: `cr:${n.id}`, from: CLOUD, to: n.id, type: 'child', position: 0, createdAt: 0, updatedAt: 0 }));
-    return [...vault.relations, ...toExt, ...toCloud, ...relations];
-  }, [vault.info, vault.relations, relations, cloudLive, ext.notes]);
+    // дочерние папки `А/` — под заметкой `А.md`
+    const vaultRel = vault.relations
+      .filter((r) => !paired.has(r.to))
+      .map((r) => (paired.has(r.from) ? { ...r, from: paired.get(r.from)! } : r));
+    return [...vaultRel, ...toExt, ...toCloud, ...relations];
+  }, [vault.info, vault.relations, relations, cloudLive, ext.notes, paired]);
   const index = useMemo(() => buildIndex(live), [live]);
   useEffect(() => {
     const t = setTimeout(() => void persistParse(), 2000);
@@ -322,9 +340,9 @@ function Desktop() {
   const setOpenFolder = (id: string) => setOpen((o) => (o.includes(id) ? o : [...o, id]));
   function createNote(inNew = false, parent: string | null = null) {
     // в хранилище: в корень или в его папку; в облако — в папку ☁ и её подпапки
-    if (vault.info && (parent === null || parent.startsWith('d:'))) {
+    if (vault.info && (parent === null || parent.startsWith('d:') || parent.startsWith('v:'))) {
       void vault
-        .create(parent ? pathOfId(parent) : '', {})
+        .create(parent ? dirFor(parent) : '', {})
         .then((id) => {
           madeHere.current.add(id);
           if (parent) setOpenFolder(parent);
@@ -358,24 +376,88 @@ function Desktop() {
     linkTo(parent, id, now);
   }
   /** Перенести заметку или папку из папки from в to (null — корень). */
+  /** Папка хранилища, куда класть «внутрь» пункта: папка — она сама, заметка `А.md` — `А/`. */
+  function dirFor(id: string): string {
+    if (id.startsWith('d:')) return pathOfId(id);
+    if (id.startsWith('v:')) return pathOfId(id).replace(/\.md$/i, '');
+    return '';
+  }
+  /** Дочерние пункта в дереве (у заметки хранилища — содержимое её папки `А/`). */
+  function kidsOf(id: string): string[] {
+    return treeRelations.filter((r) => !r.deleted && r.type === 'child' && r.from === id).map((r) => r.to);
+  }
+  /** Удалить заметку. Есть дочерние — спросить: вместе с ними или поднять их на уровень выше.
+   *  asked — «удалить саму заметку?» уже спросили. false — передумали. */
+  async function removeNote(id: string, asked = false): Promise<boolean> {
+    const n = index.byId.get(id);
+    const title = n?.title || 'Без названия';
+    const kids = kidsOf(id);
+    if (!kids.length) {
+      if (!asked && !confirm(`Удалить «${title}»?${inVault(id) ? ' (в корзину хранилища)' : ''}`)) return false;
+      store.remove(id);
+      return true;
+    }
+    const all = confirm(`У «${title}» есть дочерние (${kids.length}). Удалить их вместе с ней?\n\nОК — удалить всё${inVault(id) ? ' (в корзину хранилища)' : ''}.\nОтмена — другой вариант.`);
+    const up = !all && confirm(`Тогда поднять дочерние (${kids.length}) на уровень выше, а удалить только «${title}»?`);
+    if (!all && !up) return false;
+    const parent = parentOf(id);
+    if (id.startsWith('v:')) {
+      const dir = 'd:' + dirFor(id);
+      try {
+        if (up) for (const k of kids) await vault.move(k, dirName(pathOfId(id)));
+        else await vault.remove(dir);
+        await vault.remove(id);
+      } catch (e) {
+        fail(e);
+        return false;
+      }
+      return true;
+    }
+    // облако: дочерние — связями
+    const live = relations.filter((r) => !r.deleted && r.type === 'child');
+    if (up) {
+      for (const k of kids) move(k, id, parent && parent !== CLOUD ? parent : null);
+    } else {
+      const stack = [...kids];
+      const seen = new Set<string>([id]);
+      while (stack.length) {
+        const x = stack.pop()!;
+        if (seen.has(x)) continue;
+        seen.add(x);
+        stack.push(...live.filter((r) => r.from === x).map((r) => r.to));
+        actions.remove(x);
+      }
+    }
+    for (const r of live) if (r.from === id || r.to === id) relActions.remove(r.id);
+    actions.remove(id);
+    return true;
+  }
+  /** Родитель пункта в дереве (null — корень). */
+  function parentOf(id: string): string | null {
+    return treeRelations.find((r) => !r.deleted && r.type === 'child' && r.to === id)?.from ?? null;
+  }
   function move(id: string, from: string | null, to: string | null) {
     if (from === to) return;
+    // куда в хранилище: в папку, в корень или под заметку (её папка дочерних)
+    const intoVault = to === null || to.startsWith('d:') || to.startsWith('v:');
     if (isExt(id)) {
-      if (vault.info && (to === null || to.startsWith('d:'))) void extToVault(id, to ? pathOfId(to) : '');
-      else setVaultErr('Открытый файл можно переложить только в папку хранилища');
+      if (vault.info && intoVault) void extToVault(id, to ? dirFor(to) : '');
+      else setVaultErr('Открытый файл можно переложить только в хранилище');
       return;
     }
     if (inVault(id)) {
-      if (to === null || to.startsWith('d:')) {
-        void vault.move(id, to ? pathOfId(to) : '').catch(fail);
+      if (intoVault) {
+        if (to === id) return;
+        void vault.move(id, to ? dirFor(to) : '').catch(fail);
         if (to) setOpenFolder(to);
       } else setVaultErr('Из хранилища на телефон — отметкой 📱 в шапке заметки или в меню папки, не перетаскиванием');
       return;
     }
-    // облачную — в папку хранилища: забрать (и оставить на телефоне)
-    if (to !== null && to.startsWith('d:')) {
-      const dir = pathOfId(to);
+    // облачную — в хранилище (в папку или под заметку): забрать (и оставить на телефоне)
+    if (to !== null && (to.startsWith('d:') || to.startsWith('v:'))) {
+      const dir = dirFor(to);
       void takeToVault([id], () => dir, true);
+      if (to.startsWith('v:')) setOpenFolder(to);
       return;
     }
     if (from === CLOUD) from = null;
@@ -407,8 +489,22 @@ function Desktop() {
   storeRef.current = store;
   // переименовали файл хранилища — id другой: вкладки и раскрытые папки — следом
   renamedRef.current = (from, to) => {
+    // открытая заметка сменила id (переименовали, папка стала заметкой) — редактор откроется
+    // заново; печатали в нём — вернуть курсор на место, иначе следующие буквы уходят в никуда
+    const dom = from === target?.id ? document.querySelector<HTMLElement>('.dk-page .cm-editor') : null;
+    const view = dom && dom.contains(document.activeElement) ? EditorView.findFromDOM(dom) : null;
+    const head = view?.state.selection.main.head;
     setTabs((list) => list.map((t) => ({ ...t, hist: t.hist.map((h) => (h.id === from ? { ...h, id: to } : h)) })));
     setOpen((o) => o.map((x) => (x === from ? to : x)));
+    if (head !== undefined) {
+      setTimeout(() => {
+        const d = document.querySelector<HTMLElement>('.dk-page .cm-editor');
+        const v = d && EditorView.findFromDOM(d);
+        if (!v || document.activeElement?.closest('input, textarea')) return;
+        v.focus();
+        v.dispatch({ selection: { anchor: Math.min(head, v.state.doc.length) } });
+      }, 60);
+    }
   };
 
   // --- быстрые заметки: ★ и кнопка на микрофоне (команды окна, ./native.ts) ---
@@ -619,6 +715,25 @@ function Desktop() {
     ];
     menu({ ...at, preventDefault() {}, stopPropagation() {} } as unknown as MouseEvent, items);
   }
+  /** «Сделать дочерней к…»: соседи по папке (там же, где заметка) — выбрать родителя. */
+  function childMenu(at: { clientX: number; clientY: number }, id: string, from: string | null) {
+    const here = from
+      ? treeRelations.filter((r) => !r.deleted && r.type === 'child' && r.from === from).map((r) => r.to)
+      : live.filter((n) => !treeRelations.some((r) => !r.deleted && r.type === 'child' && r.to === n.id)).map((n) => n.id);
+    const vaultSide = inVault(id);
+    const list = here
+      .map((x) => index.byId.get(x))
+      .filter((n): n is Note => !!n && n.id !== id && n.type !== 'folder' && !treeHide.has(n.id) && (vaultSide ? n.id.startsWith('v:') : !inVault(n.id) && !isExt(n.id)))
+      .filter((n) => showAll || shown.has(n.id))
+      .sort((a, b) => (a.title || '').localeCompare(b.title || '', 'ru'));
+    const items: MenuItem[] = list.length
+      ? [
+          ...list.slice(0, 40).map((n) => ({ label: n.title || 'Без названия', icon: '📄', run: () => move(id, from, n.id) })),
+          ...(list.length > 40 ? [{ label: `ещё ${list.length - 40} — перетащите мышью на нужную`, icon: '…', disabled: true, run: () => {} }] : []),
+        ]
+      : [{ label: 'Рядом нет заметок — перетащите мышью на нужную', icon: '…', disabled: true, run: () => {} }];
+    menu({ ...at, preventDefault() {}, stopPropagation() {} } as unknown as MouseEvent, items);
+  }
   function treeMenu(e: React.MouseEvent, node: { id: string; folder: boolean; parent: string | null } | null) {
     const at = { clientX: e.clientX, clientY: e.clientY };
     if (!node) {
@@ -707,9 +822,26 @@ function Desktop() {
         },
       ]);
     }
+    // родитель и дочерние: у заметки хранилища и облачной (у файла PDF — нет)
+    const canKids = n.id.startsWith('v:') || (!inVault(n.id) && n.id !== CLOUD);
+    const grand = node.parent && node.parent !== CLOUD ? parentOf(node.parent) : null;
+    const family: MenuItem[] = canKids
+      ? [
+          'sep',
+          { label: 'Новая дочерняя заметка', icon: '↳', run: () => createNote(false, n.id) },
+          { label: 'Сделать дочерней к…', icon: '⤵', run: () => setTimeout(() => childMenu(at, n.id, node.parent), 0) },
+          {
+            label: 'Поднять на уровень выше',
+            icon: '⤴',
+            disabled: !node.parent || node.parent === CLOUD || node.parent === EXTDIR,
+            run: () => move(n.id, node.parent, grand),
+          },
+        ]
+      : [];
     menu(e, [
       { label: 'Открыть', icon: '📄', run: () => go({ id: n.id }) },
       { label: 'Открыть в новой вкладке', icon: '⧉', keys: 'Ctrl+щелчок', run: () => go({ id: n.id }, true) },
+      ...family,
       'sep',
       ...common,
       { label: 'Скопировать ссылку [[…]]', icon: '🔗', run: () => copyText(`[[${n.title}]]`), disabled: !n.title },
@@ -724,7 +856,7 @@ function Desktop() {
         label: 'Удалить',
         icon: '🗑',
         danger: true,
-        run: () => confirm(`Удалить «${n.title || 'Без названия'}»?${inVault(n.id) ? ' (в корзину хранилища)' : ''}`) && store.remove(n.id),
+        run: () => void removeNote(n.id),
       },
     ]);
   }
@@ -848,6 +980,7 @@ function Desktop() {
           searchRef={searchRef}
           relations={treeRelations}
           treeVisible={treeVisible}
+          treeHide={treeHide}
           iconOf={iconOf}
           filesOf={filesOf}
           phoneOf={phoneOf}
@@ -955,11 +1088,13 @@ function Desktop() {
                     : undefined
                 }
                 picking={!!picking && picking.tab === cur?.key}
-                onDelete={() => {
-                  store.remove(note.id);
-                  if (cur!.pos > 0) step(-1);
-                  else closeTab(cur!.key);
-                }}
+                onDelete={() =>
+                  void removeNote(note.id, true).then((done) => {
+                    if (!done) return;
+                    if (cur!.pos > 0) step(-1);
+                    else closeTab(cur!.key);
+                  })
+                }
               />
               </Guard>
               </>
@@ -1065,6 +1200,7 @@ function Sidebar({
   vaultErr,
   clearVaultErr,
   treeVisible,
+  treeHide,
   iconOf,
   filesOf,
   phoneOf,
@@ -1073,6 +1209,8 @@ function Sidebar({
   phoneOf: (n: Note) => PhoneMode | null;
   phoneBusy: string;
   treeVisible: Set<string>;
+  /** Не показывать в дереве: папки дочерних (`А/` рядом с `А.md`) — их содержимое под заметкой. */
+  treeHide: Set<string>;
   iconOf: (n: Note) => string;
   filesOf: Map<string, number>;
   vault: Vault;
@@ -1238,7 +1376,7 @@ function Sidebar({
         </>
       ) : (
         <FolderTree
-          notes={notes}
+          notes={treeHide.size ? notes.filter((n) => !treeHide.has(n.id)) : notes}
           relations={relations}
           visible={treeVisible}
           iconOf={iconOf}

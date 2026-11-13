@@ -218,6 +218,8 @@
 .dk-node.on { background: var(--accent-soft); }
 .dk-node.drop { background: var(--accent-soft); outline: 1px solid var(--accent); }
 .dk-caret { width: 14px; flex: none; color: var(--muted); font-size: 11px; text-align: center; }
+.dk-caret-btn { cursor: pointer; border-radius: 4px; }
+.dk-caret-btn:hover { color: var(--text, inherit); background: color-mix(in srgb, currentColor 12%, transparent); }
 .dk-folder .dk-node-title { font-weight: 600; }
 .dk-node-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: baseline; }
 .dk-node-title .type-badge { flex: none; }

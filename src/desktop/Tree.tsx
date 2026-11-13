@@ -128,7 +128,7 @@ export function FolderTree({ notes, relations, visible, isService, activeId, onO
         <button className="link-btn small" onClick={() => onCreate(null, 'folder')}>
           ＋ папка
         </button>
-        <span className="muted small">перетащите заметку на папку — переложить</span>
+        <span className="muted small">перетащите заметку на папку — переложить, на другую заметку — сделать дочерней</span>
       </div>
     </div>
   );
@@ -201,25 +201,48 @@ function Items({ parent, depth, path, ctx }: { parent: string | null; depth: num
       })}
       {items.slice(0, limit).map((n) => {
         const type = n.type ?? 'note';
+        // заметка с дочерними раскрывается, как папка; щелчок по названию — открыть её
+        const inner = t.split(t.kids.get(n.id) ?? []);
+        const kids = inner.folders.length + inner.items.length;
+        const isOpen = kids > 0 && openSet.has(n.id) && !path.includes(n.id);
         return (
+          <div key={n.id}>
           <div
-            key={n.id}
-            className={`dk-node dk-leaf ${n.id === activeId ? 'on' : ''}`}
+            className={`dk-node dk-leaf ${n.id === activeId ? 'on' : ''} ${over === n.id ? 'drop' : ''}`}
             style={pad}
             draggable
             onDragStart={drag(n.id, parent)}
+            onDragOver={dragOver(n.id)}
+            onDragLeave={() => setOver((o) => (o === n.id ? null : o))}
+            onDrop={drop(n.id)}
             onClick={(e) => onOpen(n.id, e.ctrlKey || e.metaKey)}
             onAuxClick={(e) => e.button === 1 && onOpen(n.id, true)}
             onContextMenu={(e) => onMenu(e, { id: n.id, folder: false, parent })}
             dir="auto"
           >
-            <span className="dk-caret" />
+            {kids ? (
+              <span
+                className="dk-caret dk-caret-btn"
+                title={isOpen ? 'Свернуть дочерние' : 'Показать дочерние'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(n.id);
+                }}
+              >
+                {isOpen ? '▾' : '▸'}
+              </span>
+            ) : (
+              <span className="dk-caret" />
+            )}
             <span className="dk-node-title">
               {iconOf?.(n) ? <span className="dk-node-icon">{iconOf(n)}</span> : type !== 'note' && <span className={`type-badge type-${type}`}>{TYPE_BADGE[type]}</span>}
               {n.title || 'Без названия'}
             </span>
             {filesOf?.get(n.id) ? <span className="dk-files-badge" title="Файлов в заметке">📎{filesOf.get(n.id)}</span> : null}
             {phoneOf?.(n) ? <span className="dk-files-badge" title={phoneOf(n) === 'files' ? 'На телефоне — с файлами' : 'На телефоне — только текст'}>📱</span> : null}
+            {kids ? <span className="dk-node-count" title="Дочерних">{kids}</span> : null}
+          </div>
+          {isOpen && <Items parent={n.id} depth={depth + 1} path={[...path, n.id]} ctx={ctx} />}
           </div>
         );
       })}
