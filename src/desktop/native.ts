@@ -32,6 +32,13 @@ export interface QtLink {
   vaultReveal: (path: string) => void;
   vaultUpload: (s: string) => void;
   vaultDownload: (s: string) => void;
+  openFiles: { connect: (cb: () => void) => void };
+  extPending: (cb: (s: string) => void) => void;
+  extRead: (path: string, cb: (s: string) => void) => void;
+  extWrite: (s: string, cb: (s: string) => void) => void;
+  extRename: (s: string, cb: (s: string) => void) => void;
+  extMove: (s: string, cb: (s: string) => void) => void;
+  extReveal: (path: string) => void;
   voice: (s: string) => void;
   process: (s: string) => void;
   mics: (cb: (s: string) => void) => void;
@@ -107,6 +114,19 @@ export function attachNative(l: QtLink) {
     const c = parse<{ op: string }>(s);
     if (c) for (const cb of commandListeners) cb(c.op);
   });
+  // «Открыть с помощью»: файлы, просившие открыться до загрузки страницы, тоже ждут в окне
+  l.openFiles?.connect(() => void pullOpen());
+  void pullOpen();
+}
+
+const openListeners = new Set<(files: ExtOpen[]) => void>();
+let openQueue: ExtOpen[] = [];
+async function pullOpen() {
+  if (!link?.extPending) return;
+  const got = await ask<ExtOpen[]>((l, d) => l.extPending(d)).catch(() => []);
+  if (!got.length) return;
+  if (openListeners.size) for (const cb of openListeners) cb(got);
+  else openQueue.push(...got); // окно ещё не подписалось — отдать, когда подпишется
 }
 
 /** Откуда писать: имя источника PipeWire, `mic` — по умолчанию, `monitor` — звук компьютера. */
@@ -129,6 +149,38 @@ function ask<T>(fn: (l: QtLink, done: (s: string) => void) => void): Promise<T> 
 }
 
 /** Хранилище-папка на компьютере: что открыто, список, чтение, запись, перемещение, корзина. */
+/** .md вне хранилища, открытый из системы: путь и — если он всё же в хранилище — путь там. */
+export interface ExtOpen {
+  path: string;
+  vault: string | null;
+}
+export interface ExtFile {
+  path: string;
+  text: string;
+  mtime: number;
+  /** false — не UTF-8: показать можно, записывать окно откажется. */
+  utf8: boolean;
+}
+
+/** .md вне хранилища — правится на месте (baza.py ext*). */
+export const extApi = {
+  read: (path: string) => ask<ExtFile>((l, d) => l.extRead(path, d)),
+  write: (path: string, text: string, mtime: number) => ask<{ mtime: number }>((l, d) => l.extWrite(JSON.stringify({ path, text, mtime }), d)),
+  rename: (path: string, name: string) => ask<{ path: string }>((l, d) => l.extRename(JSON.stringify({ path, name }), d)),
+  /** Переложить в хранилище (dir — папка в нём): путь там. */
+  move: (path: string, dir: string) => ask<{ path: string }>((l, d) => l.extMove(JSON.stringify({ path, dir }), d)),
+  reveal: (path: string) => link?.extReveal(path),
+  onOpen: (cb: (files: ExtOpen[]) => void) => {
+    openListeners.add(cb);
+    if (openQueue.length) {
+      const q = openQueue;
+      openQueue = [];
+      cb(q);
+    }
+    return () => void openListeners.delete(cb);
+  },
+};
+
 export const vaultApi = {
   info: () => ask<VaultInfo>((l, d) => l.vaultInfo(d)),
   choose: () => ask<VaultInfo>((l, d) => l.vaultChoose(d)),

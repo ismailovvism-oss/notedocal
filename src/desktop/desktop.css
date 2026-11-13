@@ -441,3 +441,23 @@
 }
 .dk-chip.on { background: var(--accent-soft); color: var(--text); border-color: var(--accent); }
 .dk-sort { border: none; background: none; color: var(--muted); font: inherit; font-size: 12px; margin-inline-start: auto; }
+
+/* .md вне хранилища (./useExternal.ts): где лежит и что с ним можно */
+.dk-ext-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #4a7) 10%, transparent);
+  font-size: 13px;
+}
+.dk-ext-bar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 260px;
+}

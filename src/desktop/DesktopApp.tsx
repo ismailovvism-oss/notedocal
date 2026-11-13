@@ -26,13 +26,14 @@ import { PropsView } from '../components/Props';
 import { NotePane, type PaneFocus } from './NotePane';
 import { sendBridge, useBridgeSync, type BridgeStatus } from './bridge';
 import { Guard } from './Guard';
-import { native, vaultApi } from './native';
+import { extApi, native, vaultApi, type ExtOpen } from './native';
 import { MenuHost, useMenu, type MenuItem } from './Menu';
 import { FileView, fileIcon } from './FileView';
 import { useVault, type Vault } from './useVault';
 import { usePhoneSync } from './usePhoneSync';
 import { phoneMode, type PhoneMode, type VaultSync } from '../lib/kb/phone';
 import { dirName, inVault, pathOfId } from '../lib/kb/vault';
+import { extPath, isExt, useExternal } from './useExternal';
 
 interface Target extends PaneFocus {
   id: string;
@@ -50,8 +51,12 @@ interface Tab {
 const PAGE = 200;
 /** Облачные заметки (notedocal) при открытом хранилище — отдельной папкой дерева. */
 const CLOUD = 'c:облако';
+/** Папка дерева «📄 Открытые файлы» — .md вне хранилища (./useExternal.ts). */
+const EXTDIR = 'x:';
+// ключ вкладки — неповторимый и после перезапуска: вкладки сохраняются (dk.tabs), а счётчик с нуля
+// давал новой вкладке ключ сохранённой — открывалась и закрывалась не та
 let seq = 0;
-const newTab = (t: Target): Tab => ({ key: `t${++seq}`, hist: [t], pos: 0 });
+const newTab = (t: Target): Tab => ({ key: `t${Date.now().toString(36)}-${++seq}`, hist: [t], pos: 0 });
 
 export default function DesktopApp() {
   return (
@@ -74,13 +79,17 @@ function Desktop() {
   const vault = useVault((a, b) => renamedRef.current(a, b));
   const [vaultErr, setVaultErr] = useState('');
   const fail = useCallback((e: unknown) => setVaultErr((e as Error).message), []);
-  /** Правка по адресу: заметка хранилища — в свой файл, облачная — в notedocal. */
+  // .md вне хранилища, открытые из системы: правятся на месте
+  const ext = useExternal((a, b) => renamedRef.current(a, b), setVaultErr);
+  /** Правка по адресу: заметка хранилища — в свой файл, открытый файл — в него же, облачная — в notedocal. */
   const store = useMemo(
     () => ({
-      update: (id: string, patch: Partial<Note>) => (inVault(id) ? void vault.update(id, patch).catch(fail) : actions.update(id, patch)),
-      remove: (id: string) => (inVault(id) ? void vault.remove(id).catch(fail) : actions.remove(id)),
+      update: (id: string, patch: Partial<Note>) =>
+        inVault(id) ? void vault.update(id, patch).catch(fail) : isExt(id) ? void ext.update(id, patch).catch(fail) : actions.update(id, patch),
+      // открытый файл «удалить» — только убрать из списка: сам файл лежит, где лежал
+      remove: (id: string) => (inVault(id) ? void vault.remove(id).catch(fail) : isExt(id) ? ext.forget(id) : actions.remove(id)),
     }),
-    [vault, actions, fail],
+    [vault, ext, actions, fail],
   );
   // облачные копии заметок хранилища («📱 на телефон») в «Базе» не показываем: заметка есть файлом
   const cloudLive = useMemo(
@@ -90,22 +99,24 @@ function Desktop() {
   const phone = usePhoneSync(vault, notes, setNotes, relations, relActions.add, status === 'есть');
   /** Режим «📱» заметки хранилища: свой или папки. */
   const phoneOf = useCallback((n: Note) => (n.vault && !n.vault.mime ? phoneMode(n, phone.folders) : null), [phone.folders]);
-  const live = useMemo(
-    () =>
-      vault.info
-        ? [...vault.notes, { id: CLOUD, title: '☁ notedocal', body: '', type: 'folder' as const, date: null, createdAt: 0, updatedAt: 0 }, ...cloudLive]
-        : cloudLive,
-    [vault.info, vault.notes, cloudLive],
-  );
+  const live = useMemo(() => {
+    const extPart = ext.notes.length
+      ? [{ id: EXTDIR, title: '📄 Открытые файлы', body: '', type: 'folder' as const, date: null, createdAt: 0, updatedAt: 0 }, ...ext.notes]
+      : [];
+    return vault.info
+      ? [...vault.notes, ...extPart, { id: CLOUD, title: '☁ notedocal', body: '', type: 'folder' as const, date: null, createdAt: 0, updatedAt: 0 }, ...cloudLive]
+      : [...extPart, ...cloudLive];
+  }, [vault.info, vault.notes, cloudLive, ext.notes]);
   // связи для дерева: папки хранилища по путям, облачное — внутри ☁
   const treeRelations = useMemo(() => {
-    if (!vault.info) return relations;
+    const toExt: Relation[] = ext.notes.map((n) => ({ id: `xr:${n.id}`, from: EXTDIR, to: n.id, type: 'child', position: 0, createdAt: 0, updatedAt: 0 }));
+    if (!vault.info) return [...toExt, ...relations];
     const hasParent = new Set(relations.filter((r) => !r.deleted && r.type === 'child').map((r) => r.to));
     const toCloud: Relation[] = cloudLive
       .filter((n) => !hasParent.has(n.id))
       .map((n) => ({ id: `cr:${n.id}`, from: CLOUD, to: n.id, type: 'child', position: 0, createdAt: 0, updatedAt: 0 }));
-    return [...vault.relations, ...toCloud, ...relations];
-  }, [vault.info, vault.relations, relations, cloudLive]);
+    return [...vault.relations, ...toExt, ...toCloud, ...relations];
+  }, [vault.info, vault.relations, relations, cloudLive, ext.notes]);
   const index = useMemo(() => buildIndex(live), [live]);
   useEffect(() => {
     const t = setTimeout(() => void persistParse(), 2000);
@@ -120,7 +131,7 @@ function Desktop() {
     const why = new Map<string, ScopeWhy>();
     for (const n of live) {
       // своё, из хранилища, — всегда рабочее (кроме спрятанного отметкой)
-      if (inVault(n.id) || n.id === CLOUD) why.set(n.id, { shown: n.inBase !== false, why: n.inBase === false ? 'отметка' : '' });
+      if (inVault(n.id) || n.id === CLOUD || n.id.startsWith(EXTDIR)) why.set(n.id, { shown: n.inBase !== false, why: n.inBase === false ? 'отметка' : '' });
       else why.set(n.id, scopeOf(n, folders.get(n.id), hiddenFolders));
     }
     return why;
@@ -134,7 +145,7 @@ function Desktop() {
 
   const isService = useCallback(
     (fid: string) => {
-      if (inVault(fid) || fid === CLOUD) return false;
+      if (inVault(fid) || fid === CLOUD || fid === EXTDIR) return false;
       const hidden = new Set(hiddenFolders.map((x) => x.trim().toLowerCase()));
       return [index.byId.get(fid)?.title ?? '', ...(folders.get(fid) ?? [])].some((t) => hidden.has(t.trim().toLowerCase()));
     },
@@ -151,6 +162,14 @@ function Desktop() {
   // --- вкладки ---
   const [tabs, setTabs] = useLocalStorage<Tab[]>('dk.tabs', []);
   const [active, setActive] = useLocalStorage<string>('dk.active', '');
+  // сохранённые до 13.11.2026 могли повторять ключ — развести
+  useEffect(() => {
+    const seen = new Set<string>();
+    if (!tabs.some((t) => seen.has(t.key) || !seen.add(t.key))) return;
+    const keys = new Set<string>();
+    setTabs((l) => l.map((t) => (keys.has(t.key) ? { ...t, key: newTab(t.hist[0]).key } : (keys.add(t.key), t))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const cur = tabs.find((t) => t.key === active) ?? tabs[0];
   const target = cur?.hist[cur.pos];
 
@@ -158,17 +177,20 @@ function Desktop() {
   const go = useCallback(
     (t: Omit<Target, 'n'>, inNew = false) => {
       const tt = { ...t, n: ++seq };
+      // новая вкладка — ключ заранее, не внутри обновления списка (оно может выполниться дважды)
+      if (inNew || !tabs.length) {
+        const tab = newTab(tt);
+        setTabs((list) => [...list, tab]);
+        setActive(tab.key);
+        return;
+      }
       setTabs((list) => {
         const c = list.find((x) => x.key === active) ?? list[0];
-        if (!c || inNew) {
-          const tab = newTab(tt);
-          setActive(tab.key);
-          return [...list, tab];
-        }
+        if (!c) return [...list, newTab(tt)];
         return list.map((x) => (x.key === c.key ? { ...x, hist: [...x.hist.slice(0, x.pos + 1), tt].slice(-50), pos: Math.min(x.pos + 1, 49) } : x));
       });
     },
-    [active, setTabs, setActive],
+    [active, tabs.length, setTabs, setActive],
   );
   const step = (d: number) =>
     cur && setTabs((list) => list.map((x) => (x.key === cur.key ? { ...x, pos: Math.max(0, Math.min(x.hist.length - 1, x.pos + d)) } : x)));
@@ -338,6 +360,11 @@ function Desktop() {
   /** Перенести заметку или папку из папки from в to (null — корень). */
   function move(id: string, from: string | null, to: string | null) {
     if (from === to) return;
+    if (isExt(id)) {
+      if (vault.info && (to === null || to.startsWith('d:'))) void extToVault(id, to ? pathOfId(to) : '');
+      else setVaultErr('Открытый файл можно переложить только в папку хранилища');
+      return;
+    }
     if (inVault(id)) {
       if (to === null || to.startsWith('d:')) {
         void vault.move(id, to ? pathOfId(to) : '').catch(fail);
@@ -410,6 +437,29 @@ function Desktop() {
   }
   const quickRef = useRef(quickNote);
   quickRef.current = quickNote;
+
+  // --- .md из системы («Открыть с помощью → База знаний») ---
+  const openExtRef = useRef<(files: ExtOpen[]) => void>(() => {});
+  openExtRef.current = (files) => {
+    for (const f of files) {
+      // лежит в хранилище — открыть как обычную заметку
+      if (f.vault) go({ id: 'v:' + f.vault }, true);
+      else void ext.open(f.path).then((id) => go({ id }, true)).catch(fail);
+    }
+  };
+  useEffect(() => extApi.onOpen((files) => openExtRef.current(files)), []);
+  /** Открытый файл — в хранилище (файл переезжает), дальше это обычная заметка хранилища. */
+  async function extToVault(id: string, dir: string) {
+    try {
+      const { path } = await extApi.move(extPath(id), dir);
+      await vault.refresh();
+      ext.dropped(id);
+      renamedRef.current(id, 'v:' + path);
+      setVaultErr(`Переложено в хранилище: ${path}`);
+    } catch (e) {
+      fail(e);
+    }
+  }
   const noteRef = useRef<string | undefined>(undefined);
   useEffect(
     () =>
@@ -584,7 +634,20 @@ function Desktop() {
       { label: 'Переименовать', icon: '✏️', run: () => renameNote(n.id) },
       { label: 'Переложить в папку…', icon: '↪', run: () => setTimeout(() => moveMenu(at, n.id, node.parent), 0) },
     ];
-    const cloud = !inVault(n.id) && n.id !== CLOUD && !!vault.info;
+    const cloud = !inVault(n.id) && n.id !== CLOUD && !n.id.startsWith(EXTDIR) && !!vault.info;
+    if (n.id === EXTDIR) return menu(e, [{ label: 'Убрать все из списка (файлы останутся на месте)', icon: '✕', run: () => ext.notes.forEach((x) => ext.forget(x.id)) }]);
+    if (isExt(n.id)) {
+      return menu(e, [
+        { label: 'Открыть', icon: '📄', run: () => go({ id: n.id }) },
+        { label: 'Открыть в новой вкладке', icon: '⧉', keys: 'Ctrl+щелчок', run: () => go({ id: n.id }, true) },
+        'sep',
+        { label: 'Переложить в хранилище', icon: '⬇', run: () => void extToVault(n.id, ''), disabled: !vault.info },
+        { label: 'Показать в папке', icon: '📂', run: () => extApi.reveal(extPath(n.id)) },
+        { label: 'Скопировать ссылку [[…]]', icon: '🔗', run: () => copyText(`[[${n.title}]]`), disabled: !n.title },
+        'sep',
+        { label: 'Убрать из списка (файл останется на месте)', icon: '✕', run: () => ext.forget(n.id) },
+      ]);
+    }
     const take: MenuItem[] = cloud
       ? node.folder
         ? [
@@ -861,6 +924,20 @@ function Desktop() {
             ) : note && target?.file && note.attachments?.some((a) => a.id === target.file) ? (
               <FileView note={note} file={note.attachments.find((a) => a.id === target.file)!} onBack={() => step(-1)} />
             ) : note ? (
+              <>
+              {isExt(note.id) && (
+                <div className="dk-ext-bar">
+                  <span title={extPath(note.id)}>📄 Файл вне хранилища: {extPath(note.id)} — правки пишутся прямо в него</span>
+                  <button className="link-btn" onClick={() => extApi.reveal(extPath(note.id))}>
+                    Показать в папке
+                  </button>
+                  {vault.info && (
+                    <button className="link-btn" onClick={() => void extToVault(note.id, '')}>
+                      Переложить в хранилище
+                    </button>
+                  )}
+                </div>
+              )}
               <Guard key={`${cur!.key}-${note.id}-${target!.n}`}>
               <NotePane
                 note={note}
@@ -885,6 +962,7 @@ function Desktop() {
                 }}
               />
               </Guard>
+              </>
             ) : (
               <div className="dk-empty">
                 <p>{loaded ? 'Откройте заметку слева или создайте новую.' : 'Поднимаю заметки…'}</p>
