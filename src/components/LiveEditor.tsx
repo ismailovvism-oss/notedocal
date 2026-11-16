@@ -239,8 +239,15 @@ export default function LiveEditor({
           if (at < 0) return null;
           return { before: doc.slice(Math.max(0, at - 1), at), after: doc.slice(at + find.length, at + find.length + 1) };
         },
-        remark: () => {
-          const res = remarkAt(view.state.doc.toString(), view.state.selection.main.head);
+        posAtDOM: (el) => {
+          try {
+            return view.posAtDOM(el);
+          } catch {
+            return null;
+          }
+        },
+        remark: (pos) => {
+          const res = remarkAt(view.state.doc.toString(), pos ?? view.state.selection.main.head);
           if ('existing' in res) {
             // уже есть — выделить его текст внутри скобок: печатай, чтобы заменить
             const r = res.existing;

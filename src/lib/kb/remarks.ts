@@ -90,8 +90,12 @@ const plain = (s: string) =>
     .replace(/\{>>[\s\S]*?<<\}/g, '')
     .replace(/\{(==|\+\+|--)([\s\S]*?)(==|\+\+|--)\}/g, '$2')
     .replace(/\{~~([\s\S]*?)~>([\s\S]*?)~~\}/g, '$2')
-    .replace(/^\s*(#{1,6}\s|>\s?(\[![^\]]*\][+-]?\s*)?|[-*+]\s|\d+[.)]\s)/, '')
+    .split('\n')
+    .map((l) => l.replace(/^\s*(#{1,6}\s|>\s?(\[![^\]]*\][+-]?\s*)?|([-*+]|\d+[.)])\s+(\[[ xX]\]\s)?)/, ''))
+    .join(' ')
+    .replace(/<[^>\n]+>/g, '')
     .replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, '$2')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[*_~=`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -129,7 +133,7 @@ export function parseRemarks(doc: string): Remark[] {
     while (k >= 0 && !L[k].text.trim()) k--;
     let start = k;
     while (start > 0 && L[start - 1].text.trim() && !parAt(L, start - 1)) start--;
-    const anchor = k >= 0 ? plain(L.slice(start, k + 1).map((l) => l.text).join(' ')) : '';
+    const anchor = k >= 0 ? plain(L.slice(start, k + 1).map((l) => l.text).join('\n')) : '';
     out.push({
       kind: 'par',
       n: 0,
@@ -186,6 +190,21 @@ export function writeGeneral(doc: string, items: string[]): Change {
   return { from: end, to: end, insert: sep + body + '\n' };
 }
 
+/** Где в тексте блок общих замечаний (для просмотра: сам блок не показываем). */
+export function generalRange(doc: string): { from: number; to: number } | null {
+  const L = linesOf(doc);
+  const g = genBlock(L);
+  return g ? { from: L[g.a].from, to: L[g.b].to } : null;
+}
+
+/** Замечание к блоку текста [from, to): уже стоит сразу за ним — оно; нет — куда вставить новое. */
+export function remarkAfter(doc: string, from: number, to: number, text: string): Change {
+  const end = from + doc.slice(from, to).trimEnd().length;
+  return { from: end, to: end, insert: `\n\n{>>${cleanText(text)}<<}` };
+}
+
+const cleanText = (t: string) => t.replace(/\n\s*\n+/g, '\n').replace(/<<\}/g, '<< }').trim();
+
 /** Общие замечания списком (без номеров). */
 export function generalItems(doc: string): string[] {
   return (genBlock(linesOf(doc))?.items ?? []).map((x) => x.text);
@@ -223,7 +242,7 @@ export function editRemark(doc: string, r: Remark, text: string): Change {
     items[idx] = text;
     return writeGeneral(doc, items);
   }
-  return { from: r.from, to: r.to, insert: `{>>${text.replace(/\n{2,}/g, '\n').trim()}<<}` };
+  return { from: r.from, to: r.to, insert: `{>>${cleanText(text)}<<}` };
 }
 
 /** Все замечания одним куском — отдать Claude. */
@@ -234,4 +253,11 @@ export function remarksText(list: Remark[]): string {
 /** Применить изменение к строке (для тестов и записи без редактора). */
 export function apply(doc: string, c: Change): string {
   return doc.slice(0, c.from) + c.insert + doc.slice(c.to);
+}
+
+/** Пустые замечания `{>><<}` (нажали ✎ и ничего не написали) в файл не идут: строка убирается
+ *  вместе с пустой строкой перед ней. */
+export function dropEmptyRemarks(doc: string): string {
+  if (!doc.includes('{>>')) return doc;
+  return doc.replace(/(?:\n[ \t]*)?\n[ \t]*\{>>\s*<<\}[ \t]*(?=\n|$)/g, '').replace(/^[ \t]*\{>>\s*<<\}[ \t]*\n?/, '');
 }

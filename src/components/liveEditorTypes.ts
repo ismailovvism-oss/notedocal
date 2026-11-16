@@ -27,7 +27,9 @@ export interface LiveEditorHandle {
   selected: () => string;
   /** Замечание к абзацу под курсором (src/lib/kb/remarks.ts): нет — завести `{>>|<<}` после
    *  абзаца, есть — выделить его текст. */
-  remark: () => void;
+  remark: (pos?: number) => void;
+  /** Место в тексте, где начинается этот элемент редактора (строка под мышью); null — не из него. */
+  posAtDOM: (el: HTMLElement) => number | null;
   /** Применить правку текста (замечания из панели); cursor — куда поставить курсор. */
   apply: (change: { from: number; to: number; insert: string }, cursor?: number) => void;
   /** Курсор на место и показать его. */

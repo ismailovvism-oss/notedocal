@@ -492,13 +492,13 @@
 .cm-crit-ins, .kb-crit-ins { color: #2e8b57; text-decoration: underline; text-decoration-color: color-mix(in srgb, #2e8b57 50%, transparent); }
 .cm-crit-del, .kb-crit-del { color: #c0392b; text-decoration: line-through; }
 .kb-remark {
-  display: block;
-  margin: 4px 0;
-  padding: 4px 10px;
-  border-inline-start: 3px solid #e8a33d;
-  border-radius: 4px;
-  background: color-mix(in srgb, #e8a33d 14%, transparent);
-  font-size: 0.94em;
+  padding: 1px 7px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, #e8a33d 55%, var(--border));
+  background: color-mix(in srgb, #e8a33d 12%, var(--surface));
+  font-size: 0.92em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 /* Хемингуэй: попытка стереть — красная вспышка */
@@ -510,44 +510,203 @@
 .dk-tool.on { border-color: var(--accent); background: var(--accent-soft); }
 .dk-modes { flex-wrap: wrap; }
 
-/* просмотр рядом с правкой */
-.dk-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
-.dk-preview {
-  border-inline-start: 1px solid var(--border);
-  padding-inline-start: 20px;
-  font-size: 1.04rem;
-  line-height: 1.65;
-  overflow-wrap: anywhere;
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 140px);
-  overflow-y: auto;
-}
-
-/* список замечаний справа */
-.dk-remarks { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.dk-remarks li { display: flex; gap: 4px; align-items: flex-start; }
-.dk-remark-go {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 6px;
-  text-align: start;
+/* ── вид заметки: правка, рядом, чтение (переключатель в шапке заметки) ── */
+.dk-viewbar { display: flex; align-items: center; gap: 4px; }
+.dk-view-seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.dk-view-seg button {
+  border: none;
   background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 6px;
-  font-size: 12.5px;
-  color: var(--text);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 5px 9px;
   cursor: pointer;
 }
-.dk-remark-go:hover { border-color: var(--accent); }
-.dk-remark-go > span:nth-child(2) { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.dk-remark-go > span:nth-child(3) { grid-column: 2; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.dk-remarks li.gen .dk-remark-go { border-style: dashed; }
-.dk-remark-n { font-weight: 600; color: #c4821f; }
-.dk-remark-x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 2px 4px; }
-.dk-remark-x:hover { color: var(--danger, #d33); }
-/* направление абзаца в просмотре — по его первому сильному знаку: арабский справа */
+.dk-view-seg button + button { border-inline-start: 1px solid var(--border); }
+.dk-view-seg button:hover { color: var(--text); background: var(--surface-2); }
+.dk-view-seg button.on { background: var(--accent-soft); color: var(--text); }
+.dk-icon.hem { color: var(--danger, #c0392b); }
+.dk-remark-chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+  padding: 5px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dk-remark-chip:hover { border-color: #e8a33d; color: var(--text); }
+.dk-remark-chip.has { border-color: #e8a33d; background: color-mix(in srgb, #e8a33d 16%, transparent); color: var(--text); font-weight: 600; }
+.dk-vsep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+
+/* рабочая область: одна колонка или две с границей, которая тянется */
+.dk-note.wide { max-width: 1500px; }
+.dk-work { position: relative; }
+.dk-work.both {
+  display: grid;
+  grid-template-columns: minmax(0, calc(var(--dk-ratio, 0.5) * 100%)) 14px minmax(0, 1fr);
+  align-items: start;
+}
+.dk-work.both.swap .dk-edit-col { order: 3; }
+.dk-work.both.swap .dk-divider { order: 2; }
+.dk-work.both.swap .dk-preview { order: 1; }
+.dk-work.read .dk-edit-col { display: none; }
+.dk-edit-col { position: relative; padding-inline-end: 34px; min-width: 0; }
+.dk-divider {
+  align-self: stretch;
+  min-height: 50vh;
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+.dk-divider::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+.dk-divider:hover::before, body.dk-dragging .dk-divider::before { background: var(--accent); }
+body.dk-dragging { cursor: col-resize; user-select: none; }
+.dk-stat { margin-top: 18px; padding-top: 8px; border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+
+/* кружок ✎ у абзаца — в правке (под мышью) и в просмотре */
+.ed-remark, .pv-btn {
+  position: absolute;
+  inset-inline-end: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.12s, color 0.12s, background 0.12s, opacity 0.12s;
+}
+.ed-remark:hover, .pv-btn:hover { border-color: #e8a33d; color: #c4821f; }
+.ed-remark.on, .pv-btn.on { background: #e8a33d; border-color: #e8a33d; color: #fff; }
+.pv-btn.open { background: var(--surface); border-color: var(--border); color: var(--muted); }
+
+/* просмотр: блоки с кружком, карточки замечаний, поле замечания */
+.dk .dk-preview { font-size: 1.04rem; line-height: 1.65; overflow-wrap: anywhere; min-width: 0; padding-top: 4px; }
+/* тот же вид, что в правке: заголовки, выделение, цитата */
+.dk .dk-preview :is(h1, h2, h3, h4) { font-weight: 650; line-height: 1.65; margin: 0; }
+.dk .dk-preview mark { background: color-mix(in srgb, var(--warn) 35%, transparent); border-radius: 3px; color: inherit; }
+.dk .dk-preview p { margin: 0; }
+.dk .dk-preview :is(ul, ol) { margin: 0; }
 .dk-preview :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th) { unicode-bidi: plaintext; text-align: start; }
+.pv-plain { padding-inline-end: 34px; }
+.pv-block { position: relative; padding-inline-end: 34px; border-inline-start: 3px solid transparent; margin-inline-start: -11px; padding-inline-start: 8px; border-radius: 2px; }
+.pv-block.marked { border-inline-start-color: #e8a33d; }
+.pv-block .pv-btn { top: 2px; opacity: 0; }
+.pv-block:hover .pv-btn, .pv-btn.on, .pv-btn.open { opacity: 1; }
+.pv-html > :first-child { margin-top: 0; }
+.pv-html > :last-child { margin-bottom: 0; }
+.pv-item { margin: 0 0 0.85em; }
+.pv-block.flash, .pv-note.flash { animation: pv-flash 1.4s ease-out; }
+@keyframes pv-flash {
+  0%, 35% { background: color-mix(in srgb, #e8a33d 28%, transparent); }
+  100% { background: transparent; }
+}
+.pv-note {
+  position: relative;
+  margin: 6px 34px 0 0;
+  margin-inline: 0 34px;
+  padding: 6px 28px 7px 10px;
+  border: 1px solid color-mix(in srgb, #e8a33d 55%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #e8a33d 12%, var(--surface));
+  font-size: 0.92em;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.pv-note-l { display: block; font-size: 11px; letter-spacing: 0.02em; color: #c4821f; }
+.pv-note-x, .dk-remark-x {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 6px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.pv-note-x:hover, .dk-remark-x:hover { color: var(--danger, #c0392b); background: color-mix(in srgb, currentColor 10%, transparent); }
+.pv-edit, .dk-remark-edit {
+  margin: 6px 0 0;
+  margin-inline-end: 34px;
+  padding: 8px;
+  border: 1px solid #e8a33d;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.dk-remark-edit { margin-inline-end: 0; margin-bottom: 6px; }
+.pv-edit textarea, .dk-remark-edit textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95em;
+  line-height: 1.45;
+  padding: 6px 8px;
+  outline: none;
+  box-sizing: border-box;
+}
+.pv-edit textarea:focus, .dk-remark-edit textarea:focus { border-color: var(--accent); }
+.pv-edit-row, .dk-remark-edit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.pv-edit-row button, .dk-remark-edit-row button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.pv-edit-row button:hover, .dk-remark-edit-row button:hover { border-color: var(--accent); }
+.pv-edit-row button.btn-primary, .dk-remark-edit-row button.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pv-edit-row button.danger { color: var(--danger, #c0392b); border-color: color-mix(in srgb, var(--danger, #c0392b) 45%, var(--border)); }
+.pv-empty { padding: 12px 0; }
+
+/* панель замечаний справа: карточки, как в md-редакторе */
+.dk-remark-group { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
+.dk-remark-card {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 6px 24px 7px 9px;
+  margin-bottom: 5px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.dk-remark-card:hover { border-color: #e8a33d; }
+.dk-remark-card.gen { border-style: dashed; }
+.dk-remark-at { font-size: 11px; color: var(--muted); margin-bottom: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.dk-remark-hint { margin: 8px 0 2px; line-height: 1.4; }
+.dk-block.ping { animation: dk-ping 0.9s ease-out; }
+@keyframes dk-ping {
+  0% { box-shadow: 0 0 0 2px #e8a33d; }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}

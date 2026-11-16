@@ -24,8 +24,8 @@ import { checkNewTag, tagCards } from '../lib/kb/tags';
 import { OWN_KEYS, fieldsOf, schemas } from '../lib/kb/schema';
 import type { ScopeWhy } from '../lib/kb/scope';
 import { onFlush } from './flush';
-import { generalItems, parseRemarks, remarksText, removeRemark, writeGeneral, type Remark } from '../lib/kb/remarks';
-import { renderMarkdown } from '../lib/markdown';
+import { dropEmptyRemarks, generalItems, parseRemarks, remarkAt, remarksText, removeRemark, writeGeneral, type Change, type Remark } from '../lib/kb/remarks';
+import { Preview } from './Preview';
 
 // не лениво: окно держит страницу открытой часами, а пересборка стирает старые куски —
 // догружаемый потом файл мог бы уже исчезнуть (так 02.11.2026 «Свойства» роняли страницу)
@@ -93,7 +93,7 @@ export function NotePane({
     note.versions ? { body: clean, versions: { ...note.versions, [note.currentVersion ?? 'оригинал']: clean } } : { body: clean };
   function save(text: string) {
     if (timer.current) clearTimeout(timer.current);
-    const clean = dropEmptyAnchors(text);
+    const clean = tidy(text);
     if (clean === saved.current) return;
     saved.current = clean;
     kb.updateNote(note.id, withVersion(clean));
@@ -110,7 +110,7 @@ export function NotePane({
     () => () => {
       if (timer.current) {
         clearTimeout(timer.current);
-        const clean = dropEmptyAnchors(bodyRef.current);
+        const clean = tidy(bodyRef.current);
         if (clean !== saved.current) kb.updateNote(note.id, withVersion(clean));
       }
     },
@@ -131,7 +131,54 @@ export function NotePane({
   const editor = useRef<LiveEditorHandle | null>(null);
   // из md-редактора: режим Хемингуэя и просмотр рядом — для всех заметок, запоминаются
   const [hem, setHem] = useLocalStorage<boolean>('dk.hemingway', false);
-  const [split, setSplit] = useLocalStorage<boolean>('dk.split', false);
+  // вид: только правка, правка и просмотр рядом, только чтение; колонки можно поменять местами,
+  // границу между ними — тянуть (двойной щелчок — поровну)
+  const [view, setView] = useLocalStorage<'edit' | 'both' | 'read'>('dk.view', 'edit');
+  const [swap, setSwap] = useLocalStorage<boolean>('dk.swap', false);
+  const [ratio, setRatio] = useLocalStorage<number>('dk.ratio', 0.5);
+  const work = useRef<HTMLDivElement>(null);
+  const dragSplit = (e: React.PointerEvent) => {
+    const box = work.current?.getBoundingClientRect();
+    if (!box) return;
+    e.preventDefault();
+    const rtl = getComputedStyle(work.current!).direction === 'rtl';
+    const move = (ev: PointerEvent) => {
+      let r = (ev.clientX - box.left) / box.width;
+      if (rtl) r = 1 - r;
+      setRatio(Math.min(0.75, Math.max(0.25, Math.round(r * 200) / 200)));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('dk-dragging');
+    };
+    document.body.classList.add('dk-dragging');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  const remarks = useMemo(() => parseRemarks(body), [body]);
+  // показать место замечания: и в правке, и в просмотре (там — с подсветкой)
+  const [jump, setJump] = useState<{ pos: number; n: number } | null>(null);
+  const jumpSeq = useRef(0);
+  const jumpTo = (pos: number) => {
+    if (view !== 'read') editor.current?.goto(pos);
+    setJump({ pos, n: ++jumpSeq.current });
+  };
+  // кружок ✎ у абзаца в правке — под мышью
+  const edWrap = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{ top: number; pos: number; has: boolean } | null>(null);
+  const overEditor = (e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('.ed-remark')) return;
+    const line = t.closest<HTMLElement>('.cm-line');
+    const h = editor.current;
+    if (!line || !h || !edWrap.current || !line.textContent?.trim() || line.classList.contains('cm-remark-line')) return;
+    const pos = h.posAtDOM(line);
+    if (pos === null) return;
+    const top = line.getBoundingClientRect().top - edWrap.current.getBoundingClientRect().top;
+    if (hover && hover.pos === pos && Math.abs(hover.top - top) < 1) return;
+    setHover({ top, pos, has: 'existing' in remarkAt(h.text(), pos) });
+  };
   const [voice, setVoice] = useState<{ id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null>(null);
   // с какого микрофона писать: mic — какой стоит в системе по умолчанию; выбор запоминается
   const [mic, setMic] = useLocalStorage<string>('dk.mic', 'mic');
@@ -215,7 +262,7 @@ export function NotePane({
   // --- Claude: очистить, связно, перевести — новая версия текста, как в быстрых заметках ---
   const [busy, setBusy] = useState('');
   async function claude(kind: 'clean' | 'connect' | 'translate', label: string, to?: string) {
-    const text = dropEmptyAnchors(body);
+    const text = tidy(body);
     if (!text.trim()) return setMsg('Пустая заметка — нечего обрабатывать');
     setBusy(label);
     setMsg('');
@@ -231,7 +278,7 @@ export function NotePane({
   }
   function pickVersion(name: string) {
     if (!note.versions?.[name] && note.versions?.[name] !== '') return;
-    const text = dropEmptyAnchors(body);
+    const text = tidy(body);
     const versions = { ...note.versions, [note.currentVersion ?? 'оригинал']: text };
     if (timer.current) clearTimeout(timer.current);
     saved.current = versions[name];
@@ -380,7 +427,7 @@ export function NotePane({
 
   return (
     <div
-      className={`dk-note ${dropping ? 'dk-dropping' : ''}`}
+      className={`dk-note ${dropping ? 'dk-dropping' : ''} ${view === 'both' ? 'wide' : ''}`}
       dir="auto"
       onDragOverCapture={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return;
@@ -460,6 +507,39 @@ export function NotePane({
           </span>
         )}
         <span className="dk-spacer" />
+        <div className="dk-viewbar" role="group" aria-label="Вид заметки">
+          <div className="dk-view-seg">
+            <button className={view === 'edit' ? 'on' : ''} title="Только правка" onClick={() => setView('edit')}>
+              ✏
+            </button>
+            <button className={view === 'both' ? 'on' : ''} title="Правка и просмотр рядом" onClick={() => setView('both')}>
+              ◫
+            </button>
+            <button className={view === 'read' ? 'on' : ''} title="Только чтение — с кружками ✎ для замечаний" onClick={() => setView('read')}>
+              📖
+            </button>
+          </div>
+          {view === 'both' && (
+            <button className="dk-icon" title="Поменять колонки местами" onClick={() => setSwap(!swap)}>
+              ⇄
+            </button>
+          )}
+          <button
+            className={`dk-icon ${hem ? 'on hem' : ''}`}
+            title={hem ? 'Режим Хемингуэя включён: стирать нельзя. Нажмите, чтобы выключить' : 'Режим Хемингуэя: стирать написанное нельзя — пиши вперёд, правь потом'}
+            onClick={() => setHem(!hem)}
+          >
+            ✒
+          </button>
+          <button
+            className={`dk-remark-chip ${remarks.length ? 'has' : ''}`}
+            title="Замечания к тексту — открыть список справа"
+            onClick={() => window.dispatchEvent(new CustomEvent('dk-open-block', { detail: 'remarks' }))}
+          >
+            ✎ {remarks.length || ''}
+          </button>
+          <span className="dk-vsep" />
+        </div>
         {scope?.why === 'отметка' && (
           <button
             className="dk-icon"
@@ -628,8 +708,26 @@ export function NotePane({
       {msg && <div className="dk-msg small">{msg}</div>}
       {picking && <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>}
 
-      <div className={split ? 'dk-split' : undefined}>
-      <div onContextMenu={textMenu}>
+      <div
+        className={`dk-work ${view} ${swap ? 'swap' : ''}`}
+        ref={work}
+        style={view === 'both' ? ({ '--dk-ratio': String(ratio) } as React.CSSProperties) : undefined}
+      >
+      <div className="dk-edit-col" ref={edWrap} onContextMenu={textMenu} onMouseMove={overEditor} onMouseLeave={() => setHover(null)}>
+      {hover && (
+        <button
+          className={`ed-remark ${hover.has ? 'on' : ''}`}
+          style={{ top: hover.top }}
+          title={hover.has ? 'Поправить замечание к этому абзацу' : 'Замечание к этому абзацу'}
+          onMouseDown={keep}
+          onClick={() => {
+            editor.current?.remark(hover.pos);
+            setHover(null);
+          }}
+        >
+          ✎
+        </button>
+      )}
       <LiveEditor
         key={note.id}
         hemingway={hem}
@@ -662,19 +760,31 @@ export function NotePane({
         ]}
       />
       </div>
-      {split && (
+      {view === 'both' && (
         <div
-          className="dk-preview"
-          dangerouslySetInnerHTML={{ __html: arabicRuns(renderMarkdown(body, { index: kb.index, noteId: note.id })) }}
-          onClick={(e) => {
-            const a = (e.target as HTMLElement).closest<HTMLElement>('.kb-link');
-            if (!a) return;
-            e.preventDefault();
-            const { target, anchor, heading } = a.dataset;
-            kb.open(target ? { name: target, anchor, heading } : { id: note.id, anchor, heading });
-          }}
+          className="dk-divider"
+          title="Потяните, чтобы изменить ширину колонок; двойной щелчок — поровну"
+          onPointerDown={dragSplit}
+          onDoubleClick={() => setRatio(0.5)}
         />
       )}
+      {view !== 'edit' && (
+        <Preview
+          body={body}
+          noteId={note.id}
+          index={kb.index}
+          remarks={remarks}
+          onApply={(c: Change) => editor.current?.apply(c)}
+          onOpenLink={({ target, anchor, heading }) => kb.open(target ? { name: target, anchor, heading } : { id: note.id, anchor, heading })}
+          onJumpEdit={view === 'both' ? (pos) => editor.current?.goto(pos) : undefined}
+          jump={jump}
+        />
+      )}
+      </div>
+      <div className="dk-stat muted small">
+        {body.length.toLocaleString('ru')} знаков · {(body.match(/[\p{L}\p{N}]+/gu)?.length ?? 0).toLocaleString('ru')} слов
+        {remarks.length ? ` · замечаний: ${remarks.length}` : ''}
+        {hem ? ' · ✒ режим Хемингуэя' : ''}
       </div>
       {toolsSlot &&
         createPortal(
@@ -696,11 +806,9 @@ export function NotePane({
             version={note.currentVersion ?? 'оригинал'}
             pickVersion={pickVersion}
             setMsg={setMsg}
-            remarks={parseRemarks(body)}
-            hem={hem}
-            setHem={setHem}
-            split={split}
-            setSplit={setSplit}
+            remarks={remarks}
+            jumpTo={jumpTo}
+            canCursor={view !== 'read'}
           />,
           toolsSlot,
         )}
@@ -757,10 +865,9 @@ const DROP_LIMIT = 20 * 1024 * 1024;
 
 const keep = (e: React.MouseEvent) => e.preventDefault();
 
-const AR = '\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff';
-const AR_RUN = new RegExp(`[${AR}](?:[${AR} \\t.,:;!?«»()\\-]*[${AR}])?`, 'g');
-/** Арабские куски в просмотре — в `<span class="ar">`: свой шрифт и кегль (как в правке). */
-const arabicRuns = (html: string) => html.replace(/>([^<]+)</g, (_, t: string) => '>' + t.replace(AR_RUN, '<span class="ar">$&</span>') + '<');
+/** Что уходит в базу: без пустых меток и пустых замечаний (их оставляют, когда передумали). */
+const tidy = (text: string) => dropEmptyRemarks(dropEmptyAnchors(text));
+
 
 /** Кнопка панели: не отнимает фокус у текста — выделение в редакторе остаётся. Отдельным
  *  компонентом, а не внутри Tools: панель перерисовывается 5 раз в секунду во время записи,
@@ -776,8 +883,23 @@ function B({ t, title, on, wide, active }: { t: React.ReactNode; title: string; 
 /** Блок панели инструментов: заголовок сворачивает; что свёрнуто — запоминается. */
 function Block({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   const [shut, setShut] = useLocalStorage<boolean>(`dk.tools.${id}`, false);
+  const box = useRef<HTMLElement>(null);
+  // открыть и показать блок по просьбе со страницы (кнопка «✎ N» в шапке заметки)
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent).detail !== id) return;
+      setShut(false);
+      setTimeout(() => box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
+      box.current?.classList.remove('ping');
+      void box.current?.offsetWidth;
+      box.current?.classList.add('ping');
+    };
+    window.addEventListener('dk-open-block', on);
+    return () => window.removeEventListener('dk-open-block', on);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   return (
-    <section className={`dk-block ${shut ? 'shut' : ''}`}>
+    <section ref={box} className={`dk-block ${shut ? 'shut' : ''}`}>
       <button className="dk-block-head" onClick={() => setShut(!shut)}>
         <span>{title}</span>
         <span className="dk-caret">{shut ? '▸' : '▾'}</span>
@@ -808,10 +930,8 @@ function Tools({
   pickVersion,
   setMsg,
   remarks,
-  hem,
-  setHem,
-  split,
-  setSplit,
+  jumpTo,
+  canCursor,
 }: {
   editor: React.MutableRefObject<LiveEditorHandle | null>;
   voice: { id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null;
@@ -831,10 +951,10 @@ function Tools({
   pickVersion: (name: string) => void;
   setMsg: (m: string) => void;
   remarks: Remark[];
-  hem: boolean;
-  setHem: (v: boolean) => void;
-  split: boolean;
-  setSplit: (v: boolean) => void;
+  /** Показать место замечания в правке и в просмотре. */
+  jumpTo: (pos: number) => void;
+  /** Курсор правки виден (не режим чтения): «к абзацу» ставит замечание у курсора. */
+  canCursor: boolean;
 }) {
   const h = () => editor.current;
   const [arScale, setArScale] = useLocalStorage<number>('dk.arScale', 1.3);
@@ -844,13 +964,49 @@ function Tools({
     const t = h()?.text() ?? '';
     return { t, r: parseRemarks(t).find((x) => x.n === r.n && x.kind === r.kind) };
   };
-  const addGeneral = () => {
-    const v = prompt('Общее замечание — ко всему тексту, не к абзацу')?.trim();
+  // общее замечание пишется и правится на месте: n — какое правим (null — новое)
+  const [gen, setGen] = useState<{ n: number | null; text: string } | null>(null);
+  const saveGen = () => {
     const e = h();
-    if (!v || !e) return;
+    if (!gen || !e) return setGen(null);
     const t = e.text();
-    e.apply(writeGeneral(t, [...generalItems(t), v]));
+    const items = generalItems(t);
+    const v = gen.text.trim();
+    if (gen.n === null) {
+      if (v) e.apply(writeGeneral(t, [...items, v]));
+    } else {
+      // номер общего замечания — его место в блоке (общие идут первыми, с единицы)
+      if (v) items[gen.n - 1] = v;
+      else items.splice(gen.n - 1, 1);
+      e.apply(writeGeneral(t, items));
+    }
+    setGen(null);
   };
+  const genField = (
+    <div className="dk-remark-edit">
+      <textarea
+        autoFocus
+        dir="auto"
+        placeholder="Замечание ко всему тексту…"
+        value={gen?.text ?? ''}
+        onChange={(e) => setGen({ n: gen?.n ?? null, text: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            saveGen();
+          } else if (e.key === 'Escape') setGen(null);
+        }}
+      />
+      <div className="dk-remark-edit-row">
+        <button className="btn-primary" onClick={saveGen}>
+          Сохранить
+        </button>
+        <button onClick={() => setGen(null)}>Отмена</button>
+      </div>
+    </div>
+  );
+  const general = remarks.filter((r) => r.kind === 'gen');
+  const toPara = remarks.filter((r) => r.kind === 'par');
   const menu = useMenu();
   /** Действие над словами — только когда они выделены. */
   const onWords = (a: Parameters<LiveEditorHandle['run']>[0]) => () => {
@@ -928,10 +1084,6 @@ function Tools({
           <B t="—" title="Черта-разделитель" on={() => h()?.insertAtCursor('\n\n---\n\n')} />
           <B t="%%" title="Скрытый текст (виден только в правке)" on={() => h()?.wrap('%%')} />
         </div>
-        <div className="dk-seg dk-modes">
-          <B t="✒ Хемингуэй" title="Стирать написанное нельзя: пиши вперёд, правь потом" on={() => setHem(!hem)} active={hem} />
-          <B t="◫ Рядом" title="Просмотр рядом с правкой" on={() => setSplit(!split)} active={split} />
-        </div>
         <div className="dk-seg">
           <span className="muted small">арабский:</span>
           <B t="ар −" title="Арабский мельче" on={() => setArScale(Math.max(0.8, Math.round((arScale - 0.1) * 10) / 10))} />
@@ -942,53 +1094,91 @@ function Tools({
 
       <Block id="remarks" title={`✎ Замечания${remarks.length ? ` · ${remarks.length}` : ''}`}>
         <div className="dk-list-tools">
-          <B wide t="✎ К абзацу" title="Замечание к абзацу, где курсор: строкой {>>…<<} сразу после него, в самом файле" on={() => h()?.remark()} />
-          <B wide t="＋ Общее" title="Замечание ко всему тексту: в блок %%замечания в конце файла" on={addGeneral} />
+          <B
+            wide
+            t="✎ К абзацу"
+            title={canCursor ? 'Замечание к абзацу, где курсор. Или кружок ✎ справа от абзаца' : 'В режиме чтения — кружок ✎ справа от абзаца'}
+            on={() => (canCursor ? h()?.remark() : setMsg('В режиме чтения нажмите кружок ✎ справа от нужного абзаца'))}
+          />
+          <B wide t="＋ Общее" title="Замечание ко всему тексту, не к абзацу" on={() => setGen({ n: null, text: '' })} />
         </div>
-        {remarks.length > 0 && (
+        {gen && gen.n === null && genField}
+        {remarks.length === 0 && !gen && (
+          <p className="dk-remark-hint muted small">
+            Замечаний нет. Наведите на абзац и нажмите ✎ — замечание ляжет в сам файл, сразу после абзаца.
+          </p>
+        )}
+        {general.length > 0 && (
           <>
-            <ol className="dk-remarks">
-              {remarks.map((r) => (
-                <li key={`${r.kind}-${r.n}`} className={r.kind}>
-                  <button
-                    className="dk-remark-go"
-                    title={r.kind === 'par' ? `К «${r.anchor}»` : 'Общее замечание'}
-                    onMouseDown={keep}
-                    onClick={() => {
-                      const { r: x } = fresh(r);
-                      if (x) h()?.goto(x.kind === 'par' ? (x.anchorAt ?? x.from) : x.from);
-                    }}
-                  >
-                    <span className="dk-remark-n">{r.n}</span>
-                    <span dir="auto">{r.text || '…'}</span>
-                    <span className="muted small" dir="auto">{r.kind === 'par' ? r.anchor : 'общее'}</span>
-                  </button>
+            <div className="dk-remark-group">Общие</div>
+            {general.map((r) =>
+              gen && gen.n === r.n ? (
+                <div key={r.n}>{genField}</div>
+              ) : (
+                <div key={r.n} className="dk-remark-card gen" onMouseDown={keep} onClick={() => setGen({ n: r.n, text: r.text })} title="Щёлкните, чтобы поправить">
+                  <div className="dk-remark-at">{r.n}. ко всему тексту</div>
+                  <div dir="auto">{r.text || '…'}</div>
                   <button
                     className="dk-remark-x"
                     title="Убрать замечание"
-                    onMouseDown={keep}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       const { t, r: x } = fresh(r);
                       if (x) h()?.apply(removeRemark(t, x));
                     }}
                   >
-                    ×
+                    ✕
                   </button>
-                </li>
-              ))}
-            </ol>
-            <B
-              wide
-              t="⧉ Скопировать все"
-              title="Все замечания списком вместе с местами — отдать Claude"
-              on={() =>
-                void navigator.clipboard
-                  .writeText(remarksText(remarks))
-                  .then(() => setMsg(`Скопировано замечаний: ${remarks.length}`))
-                  .catch(() => setMsg('Скопировать не дали'))
-              }
-            />
+                </div>
+              ),
+            )}
           </>
+        )}
+        {toPara.length > 0 && (
+          <>
+            <div className="dk-remark-group">К абзацам</div>
+            {toPara.map((r) => (
+              <div
+                key={r.n}
+                className="dk-remark-card"
+                onMouseDown={keep}
+                onClick={() => {
+                  const { r: x } = fresh(r);
+                  if (x) jumpTo(x.anchorAt ?? x.from);
+                }}
+                title="Показать место в тексте"
+              >
+                <div className="dk-remark-at" dir="auto">
+                  {r.n}. {r.anchor}
+                </div>
+                <div dir="auto">{r.text || '…'}</div>
+                <button
+                  className="dk-remark-x"
+                  title="Убрать замечание"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const { t, r: x } = fresh(r);
+                    if (x) h()?.apply(removeRemark(t, x));
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+        {remarks.length > 0 && (
+          <B
+            wide
+            t="⧉ Скопировать все"
+            title="Все замечания списком вместе с местами — отдать Claude"
+            on={() =>
+              void navigator.clipboard
+                .writeText(remarksText(remarks))
+                .then(() => setMsg(`Скопировано замечаний: ${remarks.length}`))
+                .catch(() => setMsg('Скопировать не дали'))
+            }
+          />
         )}
       </Block>
 

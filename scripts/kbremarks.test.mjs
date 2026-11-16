@@ -1,7 +1,7 @@
 // Тесты замечаний в файле ({>>…<<} к абзацу, блок %%замечания), как в md-редакторе. npm test.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apply, editRemark, generalItems, parseRemarks, remarkAt, remarksText, removeRemark, writeGeneral } from '../src/lib/kb/remarks.ts';
+import { apply, dropEmptyRemarks, editRemark, generalItems, parseRemarks, remarkAt, remarksText, removeRemark, writeGeneral } from '../src/lib/kb/remarks.ts';
 
 const DOC = `# Заголовок
 
@@ -91,4 +91,16 @@ test('замечание посреди строки — тоже в списк�
   const r = parseRemarks(doc);
   assert.deepEqual(r.map((x) => [x.text, x.anchor]), [['прямо в строке', 'Фраза с выделением и посреди.']]);
   assert.equal(doc.slice(r[0].from, r[0].to), '{>>прямо в строке<<}');
+});
+
+test('якорь — чистым текстом: без значков списка, тегов и ссылок', () => {
+  const doc = '- [ ] первый <u>пункт</u>\n- второй [сайт](https://x.y) и [[Заметка|так]]\n\n{>>к списку<<}';
+  assert.equal(parseRemarks(doc)[0].anchor, 'первый пункт второй сайт и так');
+});
+
+test('пустое замечание в файл не идёт, непустые и текст — целы', () => {
+
+  assert.equal(dropEmptyRemarks('Абзац.\n\n{>><<}\n\nДальше.'), 'Абзац.\n\nДальше.');
+  assert.equal(dropEmptyRemarks('Абзац.\n\n{>> <<}'), 'Абзац.');
+  assert.equal(dropEmptyRemarks('Абзац.\n\n{>>есть<<}\n\nقال'), 'Абзац.\n\n{>>есть<<}\n\nقال');
 });
