@@ -6,7 +6,7 @@
 }
 .dk {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 280px;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
   height: 100vh;
   background: var(--bg);
 }
@@ -172,12 +172,175 @@
 /* --- правая колонка --- */
 .dk-right {
   min-height: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   border-inline-start: 1px solid var(--border);
   background: var(--surface);
-  padding: 12px;
   font-size: 13px;
 }
+/* правая панель вкладками (как в «Вычитке»): одна вкладка — одно дело */
+.dk-rail-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  flex: none;
+}
+.dk-rail-tabs button {
+  flex: none;
+  min-width: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  padding: 7px 8px;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.dk-rail-tabs button:hover { color: var(--text); background: color-mix(in srgb, var(--surface) 60%, transparent); }
+/* открытая вкладка — со словом, остальные — значком (название в подсказке) */
+.dk-rail-tabs button.on { flex: 1; background: var(--surface); color: var(--text); border-color: var(--border); font-weight: 600; }
+.dk-rail-tabs button { position: relative; }
+.dk-rail-ico { font-size: 15px; line-height: 1; }
+.dk-rail-label { display: none; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dk-rail-tabs button.on .dk-rail-label { display: inline; }
+.dk-rail-badge {
+  position: absolute;
+  top: 1px;
+  inset-inline-end: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: #e8a33d;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+.dk-rail-tabs button.on .dk-rail-badge { position: static; flex: none; }
+.dk-rail-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.dk-rail-actions .dk-tool { flex: 1 1 auto; text-align: center; }
+.dk-rail-tabs .dk-rail-hide { flex: none; min-width: 26px; padding-inline: 4px; font-size: 14px; }
+.dk-rail-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; }
+.dk-rail-empty { margin: 8px 2px; line-height: 1.45; }
+.dk-rail-pane > .dk-list-tools:first-child { margin-bottom: 4px; }
+
+/* панели прячутся: дерево слева, инструменты справа; «Фокус» — обе */
+.dk.no-side { grid-template-columns: minmax(0, 1fr) 300px; }
+.dk.no-rail { grid-template-columns: 300px minmax(0, 1fr); }
+.dk.no-side.no-rail { grid-template-columns: minmax(0, 1fr); }
+.dk.no-side > .dk-left { display: none; }
+.dk.no-rail > .dk-right { display: none; }
+@media (max-width: 1150px) {
+  .dk.no-side { grid-template-columns: minmax(0, 1fr) 250px; }
+  .dk.no-rail { grid-template-columns: 240px minmax(0, 1fr); }
+}
+.dk-panel-btn { color: var(--muted); font-size: 15px; }
+.dk-panel-btn.on { color: var(--text); }
+.dk-tabs > .dk-tablist { flex: 1; min-width: 0; }
+
+/* поиск и замена в тексте */
+.dk-find {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  font-size: 13px;
+}
+.dk-find-q {
+  flex: 1 1 140px;
+  min-width: 100px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  padding: 4px 8px;
+  outline: none;
+}
+.dk-find-q:focus { border-color: var(--accent); }
+.dk-find-n { min-width: 58px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.dk-find-n.none { color: var(--danger, #c0392b); }
+.dk-find button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.dk-find button:hover:not(:disabled) { border-color: var(--accent); }
+.dk-find button.on { background: var(--accent-soft); border-color: var(--accent); }
+.dk-find button:disabled { opacity: 0.45; cursor: default; }
+.live-host .cm-find { background: color-mix(in srgb, #4aa3df 28%, transparent); border-radius: 2px; }
+.live-host .cm-find-cur { background: color-mix(in srgb, #4aa3df 60%, transparent); outline: 1px solid #4aa3df; }
+
+/* сохранено / сохраняю */
+.dk-stat { display: flex; flex-wrap: wrap; gap: 0 4px; }
+.dk-saved { margin-inline-start: auto; }
+.dk-saved.dirty { color: #c4821f; }
+
+/* сноски: номер в чтении, раскрытие под абзацем, список внизу */
+.dk-preview sup.kb-fn {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.72em;
+  font-weight: 600;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.dk-preview sup.kb-fn:hover, .dk-preview sup.kb-fn.open { background: var(--accent-soft); }
+.pv-fn {
+  position: relative;
+  margin: 6px 34px 0 0;
+  margin-inline: 0 34px;
+  padding: 6px 10px 7px;
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-2);
+  font-size: 0.92em;
+  line-height: 1.5;
+}
+.pv-fn-n { font-weight: 600; color: var(--accent); margin-inline-end: 6px; }
+.pv-foots { margin-top: 1.4em; padding-top: 0.8em; border-top: 1px solid var(--border); font-size: 0.92em; padding-inline-end: 34px; }
+.pv-foots-title { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.pv-foot { display: flex; gap: 8px; margin-bottom: 4px; line-height: 1.5; }
+.pv-foot .pv-fn-n { flex: none; min-width: 1.4em; text-align: end; }
+.dk-fn-go {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  min-width: 20px;
+  padding: 0 5px;
+  cursor: pointer;
+}
+.dk-fn-go:hover:not(:disabled) { border-color: var(--accent); }
+.dk-remark-card.warn { border-color: color-mix(in srgb, var(--danger, #c0392b) 40%, var(--border)); }
 .dk-context section { margin-bottom: 16px; }
 .dk-context h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .dk-outline,
@@ -283,7 +446,7 @@
 .dk-mic { max-width: 220px; }
 
 /* --- панель инструментов справа (NotePane → Tools) --- */
-.dk-tools { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.dk-tools { display: flex; flex-direction: column; gap: 6px; }
 .dk-block { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
 .dk-block-head {
   width: 100%;
@@ -705,8 +868,4 @@ body.dk-dragging { cursor: col-resize; user-select: none; }
 .dk-remark-card.gen { border-style: dashed; }
 .dk-remark-at { font-size: 11px; color: var(--muted); margin-bottom: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .dk-remark-hint { margin: 8px 0 2px; line-height: 1.4; }
-.dk-block.ping { animation: dk-ping 0.9s ease-out; }
-@keyframes dk-ping {
-  0% { box-shadow: 0 0 0 2px #e8a33d; }
-  100% { box-shadow: 0 0 0 2px transparent; }
-}
+

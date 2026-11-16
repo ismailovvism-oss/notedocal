@@ -30,8 +30,18 @@ export interface LiveEditorHandle {
   remark: (pos?: number) => void;
   /** Место в тексте, где начинается этот элемент редактора (строка под мышью); null — не из него. */
   posAtDOM: (el: HTMLElement) => number | null;
-  /** Применить правку текста (замечания из панели); cursor — куда поставить курсор. */
-  apply: (change: { from: number; to: number; insert: string }, cursor?: number) => void;
+  /** Применить правку текста (одну или несколько — места по тексту до правки); cursor — куда
+   *  поставить курсор. */
+  apply: (change: { from: number; to: number; insert: string } | { from: number; to: number; insert: string }[], cursor?: number) => void;
+  /** Где курсор. */
+  cursor: () => number;
+  focus: () => void;
+  /** Поиск по тексту (src/lib/kb/find.ts): подсветить совпадения; i — текущее с 1, n — всего. */
+  find: (query: string, cased: boolean) => { i: number; n: number };
+  findStep: (dir: 1 | -1) => { i: number; n: number };
+  replaceOne: (text: string) => { i: number; n: number };
+  replaceAll: (text: string) => number;
+  findClear: () => void;
   /** Курсор на место и показать его. */
   goto: (pos: number) => void;
   /** Текст сейчас (с несохранённым). */

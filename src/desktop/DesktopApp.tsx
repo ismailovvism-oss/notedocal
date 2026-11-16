@@ -34,6 +34,8 @@ import { usePhoneSync } from './usePhoneSync';
 import { phoneMode, type PhoneMode, type VaultSync } from '../lib/kb/phone';
 import { dirName, inVault, pathOfId } from '../lib/kb/vault';
 import { extPath, isExt, useExternal } from './useExternal';
+import { parseRemarks } from '../lib/kb/remarks';
+import { parseFootnotes } from '../lib/kb/footnotes';
 import { EditorView } from '@codemirror/view';
 
 interface Target extends PaneFocus {
@@ -175,7 +177,22 @@ function Desktop() {
   const cards = useMemo(() => tagCards(live), [live]);
   const [sel, setSel] = useState<Selection>(new Map());
   const facets = useMemo(() => computeFacets(index, cards, sel, showAll ? undefined : shown), [index, cards, sel, showAll, shown]);
-  const [rightTab, setRightTab] = useLocalStorage<'note' | 'tags'>('dk.right', 'note');
+  // правая панель — вкладками (как в «Вычитке»): действия, замечания, сноски — открытой заметки
+  // (их рисует NotePane), «заметка» — оглавление и связи, «теги» — отбор по всей базе
+  type Rail = 'tools' | 'remarks' | 'foot' | 'note' | 'tags';
+  const [rightTab, setRightTab] = useLocalStorage<Rail>('dk.rail', 'tools');
+  // панели прячутся: слева дерево, справа инструменты; «Фокус» — обе разом, остаётся текст
+  const [sideShut, setSideShut] = useLocalStorage<boolean>('dk.sideShut', false);
+  const [railShut, setRailShut] = useLocalStorage<boolean>('dk.railShut', false);
+  const focusOn = sideShut && railShut;
+  const toggleFocus = () => {
+    setSideShut(!focusOn);
+    setRailShut(!focusOn);
+  };
+  const openRail = (tab: Rail) => {
+    setRightTab(tab);
+    setRailShut(false);
+  };
 
   // --- вкладки ---
   const [tabs, setTabs] = useLocalStorage<Tab[]>('dk.tabs', []);
@@ -881,6 +898,8 @@ function Desktop() {
 
   // --- клавиши: как в Obsidian ---
   const searchRef = useRef<HTMLInputElement>(null);
+  const focusRef = useRef(toggleFocus);
+  focusRef.current = toggleFocus;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -891,6 +910,9 @@ function Desktop() {
         e.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        focusRef.current();
       } else if (mod && e.key.toLowerCase() === 'w' && cur) {
         e.preventDefault();
         closeTab(cur.key);
@@ -903,6 +925,11 @@ function Desktop() {
 
   const byId = index.byId;
   const note = target ? byId.get(target.id) : undefined;
+  // счётчики на вкладках правой панели
+  const railCounts = useMemo(() => {
+    const b = note && !note.vault?.mime ? (note.body ?? '') : '';
+    return { remarks: b ? parseRemarks(b).length : 0, foot: b ? parseFootnotes(b).length : 0 };
+  }, [note]);
 
   // Карточка файла хранилища: `X.md` рядом с `X.pdf` — его теги, свойства, иконка и заметки о нём.
   // В дереве пара — один пункт (сам файл), карточка открывается из шапки просмотра.
@@ -965,7 +992,7 @@ function Desktop() {
 
   return (
     <KbContext.Provider value={kb}>
-      <div className="dk">
+      <div className={`dk ${sideShut ? 'no-side' : ''} ${railShut ? 'no-rail' : ''}`}>
         <Sidebar
           notes={live}
           scope={showAll ? null : shown}
@@ -1002,6 +1029,13 @@ function Desktop() {
 
         <main className="dk-main">
           <div className="dk-tabs">
+            <button
+              className={`dk-icon dk-panel-btn ${sideShut ? '' : 'on'}`}
+              title={sideShut ? 'Показать дерево заметок' : 'Скрыть дерево заметок — больше места тексту'}
+              onClick={() => setSideShut(!sideShut)}
+            >
+              ◧
+            </button>
             <button className="dk-icon" title="Назад (Alt+←)" disabled={!cur || cur.pos === 0} onClick={() => step(-1)}>
               ‹
             </button>
@@ -1038,6 +1072,16 @@ function Desktop() {
                 ＋
               </button>
             </div>
+            <button className={`dk-icon dk-panel-btn ${focusOn ? 'on' : ''}`} title={focusOn ? 'Вернуть панели (F9)' : 'Фокус: только текст, без панелей (F9)'} onClick={toggleFocus}>
+              ⛶
+            </button>
+            <button
+              className={`dk-icon dk-panel-btn ${railShut ? '' : 'on'}`}
+              title={railShut ? 'Показать правую панель' : 'Скрыть правую панель — больше места тексту'}
+              onClick={() => setRailShut(!railShut)}
+            >
+              ◨
+            </button>
           </div>
           <div className="dk-page">
             {note?.vault?.mime ? (
@@ -1088,6 +1132,8 @@ function Desktop() {
                     : undefined
                 }
                 picking={!!picking && picking.tab === cur?.key}
+                rail={rightTab}
+                onRail={openRail}
                 onDelete={() =>
                   void removeNote(note.id, true).then((done) => {
                     if (!done) return;
@@ -1108,29 +1154,42 @@ function Desktop() {
         </main>
 
         <aside className="dk-right">
-          {/* панель инструментов открытой заметки: её рисует NotePane (createPortal) */}
-          <div className="dk-tools-slot" ref={setToolsSlot} />
-          <div className="dk-right-tabs">
-            <button className={rightTab === 'note' ? 'on' : ''} onClick={() => setRightTab('note')}>
-              Заметка
-            </button>
-            <button className={rightTab === 'tags' ? 'on' : ''} onClick={() => setRightTab('tags')}>
-              Теги{selectedTags(sel).length ? ` · ${selectedTags(sel).length}` : ''}
-            </button>
+          <div className="dk-rail-tabs" role="tablist">
+            {(
+              [
+                ['tools', '🎛', 'Действия', 0],
+                ['remarks', '✎', 'Замечания', railCounts.remarks],
+                ['foot', '¹', 'Сноски', railCounts.foot],
+                ['note', '☰', 'Заметка', 0],
+                ['tags', '#', 'Теги', selectedTags(sel).length],
+              ] as [Rail, string, string, number][]
+            ).map(([id, icon, label, n]) => (
+              <button key={id} role="tab" aria-selected={rightTab === id} className={rightTab === id ? 'on' : ''} title={label} onClick={() => setRightTab(id)}>
+                <span className="dk-rail-ico">{icon}</span>
+                <span className="dk-rail-label">{label}</span>
+                {n > 0 && <span className="dk-rail-badge">{n}</span>}
+              </button>
+            ))}
           </div>
-          {rightTab === 'note' ? (
-            note && <Context note={note} />
-          ) : (
-            <TagsPanel facets={facets} sel={sel} setSel={setSel} cards={cards} onCard={(tag) => {
-              const c = cards.get(tag.toLowerCase());
-              if (c) return go({ id: c.note.id });
-              // карточки тегов — в облаке: название — путь тега с «/», файлом такое не назвать
-              const now = Date.now();
-              const id = uid();
-              actions.add({ id, type: 'tag', title: tag, body: '', date: null, createdAt: now, updatedAt: now });
-              go({ id });
-            }} />
-          )}
+          <div className="dk-rail-body">
+            {/* действия, замечания и сноски открытой заметки рисует NotePane (createPortal) */}
+            <div className="dk-tools-slot" ref={setToolsSlot} hidden={rightTab === 'note' || rightTab === 'tags'} />
+            {(rightTab === 'tools' || rightTab === 'remarks' || rightTab === 'foot') && (!note || note.vault?.mime) && (
+              <p className="muted small dk-rail-empty">Откройте заметку — здесь будут её {rightTab === 'tools' ? 'действия' : rightTab === 'remarks' ? 'замечания' : 'сноски'}.</p>
+            )}
+            {rightTab === 'note' && (note ? <Context note={note} /> : <p className="muted small dk-rail-empty">Откройте заметку — здесь будут её оглавление и связи.</p>)}
+            {rightTab === 'tags' && (
+              <TagsPanel facets={facets} sel={sel} setSel={setSel} cards={cards} onCard={(tag) => {
+                const c = cards.get(tag.toLowerCase());
+                if (c) return go({ id: c.note.id });
+                // карточки тегов — в облаке: название — путь тега с «/», файлом такое не назвать
+                const now = Date.now();
+                const id = uid();
+                actions.add({ id, type: 'tag', title: tag, body: '', date: null, createdAt: now, updatedAt: now });
+                go({ id });
+              }} />
+            )}
+          </div>
         </aside>
       </div>
 

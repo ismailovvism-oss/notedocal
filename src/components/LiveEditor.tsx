@@ -23,6 +23,7 @@ import { useLocalStorage } from '../lib/storage';
 import { LANGS } from '../lib/quick';
 import { hemingway as hemingwayExt } from '../lib/kb/hemingway';
 import { remarkAt } from '../lib/kb/remarks';
+import { find, findClear, findExt, findStep, replaceAll, replaceOne } from '../lib/kb/find';
 
 /** Минимальная правка вместо замены всего текста: курсор и история не прыгают. */
 function diff(a: string, b: string) {
@@ -170,6 +171,7 @@ export default function LiveEditor({
           EditorView.perLineTextDirection.of(true),
           cmPlaceholder(placeholder ?? ''),
           livePreview(),
+          findExt,
           hemComp.current.of(hemingway ? hemingwayExt(flash) : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
@@ -263,6 +265,13 @@ export default function LiveEditor({
         apply: (change, cursor) => {
           view.dispatch({ changes: change, filter: false, ...(cursor !== undefined ? { selection: { anchor: cursor }, scrollIntoView: true } : {}) });
         },
+        cursor: () => view.state.selection.main.head,
+        focus: () => view.focus(),
+        find: (q, cased) => find(view, q, cased),
+        findStep: (dir) => findStep(view, dir),
+        replaceOne: (text) => replaceOne(view, text),
+        replaceAll: (text) => replaceAll(view, text),
+        findClear: () => findClear(view),
         goto: (pos) => {
           const at = Math.min(pos, view.state.doc.length);
           view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at, { y: 'center' }) });

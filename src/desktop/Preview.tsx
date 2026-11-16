@@ -9,6 +9,7 @@ import { marked } from 'marked';
 import { renderMarkdown } from '../lib/markdown';
 import type { KbIndex } from '../lib/kb/index';
 import { editRemark, generalRange, remarkAfter, removeRemark, type Change, type Remark } from '../lib/kb/remarks';
+import { parseFootnotes } from '../lib/kb/footnotes';
 
 interface Block {
   from: number;
@@ -34,6 +35,7 @@ function blocksOf(src: string, remarks: Remark[]): Block[] | null {
     at += t.raw.length;
     if (t.type === 'space') continue;
     if (gen && from < gen.to && at > gen.from) continue; // блок общих замечаний — в панели, не в тексте
+    if (/^\s*\[\^[^\]\s]+\]:/.test(t.raw)) continue; // определения сносок — списком внизу и по щелчку на номер
     if (REMARK_ONLY.test(t.raw)) {
       const lead = t.raw.length - t.raw.trimStart().length;
       const r = standalone.get(from + lead);
@@ -56,6 +58,9 @@ const AR = '؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿';
 const AR_RUN = new RegExp(`[${AR}](?:[${AR} \\t.,:;!?«»()\\-]*[${AR}])?`, 'g');
 /** Арабские куски — в `<span class="ar">`: свой шрифт и кегль (как в правке). */
 const arabicRuns = (html: string) => html.replace(/>([^<]+)</g, (_, t: string) => '>' + t.replace(AR_RUN, '<span class="ar">$&</span>') + '<');
+
+/** Текст сноски — одной строкой разметки (без обёртки абзаца). */
+const inline = (text: string) => arabicRuns(renderMarkdown(text)).replace(/^<p>|<\/p>\s*$/g, '');
 
 const Html = memo(function Html({ html }: { html: string }) {
   return <div className="pv-html" dangerouslySetInnerHTML={{ __html: html }} />;
@@ -91,10 +96,24 @@ export function Preview({
     cache.current = new Map();
     cacheFor.current = index;
   }
+  // сноски: номер вместо `[^id]`, определение — под абзацем по щелчку и списком внизу
+  const foots = useMemo(() => parseFootnotes(body), [body]);
+  const fnNum = useMemo(() => new Map(foots.filter((f) => f.n).map((f) => [f.id, f.n])), [foots]);
+  const fnSig = foots.map((f) => f.id).join('\u0001');
+  const sigFor = useRef('');
+  if (sigFor.current !== fnSig) {
+    cache.current = new Map();
+    sigFor.current = fnSig;
+  }
+  const withRefs = (raw: string) =>
+    /^\s*(```|~~~)/.test(raw)
+      ? raw
+      : raw.replace(/\[\^([^\]\s]+)\](?!:)/g, (_, id: string) => `<sup class="kb-fn" data-fn="${id.replace(/"/g, '')}">${fnNum.get(id) ?? '?'}</sup>`);
+  const [openFn, setOpenFn] = useState<{ at: number; id: string } | null>(null);
   const htmlOf = (raw: string) => {
     let h = cache.current.get(raw);
     if (h === undefined) {
-      h = arabicRuns(renderMarkdown(raw, { index, noteId }));
+      h = arabicRuns(renderMarkdown(withRefs(raw), { index, noteId }));
       if (cache.current.size > 2000) cache.current.clear();
       cache.current.set(raw, h);
     }
@@ -136,6 +155,13 @@ export function Preview({
       className="dk-preview md"
       ref={host}
       onClick={(e) => {
+        const sup = (e.target as HTMLElement).closest<HTMLElement>('sup.kb-fn');
+        if (sup) {
+          const at = Number(sup.closest<HTMLElement>('.pv-block')?.dataset.from);
+          const id = sup.dataset.fn ?? '';
+          setOpenFn(openFn && openFn.at === at && openFn.id === id ? null : { at, id });
+          return;
+        }
         const a = (e.target as HTMLElement).closest<HTMLElement>('.kb-link');
         if (!a) return;
         e.preventDefault();
@@ -164,6 +190,16 @@ export function Preview({
                 </button>
               </div>
             )}
+            {openFn?.at === b.from &&
+              (() => {
+                const f = foots.find((x) => x.id === openFn.id);
+                return (
+                  <div className="pv-fn" onClick={() => setOpenFn(null)} title="Щёлкните, чтобы свернуть">
+                    <span className="pv-fn-n">{f?.n || '?'}</span>
+                    {f?.text ? <span dir="auto" dangerouslySetInnerHTML={{ __html: inline(f.text) }} /> : <span className="muted">у этой сноски нет текста</span>}
+                  </div>
+                );
+              })()}
             {b.notes.map((r) =>
               open && edit?.n === r.n ? null : (
                 <aside
@@ -230,6 +266,19 @@ export function Preview({
           </div>
         );
       })}
+      {foots.some((f) => f.n) && (
+        <div className="pv-foots">
+          <div className="pv-foots-title">Сноски</div>
+          {foots
+            .filter((f) => f.n)
+            .map((f) => (
+              <div key={f.id} className="pv-foot">
+                <span className="pv-fn-n">{f.n}</span>
+                {f.text ? <span dir="auto" dangerouslySetInnerHTML={{ __html: inline(f.text) }} /> : <span className="muted">нет текста</span>}
+              </div>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

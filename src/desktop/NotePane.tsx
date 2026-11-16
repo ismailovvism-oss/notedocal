@@ -26,6 +26,7 @@ import type { ScopeWhy } from '../lib/kb/scope';
 import { onFlush } from './flush';
 import { dropEmptyRemarks, generalItems, parseRemarks, remarkAt, remarksText, removeRemark, writeGeneral, type Change, type Remark } from '../lib/kb/remarks';
 import { Preview } from './Preview';
+import { addFootnote, editFootnote, parseFootnotes, removeFootnote, type Footnote } from '../lib/kb/footnotes';
 
 // не лениво: окно держит страницу открытой часами, а пересборка стирает старые куски —
 // догружаемый потом файл мог бы уже исчезнуть (так 02.11.2026 «Свойства» роняли страницу)
@@ -48,7 +49,13 @@ export function NotePane({
   vaultImport,
   phone,
   onDelete,
+  rail,
+  onRail,
 }: {
+  /** Какая вкладка правой панели открыта: действия, замечания и сноски рисует эта заметка. */
+  rail: string;
+  /** Открыть вкладку правой панели (и показать панель, если спрятана). */
+  onRail: (tab: 'tools' | 'remarks' | 'foot') => void;
   /** Заметка хранилища: «📱 на телефон» — действующий режим, своя отметка, поставить. */
   phone?: { mode: 'text' | 'files' | null; own?: 'text' | 'files' | 'off'; set: (v: 'text' | 'files' | 'off' | null) => void };
   note: Note;
@@ -91,8 +98,11 @@ export function NotePane({
   /** Текст в базу; у заметки с версиями (быстрые) — и в текущую версию. */
   const withVersion = (clean: string) =>
     note.versions ? { body: clean, versions: { ...note.versions, [note.currentVersion ?? 'оригинал']: clean } } : { body: clean };
+  // «не сохранено» видно под текстом, пока правка не ушла в файл или в облако
+  const [dirty, setDirty] = useState(false);
   function save(text: string) {
     if (timer.current) clearTimeout(timer.current);
+    setDirty(false);
     const clean = tidy(text);
     if (clean === saved.current) return;
     saved.current = clean;
@@ -100,6 +110,7 @@ export function NotePane({
   }
   function change(text: string) {
     setBody(text);
+    setDirty(true);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => save(text), 700);
   }
@@ -164,6 +175,43 @@ export function NotePane({
     if (view !== 'read') editor.current?.goto(pos);
     setJump({ pos, n: ++jumpSeq.current });
   };
+  const foots = useMemo(() => parseFootnotes(body), [body]);
+  // поиск и замена в тексте (Ctrl+F, Ctrl+H) — src/lib/kb/find.ts
+  const [finder, setFinder] = useState<{ q: string; rep: string; cased: boolean; replace: boolean } | null>(null);
+  const [found, setFound] = useState({ i: 0, n: 0 });
+  const findInput = useRef<HTMLInputElement>(null);
+  const repInput = useRef<HTMLInputElement>(null);
+  const openFind = (replace: boolean) => {
+    if (view === 'read') setView('both'); // искать — в правке
+    const sel = editor.current?.selected() ?? '';
+    const q = sel && !sel.includes('\n') ? sel : (finder?.q ?? '');
+    setFinder({ q, rep: finder?.rep ?? '', cased: finder?.cased ?? false, replace });
+    if (q) setFound(editor.current?.find(q, finder?.cased ?? false) ?? { i: 0, n: 0 });
+    setTimeout(() => {
+      const el = replace && q ? repInput.current : findInput.current;
+      el?.focus();
+      el?.select();
+    }, 30);
+  };
+  const closeFind = () => {
+    setFinder(null);
+    editor.current?.findClear();
+    editor.current?.focus();
+  };
+  const openFindRef = useRef(openFind);
+  openFindRef.current = openFind;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== 'f' && k !== 'h' && k !== 'а' && k !== 'р') return;
+      e.preventDefault();
+      e.stopPropagation();
+      openFindRef.current(k === 'h' || k === 'р');
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
   // кружок ✎ у абзаца в правке — под мышью
   const edWrap = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ top: number; pos: number; has: boolean } | null>(null);
@@ -533,8 +581,8 @@ export function NotePane({
           </button>
           <button
             className={`dk-remark-chip ${remarks.length ? 'has' : ''}`}
-            title="Замечания к тексту — открыть список справа"
-            onClick={() => window.dispatchEvent(new CustomEvent('dk-open-block', { detail: 'remarks' }))}
+            title="Замечания к тексту — открыть вкладку справа"
+            onClick={() => onRail('remarks')}
           >
             ✎ {remarks.length || ''}
           </button>
@@ -708,6 +756,84 @@ export function NotePane({
       {msg && <div className="dk-msg small">{msg}</div>}
       {picking && <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>}
 
+      {finder && (
+        <div className="dk-find" onKeyDown={(e) => e.key === 'Escape' && (e.preventDefault(), closeFind())}>
+          <input
+            ref={findInput}
+            className="dk-find-q"
+            placeholder="Найти в тексте"
+            dir="auto"
+            value={finder.q}
+            onChange={(e) => {
+              setFinder({ ...finder, q: e.target.value });
+              setFound(editor.current?.find(e.target.value, finder.cased) ?? { i: 0, n: 0 });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                setFound(editor.current?.findStep(e.shiftKey ? -1 : 1) ?? found);
+              }
+            }}
+          />
+          <span className={`dk-find-n ${finder.q && !found.n ? 'none' : ''}`}>{finder.q ? (found.n ? `${found.i} из ${found.n}` : 'нет') : ''}</span>
+          <button title="Предыдущее (Shift+Enter)" onClick={() => setFound(editor.current?.findStep(-1) ?? found)}>
+            ↑
+          </button>
+          <button title="Следующее (Enter)" onClick={() => setFound(editor.current?.findStep(1) ?? found)}>
+            ↓
+          </button>
+          <button
+            className={finder.cased ? 'on' : ''}
+            title="Учитывать регистр"
+            onClick={() => {
+              setFinder({ ...finder, cased: !finder.cased });
+              setFound(editor.current?.find(finder.q, !finder.cased) ?? found);
+            }}
+          >
+            Аа
+          </button>
+          <button className={finder.replace ? 'on' : ''} title="Замена (Ctrl+H)" onClick={() => setFinder({ ...finder, replace: !finder.replace })}>
+            ⇆
+          </button>
+          {finder.replace && (
+            <>
+              <span className="dk-vsep" />
+              <input
+                ref={repInput}
+                className="dk-find-q"
+                placeholder="Заменить на"
+                dir="auto"
+                value={finder.rep}
+                onChange={(e) => setFinder({ ...finder, rep: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    setFound(editor.current?.replaceOne(finder.rep) ?? found);
+                  }
+                }}
+              />
+              <button disabled={!found.n} title="Заменить текущее (Enter в поле замены)" onClick={() => setFound(editor.current?.replaceOne(finder.rep) ?? found)}>
+                Заменить
+              </button>
+              <button
+                disabled={!found.n}
+                title="Заменить все совпадения; Ctrl+Z в тексте вернёт разом"
+                onClick={() => {
+                  const n = editor.current?.replaceAll(finder.rep) ?? 0;
+                  setFound(editor.current?.find(finder.q, finder.cased) ?? { i: 0, n: 0 });
+                  setMsg(`Заменено: ${n}`);
+                }}
+              >
+                Все
+              </button>
+            </>
+          )}
+          <span className="dk-spacer" />
+          <button title="Закрыть (Esc)" onClick={closeFind}>
+            ✕
+          </button>
+        </div>
+      )}
       <div
         className={`dk-work ${view} ${swap ? 'swap' : ''}`}
         ref={work}
@@ -785,6 +911,7 @@ export function NotePane({
         {body.length.toLocaleString('ru')} знаков · {(body.match(/[\p{L}\p{N}]+/gu)?.length ?? 0).toLocaleString('ru')} слов
         {remarks.length ? ` · замечаний: ${remarks.length}` : ''}
         {hem ? ' · ✒ режим Хемингуэя' : ''}
+        <span className={`dk-saved ${dirty ? 'dirty' : ''}`}>{dirty ? '● сохраняю…' : '✓ сохранено'}</span>
       </div>
       {toolsSlot &&
         createPortal(
@@ -809,6 +936,10 @@ export function NotePane({
             remarks={remarks}
             jumpTo={jumpTo}
             canCursor={view !== 'read'}
+            tab={rail}
+            foots={foots}
+            onRail={onRail}
+            openFind={openFind}
           />,
           toolsSlot,
         )}
@@ -883,23 +1014,8 @@ function B({ t, title, on, wide, active }: { t: React.ReactNode; title: string; 
 /** Блок панели инструментов: заголовок сворачивает; что свёрнуто — запоминается. */
 function Block({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   const [shut, setShut] = useLocalStorage<boolean>(`dk.tools.${id}`, false);
-  const box = useRef<HTMLElement>(null);
-  // открыть и показать блок по просьбе со страницы (кнопка «✎ N» в шапке заметки)
-  useEffect(() => {
-    const on = (e: Event) => {
-      if ((e as CustomEvent).detail !== id) return;
-      setShut(false);
-      setTimeout(() => box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
-      box.current?.classList.remove('ping');
-      void box.current?.offsetWidth;
-      box.current?.classList.add('ping');
-    };
-    window.addEventListener('dk-open-block', on);
-    return () => window.removeEventListener('dk-open-block', on);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
   return (
-    <section ref={box} className={`dk-block ${shut ? 'shut' : ''}`}>
+    <section className={`dk-block ${shut ? 'shut' : ''}`}>
       <button className="dk-block-head" onClick={() => setShut(!shut)}>
         <span>{title}</span>
         <span className="dk-caret">{shut ? '▸' : '▾'}</span>
@@ -932,7 +1048,16 @@ function Tools({
   remarks,
   jumpTo,
   canCursor,
+  tab,
+  foots,
+  onRail,
+  openFind,
 }: {
+  /** Вкладка правой панели: действия (tools), замечания (remarks), сноски (foot). */
+  tab: string;
+  foots: Footnote[];
+  onRail: (tab: 'tools' | 'remarks' | 'foot') => void;
+  openFind: (replace: boolean) => void;
   editor: React.MutableRefObject<LiveEditorHandle | null>;
   voice: { id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null;
   toggleVoice: () => void;
@@ -1007,6 +1132,52 @@ function Tools({
   );
   const general = remarks.filter((r) => r.kind === 'gen');
   const toPara = remarks.filter((r) => r.kind === 'par');
+
+  // сноски: поле открытой (id) — пишется на месте, как в «Вычитке»
+  const [fn, setFn] = useState<{ id: string; text: string } | null>(null);
+  const addFoot = () => {
+    const e = h();
+    if (!e) return;
+    if (!canCursor) return setMsg('Сноска ставится у курсора — переключитесь в правку (✏ или ◫)');
+    const { changes, id } = addFootnote(e.text(), e.cursor());
+    e.apply(changes);
+    setFn({ id, text: '' });
+  };
+  const saveFn = () => {
+    const e = h();
+    if (!fn || !e) return setFn(null);
+    const t = e.text();
+    const f = parseFootnotes(t).find((x) => x.id === fn.id);
+    if (f) {
+      // пустая новая сноска — убрать и ссылку, а не оставлять «[^3]» без текста
+      if (!fn.text.trim() && !f.text) e.apply(removeFootnote(t, f));
+      else e.apply(editFootnote(t, f, fn.text));
+    }
+    setFn(null);
+  };
+  const fnField = (
+    <div className="dk-remark-edit">
+      <textarea
+        autoFocus
+        dir="auto"
+        placeholder="Текст сноски…"
+        value={fn?.text ?? ''}
+        onChange={(e) => fn && setFn({ ...fn, text: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            saveFn();
+          } else if (e.key === 'Escape') saveFn();
+        }}
+      />
+      <div className="dk-remark-edit-row">
+        <button className="btn-primary" onClick={saveFn}>
+          Сохранить
+        </button>
+        <span className="muted small">Ctrl+Enter</span>
+      </div>
+    </div>
+  );
   const menu = useMenu();
   /** Действие над словами — только когда они выделены. */
   const onWords = (a: Parameters<LiveEditorHandle['run']>[0]) => () => {
@@ -1016,83 +1187,9 @@ function Tools({
   };
   const time = voice ? `${Math.floor(voice.seconds / 60)}:${String(voice.seconds % 60).padStart(2, '0')}` : '';
   const native_ = native.available();
-  return (
-    <div className="dk-tools">
-      {native_ && (
-        <Block id="voice" title="🎤 Голос">
-          <div className={`dk-rec ${voice ? voice.state : ''}`}>
-            {!voice ? (
-              <B wide t={<>● Записать <span className="muted small">Ctrl+Пробел</span></>} title="Диктовать с места курсора" on={toggleVoice} />
-            ) : voice.state === 'wait' ? (
-              <div className="dk-rec-wait">распознаю… {voice.waiting || ''}</div>
-            ) : (
-              <>
-                <B wide t={voice.state === 'rec' ? `⏸ Пауза · ${time}` : `● Дальше · ${time}`} title="Пауза / дальше (Ctrl+Пробел, кнопка на микрофоне)" on={toggleVoice} />
-                <B t="✓" title="Готово — дораспознать и закончить" on={stopVoice} />
-              </>
-            )}
-          </div>
-          {voice?.state === 'rec' && (
-            <div className="dk-level">
-              <span style={{ width: `${Math.min(100, voice.level * 400)}%` }} />
-            </div>
-          )}
-          {voice?.state === 'pause' && <div className="muted small">пауза — заговорите, и запись продолжится сама</div>}
-          <MicSelect value={mic} mics={mics} title={micTitle} onFocus={loadMics} onChange={pickMic} current={voice?.mic} />
-          <div className="dk-seg">
-            {LANGS.map(([k, t]) => (
-              <button key={k} className={lang === k ? 'on' : ''} onMouseDown={keep} onClick={() => setLang(k)} title="Язык диктовки">
-                {t}
-              </button>
-            ))}
-          </div>
-        </Block>
-      )}
-
-      <Block id="format" title="Оформление">
-        <div className="dk-grid">
-          <B t={<b>Ж</b>} title="Жирный (Ctrl+B)" on={() => h()?.wrap('**')} />
-          <B t={<i>К</i>} title="Курсив (Ctrl+I)" on={() => h()?.wrap('*')} />
-          <B t={<u>Ч</u>} title="Подчёркнутый (Ctrl+U)" on={() => h()?.wrap('<u>', '</u>')} />
-          <B t={<s>З</s>} title="Зачёркнутый" on={() => h()?.wrap('~~')} />
-          <B t={<mark>М</mark>} title="Маркер" on={() => h()?.wrap('==')} />
-          <B t={<code>{'<>'}</code>} title="Код" on={() => h()?.wrap('`')} />
-          <B t="H1" title="Заголовок 1" on={() => h()?.prefixLine('# ')} />
-          <B t="H2" title="Заголовок 2" on={() => h()?.prefixLine('## ')} />
-          <B t="H3" title="Заголовок 3" on={() => h()?.prefixLine('### ')} />
-          <B t="•" title="Список" on={() => h()?.prefixLine('- ')} />
-          <B t="1." title="Нумерованный список" on={() => h()?.prefixLine('1. ')} />
-          <B t="☐" title="Задача" on={() => h()?.prefixLine('- [ ] ')} />
-          <B t="❝" title="Цитата" on={() => h()?.prefixLine('> ')} />
-          <button
-            className="dk-tool"
-            title="Выноска (callout): заметка, совет, важно, внимание…"
-            onMouseDown={keep}
-            onClick={(e) =>
-              menu(
-                e,
-                ['note', 'tip', 'important', 'warning', 'question', 'example', 'quote', 'danger', 'success'].map((type) => ({
-                  label: calloutMeta(type).title,
-                  icon: calloutMeta(type).icon,
-                  run: () => h()?.replaceSelection((sel) => `> [!${type}] ${calloutMeta(type).title}\n> ${sel.split('\n').join('\n> ') || 'текст'}\n`),
-                })),
-              )
-            }
-          >
-            💡
-          </button>
-          <B t="—" title="Черта-разделитель" on={() => h()?.insertAtCursor('\n\n---\n\n')} />
-          <B t="%%" title="Скрытый текст (виден только в правке)" on={() => h()?.wrap('%%')} />
-        </div>
-        <div className="dk-seg">
-          <span className="muted small">арабский:</span>
-          <B t="ар −" title="Арабский мельче" on={() => setArScale(Math.max(0.8, Math.round((arScale - 0.1) * 10) / 10))} />
-          <span className="small">{Math.round(arScale * 100)}%</span>
-          <B t="ар +" title="Арабский крупнее" on={() => setArScale(Math.min(2.5, Math.round((arScale + 0.1) * 10) / 10))} />
-        </div>
-      </Block>
-
-      <Block id="remarks" title={`✎ Замечания${remarks.length ? ` · ${remarks.length}` : ''}`}>
+  if (tab === 'remarks') {
+    return (
+      <div className="dk-tools dk-rail-pane">
         <div className="dk-list-tools">
           <B
             wide
@@ -1180,6 +1277,168 @@ function Tools({
             }
           />
         )}
+      </div>
+    );
+  }
+  if (tab === 'foot') {
+    return (
+      <div className="dk-tools dk-rail-pane">
+        <div className="dk-rail-actions">
+          <B wide t="＋ Сноска у курсора" title="Поставить ссылку [^n] у курсора и написать текст сноски здесь" on={addFoot} />
+        </div>
+        {foots.length === 0 && !fn && (
+          <p className="dk-remark-hint muted small">
+            Сносок нет. Поставьте курсор в текст и нажмите «＋ Сноска»: в тексте появится номер, а текст сноски пишется здесь.
+          </p>
+        )}
+        {foots.map((f) =>
+          fn && fn.id === f.id ? (
+            <div key={f.id}>
+              <div className="dk-remark-at">сноска {f.n || '—'}</div>
+              {fnField}
+            </div>
+          ) : (
+            <div
+              key={f.id}
+              className={`dk-remark-card ${f.defFrom === undefined || !f.refs.length ? 'warn' : ''}`}
+              onMouseDown={keep}
+              onClick={() => setFn({ id: f.id, text: f.text })}
+              title="Щёлкните, чтобы поправить текст сноски"
+            >
+              <div className="dk-remark-at">
+                <button
+                  className="dk-fn-go"
+                  title="Показать место в тексте"
+                  disabled={!f.refs.length}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    jumpTo(f.refs[0]);
+                  }}
+                >
+                  {f.n ? `${f.n}` : '—'}
+                </button>
+                {f.id !== String(f.n) && <span> [^{f.id}]</span>}
+                {!f.refs.length && <span> · в тексте на неё нет ссылки</span>}
+                {f.defFrom === undefined && <span> · нет текста сноски</span>}
+                {f.refs.length > 1 && <span> · ссылок: {f.refs.length}</span>}
+              </div>
+              <div dir="auto">{f.text || '…'}</div>
+              <button
+                className="dk-remark-x"
+                title="Убрать сноску: текст и ссылки на неё"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const ed = h();
+                  if (!ed) return;
+                  const t = ed.text();
+                  const x = parseFootnotes(t).find((y) => y.id === f.id);
+                  if (x) ed.apply(removeFootnote(t, x));
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ),
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="dk-tools dk-rail-pane">
+      {native_ && (
+        <Block id="voice" title="🎤 Голос">
+          <div className={`dk-rec ${voice ? voice.state : ''}`}>
+            {!voice ? (
+              <B wide t={<>● Записать <span className="muted small">Ctrl+Пробел</span></>} title="Диктовать с места курсора" on={toggleVoice} />
+            ) : voice.state === 'wait' ? (
+              <div className="dk-rec-wait">распознаю… {voice.waiting || ''}</div>
+            ) : (
+              <>
+                <B wide t={voice.state === 'rec' ? `⏸ Пауза · ${time}` : `● Дальше · ${time}`} title="Пауза / дальше (Ctrl+Пробел, кнопка на микрофоне)" on={toggleVoice} />
+                <B t="✓" title="Готово — дораспознать и закончить" on={stopVoice} />
+              </>
+            )}
+          </div>
+          {voice?.state === 'rec' && (
+            <div className="dk-level">
+              <span style={{ width: `${Math.min(100, voice.level * 400)}%` }} />
+            </div>
+          )}
+          {voice?.state === 'pause' && <div className="muted small">пауза — заговорите, и запись продолжится сама</div>}
+          <MicSelect value={mic} mics={mics} title={micTitle} onFocus={loadMics} onChange={pickMic} current={voice?.mic} />
+          <div className="dk-seg">
+            {LANGS.map(([k, t]) => (
+              <button key={k} className={lang === k ? 'on' : ''} onMouseDown={keep} onClick={() => setLang(k)} title="Язык диктовки">
+                {t}
+              </button>
+            ))}
+          </div>
+        </Block>
+      )}
+
+      <Block id="format" title="Оформление">
+        <div className="dk-grid">
+          <B t={<b>Ж</b>} title="Жирный (Ctrl+B)" on={() => h()?.wrap('**')} />
+          <B t={<i>К</i>} title="Курсив (Ctrl+I)" on={() => h()?.wrap('*')} />
+          <B t={<u>Ч</u>} title="Подчёркнутый (Ctrl+U)" on={() => h()?.wrap('<u>', '</u>')} />
+          <B t={<s>З</s>} title="Зачёркнутый" on={() => h()?.wrap('~~')} />
+          <B t={<mark>М</mark>} title="Маркер" on={() => h()?.wrap('==')} />
+          <B t={<code>{'<>'}</code>} title="Код" on={() => h()?.wrap('`')} />
+          <B t="H1" title="Заголовок 1" on={() => h()?.prefixLine('# ')} />
+          <B t="H2" title="Заголовок 2" on={() => h()?.prefixLine('## ')} />
+          <B t="H3" title="Заголовок 3" on={() => h()?.prefixLine('### ')} />
+          <B t="•" title="Список" on={() => h()?.prefixLine('- ')} />
+          <B t="1." title="Нумерованный список" on={() => h()?.prefixLine('1. ')} />
+          <B t="☐" title="Задача" on={() => h()?.prefixLine('- [ ] ')} />
+          <B t="❝" title="Цитата" on={() => h()?.prefixLine('> ')} />
+          <button
+            className="dk-tool"
+            title="Выноска (callout): заметка, совет, важно, внимание…"
+            onMouseDown={keep}
+            onClick={(e) =>
+              menu(
+                e,
+                ['note', 'tip', 'important', 'warning', 'question', 'example', 'quote', 'danger', 'success'].map((type) => ({
+                  label: calloutMeta(type).title,
+                  icon: calloutMeta(type).icon,
+                  run: () => h()?.replaceSelection((sel) => `> [!${type}] ${calloutMeta(type).title}\n> ${sel.split('\n').join('\n> ') || 'текст'}\n`),
+                })),
+              )
+            }
+          >
+            💡
+          </button>
+          <B t="—" title="Черта-разделитель" on={() => h()?.insertAtCursor('\n\n---\n\n')} />
+          <B t="%%" title="Скрытый текст (виден только в правке)" on={() => h()?.wrap('%%')} />
+        </div>
+        <div className="dk-seg">
+          <span className="muted small">арабский:</span>
+          <B t="ар −" title="Арабский мельче" on={() => setArScale(Math.max(0.8, Math.round((arScale - 0.1) * 10) / 10))} />
+          <span className="small">{Math.round(arScale * 100)}%</span>
+          <B t="ар +" title="Арабский крупнее" on={() => setArScale(Math.min(2.5, Math.round((arScale + 0.1) * 10) / 10))} />
+        </div>
+      </Block>
+
+      <Block id="text" title="Текст">
+        <div className="dk-list-tools">
+          <B wide t="🔍 Найти" title="Поиск в тексте (Ctrl+F)" on={() => openFind(false)} />
+          <B wide t="⇆ Заменить" title="Поиск и замена (Ctrl+H)" on={() => openFind(true)} />
+          <B
+            wide
+            t="¹ Сноска"
+            title="Поставить сноску у курсора — текст пишется во вкладке «Сноски»"
+            on={() => {
+              onRail('foot');
+              addFoot();
+            }}
+          />
+          <B
+            wide
+            t="✎ Замечание"
+            title="Замечание к абзацу, где курсор"
+            on={() => (canCursor ? h()?.remark() : setMsg('В режиме чтения нажмите кружок ✎ справа от нужного абзаца'))}
+          />
+        </div>
       </Block>
 
       <Block id="links" title="Метки и ссылки">
