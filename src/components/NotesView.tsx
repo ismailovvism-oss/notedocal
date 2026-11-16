@@ -943,6 +943,7 @@ export function NoteModal({
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return; // клавиатура телефона ещё набирает слово
                 if (e.key === 'Enter' || e.key === ',') {
                   e.preventDefault();
                   addTag(tagInput);

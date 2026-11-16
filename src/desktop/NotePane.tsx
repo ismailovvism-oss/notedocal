@@ -675,6 +675,7 @@ export function NotePane({
         onChange={(e) => setTitle(e.target.value)}
         onBlur={commitTitle}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return; // клавиатура телефона ещё набирает слово
           if (e.key === 'Enter') {
             e.preventDefault();
             (e.target as HTMLInputElement).blur();
@@ -705,6 +706,7 @@ export function NotePane({
           value={tagInput}
           onChange={(e) => setTagInput(e.target.value)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return; // клавиатура телефона ещё набирает слово
             if (e.key === 'Enter' || e.key === ',') {
               e.preventDefault();
               addTag(tagInput);
@@ -840,6 +842,7 @@ export function NotePane({
               setFound(editor.current?.find(e.target.value, finder.cased) ?? { i: 0, n: 0 });
             }}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return; // клавиатура телефона ещё набирает слово
               if (e.key === 'Enter') {
                 e.preventDefault();
                 setFound(editor.current?.findStep(e.shiftKey ? -1 : 1) ?? found);
@@ -877,6 +880,7 @@ export function NotePane({
                 value={finder.rep}
                 onChange={(e) => setFinder({ ...finder, rep: e.target.value })}
                 onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return; // клавиатура телефона ещё набирает слово
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     setFound(editor.current?.replaceOne(finder.rep) ?? found);

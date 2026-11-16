@@ -1465,6 +1465,7 @@ function Sidebar({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return; // клавиатура телефона ещё набирает слово
             if (e.key === 'Enter' && found && list[0]) onOpen(list[0].id, e.ctrlKey);
             if (e.key === 'Escape') setQ('');
           }}

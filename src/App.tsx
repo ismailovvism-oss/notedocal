@@ -102,6 +102,7 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
   }, [theme]);
 
   // Приём «поделиться» из других приложений (Web Share Target, текст/ссылка).

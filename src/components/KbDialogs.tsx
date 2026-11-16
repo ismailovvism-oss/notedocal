@@ -59,6 +59,7 @@ export function LinkPicker({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return; // клавиатура телефона ещё набирает слово
                 if (e.key === 'Enter' && list[0]) setChosen(list[0].id);
                 if (e.key === 'Escape') onClose();
               }}
