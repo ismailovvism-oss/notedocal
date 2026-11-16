@@ -39,6 +39,8 @@ export interface QtLink {
   extRename: (s: string, cb: (s: string) => void) => void;
   extMove: (s: string, cb: (s: string) => void) => void;
   extReveal: (path: string) => void;
+  /** «Открыть файл…» обычным окном выбора (в окне со старой программой этого нет). */
+  extChoose?: (cb: (s: string) => void) => void;
   /** Режим тестировщика (baza.py bug*, zamechaniya.py); в окне со старой программой их нет. */
   /** Вычитка: снимки и замок на время правки Claude (baza.py review*). */
   reviewState?: (path: string, cb: (s: string) => void) => void;
@@ -175,7 +177,12 @@ export const extApi = {
   rename: (path: string, name: string) => ask<{ path: string }>((l, d) => l.extRename(JSON.stringify({ path, name }), d)),
   /** Переложить в хранилище (dir — папка в нём): путь там. */
   move: (path: string, dir: string) => ask<{ path: string }>((l, d) => l.extMove(JSON.stringify({ path, dir }), d)),
+  /** Показать в проводнике (файл — выделенным): полный путь любого файла или папки. */
   reveal: (path: string) => link?.extReveal(path),
+  /** Можно ли открыть файл окном выбора прямо из программы. */
+  canChoose: () => !!link?.extChoose,
+  /** Выбрать .md с диска — править на месте; пусто — отменили. */
+  choose: (): Promise<ExtOpen[]> => (link?.extChoose ? ask<ExtOpen[]>((l, d) => l.extChoose!(d)).catch(() => []) : Promise.resolve([])),
   onOpen: (cb: (files: ExtOpen[]) => void) => {
     openListeners.add(cb);
     if (openQueue.length) {

@@ -1166,3 +1166,8 @@ body.bugpick, body.bugpick * { cursor: crosshair !important; }
   color: var(--muted);
 }
 .pv-gone span { flex: 1; min-width: 0; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger, #c0392b) 50%, transparent); }
+
+/* где лежит заметка: путь файла, «копировать путь», «показать в папке» */
+.dk-where { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin-top: 4px; }
+.dk-where-path { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: plaintext; }
+.dk-where .link-btn { font-size: inherit; }

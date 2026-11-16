@@ -10,7 +10,7 @@ import type { Note, NoteType } from '../types';
 import LiveEditor from '../components/LiveEditor';
 import type { LiveEditorHandle } from '../components/liveEditorTypes';
 import { useLocalStorage } from '../lib/storage';
-import { native, reviewApi, type Mics, type ReviewState, type VoiceEvent } from './native';
+import { extApi, native, reviewApi, type Mics, type ReviewState, type VoiceEvent } from './native';
 import { useMenu, type MenuItem } from './Menu';
 import { fileIcon } from './FileView';
 import { calloutMeta } from '../lib/kb/callouts';
@@ -998,6 +998,33 @@ export function NotePane({
         {remarks.length ? ` · замечаний: ${remarks.length}` : ''}
         {hem ? ' · ✒ режим Хемингуэя' : ''}
         <span className={`dk-saved ${dirty ? 'dirty' : ''}`}>{dirty ? '● сохраняю…' : '✓ сохранено'}</span>
+      </div>
+      {/* где эта заметка лежит: файл на диске (хранилище или открытый с диска) или облако */}
+      <div className="dk-where muted small">
+        {filePath ? (
+          <>
+            <span className="dk-where-path" title={`${filePath}\nПравки сохраняются в этот файл`} dir="ltr">
+              📁 {filePath.replace(/^\/home\/[^/]+/, '~')}
+            </span>
+            <button
+              className="link-btn"
+              title="Скопировать полный путь файла"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(filePath)
+                  .then(() => setMsg('Путь скопирован'))
+                  .catch(() => setMsg('Скопировать не дали'))
+              }
+            >
+              копировать путь
+            </button>
+            <button className="link-btn" title="Открыть проводник на этом файле" onClick={() => extApi.reveal(filePath)}>
+              показать в папке
+            </button>
+          </>
+        ) : (
+          <span>☁ заметка в облаке notedocal — отдельного файла на диске нет</span>
+        )}
       </div>
       {toolsSlot &&
         createPortal(

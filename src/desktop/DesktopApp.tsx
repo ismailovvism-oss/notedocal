@@ -558,10 +558,43 @@ function Desktop() {
     for (const f of files) {
       // лежит в хранилище — открыть как обычную заметку
       if (f.vault) go({ id: 'v:' + f.vault }, true);
-      else void ext.open(f.path).then((id) => go({ id }, true)).catch(fail);
+      else
+        void ext
+          .open(f.path)
+          .then((id) => {
+            setOpenFolder(EXTDIR); // «📄 Открытые файлы» в дереве — раскрыть: видно, что открыто
+            go({ id }, true);
+          })
+          .catch(fail);
     }
   };
   useEffect(() => extApi.onOpen((files) => openExtRef.current(files)), []);
+  /** «Открыть файл…»: .md с диска — правится на месте, в хранилище не переносится. */
+  const openFiles = () => {
+    if (!extApi.canChoose()) return setVaultErr('Открыть файл из программы можно после её перезапуска. Пока — правой кнопкой по файлу в проводнике → «Открыть с помощью» → «База знаний»');
+    void extApi.choose().then((files) => files.length && openExtRef.current(files));
+  };
+  const openFilesRef = useRef(openFiles);
+  openFilesRef.current = openFiles;
+  /** Полный путь файла или папки на диске; null — заметка в облаке, файла нет. */
+  const absOf = (id: string): string | null =>
+    isExt(id) ? extPath(id) : inVault(id) && vault.info ? `${vault.info.path}/${pathOfId(id)}`.replace(/\/$/, '') : null;
+  /** Пункты меню «где этот файл»: показать в проводнике, скопировать путь. */
+  const fileItems = (id: string): MenuItem[] => {
+    const abs = absOf(id);
+    if (!abs) return [];
+    return [
+      { label: 'Показать в папке', icon: '📂', run: () => extApi.reveal(abs) },
+      {
+        label: 'Скопировать путь',
+        icon: '⧉',
+        run: () => {
+          copyText(abs);
+          setVaultErr(`Путь скопирован: ${abs}`);
+        },
+      },
+    ];
+  };
   /** Открытый файл — в хранилище (файл переезжает), дальше это обычная заметка хранилища. */
   async function extToVault(id: string, dir: string) {
     try {
@@ -723,12 +756,15 @@ function Desktop() {
   }
   /** Куда переложить: все видимые папки с путём. */
   function moveMenu(at: { clientX: number; clientY: number }, id: string, from: string | null) {
+    // файлу (из хранилища или открытому с диска) — только папки хранилища; облачной — только облачные
+    const onDisk = inVault(id) || isExt(id);
     const list = live
-      .filter((n) => n.type === 'folder' && n.id !== id && (showAll || !isService(n.id)))
+      .filter((n) => n.type === 'folder' && n.id !== id && n.id !== EXTDIR && (showAll || !isService(n.id)))
+      .filter((n) => (onDisk ? n.id.startsWith('d:') : !n.id.startsWith('d:')))
       .map((n) => ({ id: n.id, path: [...(folders.get(n.id) ?? [])].reverse().concat(n.title).join(' / ') }))
       .sort((a, b) => a.path.localeCompare(b.path, 'ru'));
     const items: MenuItem[] = [
-      ...(from ? [{ label: 'В корень (без папки)', icon: '⤒', run: () => move(id, from, null) }, 'sep' as const] : []),
+      ...(from ? [{ label: onDisk ? 'В корень хранилища' : 'В корень (без папки)', icon: '⤒', run: () => move(id, from, null) }, 'sep' as const] : []),
       ...list.map((f) => ({ label: f.path, icon: '📁', run: () => move(id, from, f.id), disabled: f.id === from })),
     ];
     menu({ ...at, preventDefault() {}, stopPropagation() {} } as unknown as MouseEvent, items);
@@ -758,6 +794,8 @@ function Desktop() {
       return menu(e, [
         { label: 'Новая заметка', icon: '✎', keys: 'Ctrl+N', run: () => createNote() },
         { label: 'Новая папка', icon: '📁', run: () => createFolder(null) },
+        'sep',
+        { label: 'Открыть файл .md с диска…', icon: '📂', keys: 'Ctrl+Shift+O', run: openFiles },
       ]);
     }
     const n = index.byId.get(node.id);
@@ -775,7 +813,8 @@ function Desktop() {
         { label: 'Открыть в новой вкладке', icon: '⧉', keys: 'Ctrl+щелчок', run: () => go({ id: n.id }, true) },
         'sep',
         { label: 'Переложить в хранилище', icon: '⬇', run: () => void extToVault(n.id, ''), disabled: !vault.info },
-        { label: 'Показать в папке', icon: '📂', run: () => extApi.reveal(extPath(n.id)) },
+        { label: 'Переложить в папку хранилища…', icon: '↪', run: () => setTimeout(() => moveMenu(at, n.id, node.parent), 0), disabled: !vault.info },
+        ...fileItems(n.id),
         { label: 'Скопировать ссылку [[…]]', icon: '🔗', run: () => copyText(`[[${n.title}]]`), disabled: !n.title },
         'sep',
         { label: 'Убрать из списка (файл останется на месте)', icon: '✕', run: () => ext.forget(n.id) },
@@ -822,6 +861,7 @@ function Desktop() {
               ];
             })()
           : [{ label: 'Открыть папку как заметку', icon: '📄', run: () => go({ id: n.id }) }]),
+        ...fileItems(n.id),
         ...take,
         'sep',
         {
@@ -863,6 +903,7 @@ function Desktop() {
       'sep',
       ...common,
       { label: 'Скопировать ссылку [[…]]', icon: '🔗', run: () => copyText(`[[${n.title}]]`), disabled: !n.title },
+      ...fileItems(n.id),
       ...take,
       {
         label: hidden ? 'Показывать в Базе' : 'Спрятать из Базы',
@@ -894,6 +935,7 @@ function Desktop() {
       },
       'sep',
       { label: 'Открыть копию в новой вкладке', icon: '⧉', run: () => id && go({ id }, true), disabled: !id },
+      ...(id && absOf(id) ? ['sep' as const, ...fileItems(id)] : []),
     ]);
   }
 
@@ -907,6 +949,9 @@ function Desktop() {
       if (mod && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         createNote(e.shiftKey);
+      } else if (mod && e.shiftKey && (e.key.toLowerCase() === 'o' || e.key.toLowerCase() === 'щ')) {
+        e.preventDefault();
+        openFilesRef.current();
       } else if (mod && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'o' || e.key.toLowerCase() === 'p')) {
         e.preventDefault();
         searchRef.current?.focus();
@@ -1035,6 +1080,7 @@ function Desktop() {
           phoneOf={phoneOf}
           phoneBusy={phone.busy}
           vault={vault}
+          onOpenFiles={openFiles}
           vaultErr={vaultErr}
           clearVaultErr={() => setVaultErr('')}
           isService={isService}
@@ -1140,6 +1186,15 @@ function Desktop() {
                   <span title={extPath(note.id)}>📄 Файл вне хранилища: {extPath(note.id)} — правки пишутся прямо в него</span>
                   <button className="link-btn" onClick={() => extApi.reveal(extPath(note.id))}>
                     Показать в папке
+                  </button>
+                  <button
+                    className="link-btn"
+                    onClick={() => {
+                      copyText(extPath(note.id));
+                      setVaultErr('Путь скопирован');
+                    }}
+                  >
+                    Скопировать путь
                   </button>
                   {vault.info && (
                     <button className="link-btn" onClick={() => void extToVault(note.id, '')}>
@@ -1293,6 +1348,7 @@ function Sidebar({
   setOpen,
   onTreeMenu,
   vault,
+  onOpenFiles,
   vaultErr,
   clearVaultErr,
   treeVisible,
@@ -1310,6 +1366,8 @@ function Sidebar({
   iconOf: (n: Note) => string;
   filesOf: Map<string, number>;
   vault: Vault;
+  /** «Открыть файл…» — .md с диска, править на месте. */
+  onOpenFiles: () => void;
   vaultErr: string;
   clearVaultErr: () => void;
   notes: Note[];
@@ -1376,6 +1434,8 @@ function Sidebar({
   const menu = useMenu();
   const vaultMenu = (e: React.MouseEvent) =>
     menu(e, [
+      { label: 'Открыть файл .md с диска…', icon: '📄', keys: 'Ctrl+Shift+O', run: onOpenFiles },
+      'sep' as const,
       { label: 'Открыть или создать папку-хранилище…', icon: '📂', run: () => void vault.choose().catch((x) => alert((x as Error).message)) },
       ...(vault.info ? [{ label: 'Показать в проводнике', icon: '🗂', run: () => vaultApi.reveal('_') /* папка этого пути — корень хранилища */ }] : []),
       'sep' as const,
@@ -1412,6 +1472,11 @@ function Sidebar({
         <button className="dk-icon" title="Новая заметка (Ctrl+N)" onClick={() => onCreate(null, 'note')}>
           ✎
         </button>
+        {native.available() && (
+          <button className="dk-icon" title="Открыть файл .md с диска (Ctrl+Shift+O) — правится на месте, в хранилище не переносится" onClick={onOpenFiles}>
+            📂
+          </button>
+        )}
       </div>
       {filtering && (
         <div className="dk-chosen">
