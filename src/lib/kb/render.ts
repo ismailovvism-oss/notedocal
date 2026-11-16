@@ -60,6 +60,25 @@ export function prepareMarkdown(
     i = j < 0 ? -1 : codeOnly.indexOf('%%', end);
   }
 
+  // замечания и правки CriticMarkup (src/lib/kb/remarks.ts) — плашкой и цветом
+  for (const m of masked.matchAll(/\{(>>|==|\+\+|--|~~)([\s\S]*?)(<<|==|\+\+|--|~~)\}/g)) {
+    const close = ({ '>>': '<<', '==': '==', '++': '++', '--': '--', '~~': '~~' } as Record<string, string>)[m[1]];
+    if (m[3] !== close) continue;
+    const t = m[2].trim();
+    const arrow = t.indexOf('~>');
+    const html =
+      m[1] === '>>'
+        ? `<span class="kb-remark" title="Замечание">✎ ${esc(t)}</span>`
+        : m[1] === '=='
+          ? `<mark class="kb-crit-hl">${esc(t)}</mark>`
+          : m[1] === '++'
+            ? `<ins class="kb-crit-ins">${esc(t)}</ins>`
+            : m[1] === '--' || arrow < 0
+              ? `<del class="kb-crit-del">${esc(t)}</del>`
+              : `<del class="kb-crit-del">${esc(t.slice(0, arrow))}</del><ins class="kb-crit-ins">${esc(t.slice(arrow + 2))}</ins>`;
+    repl.push({ start: m.index!, end: m.index! + m[0].length, html });
+  }
+
   const counts = ctx?.noteId ? anchorCounts(ctx.index, ctx.noteId) : new Map();
   const countAttrs = (name: string) => {
     const c = counts.get(name.toLowerCase());

@@ -463,3 +463,91 @@
   min-width: 0;
   flex: 1 1 260px;
 }
+
+/* ── из md-редактора: замечания в файле, правки CriticMarkup, арабский, Хемингуэй, «рядом» ── */
+
+/* арабский — Amiri только для арабских букв; кегль — кнопками «ар − +» (--ar-scale) */
+@font-face {
+  font-family: 'DkArabic';
+  src: local('Amiri'), local('Amiri Regular'), local('Amiri-Regular'), local('Noto Naskh Arabic');
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+.dk .live-host .cm-ar,
+.dk .dk-preview .ar {
+  font-family: 'DkArabic', 'Amiri', 'Noto Naskh Arabic', serif;
+  font-size: calc(1em * var(--ar-scale, 1.3));
+  line-height: 1.9;
+}
+
+/* замечание к абзацу {>>…<<} — плашкой; правки — цветом */
+.dk .live-host .cm-remark-line {
+  background: color-mix(in srgb, #e8a33d 14%, transparent);
+  border-inline-start: 3px solid #e8a33d;
+  padding-inline-start: 8px !important;
+  border-radius: 4px;
+  font-size: 0.94em;
+}
+.dk .live-host .cm-crit-note::before { content: '✎ '; color: #c4821f; }
+.cm-crit-hl, .kb-crit-hl { background: color-mix(in srgb, #f5d000 35%, transparent); }
+.cm-crit-ins, .kb-crit-ins { color: #2e8b57; text-decoration: underline; text-decoration-color: color-mix(in srgb, #2e8b57 50%, transparent); }
+.cm-crit-del, .kb-crit-del { color: #c0392b; text-decoration: line-through; }
+.kb-remark {
+  display: block;
+  margin: 4px 0;
+  padding: 4px 10px;
+  border-inline-start: 3px solid #e8a33d;
+  border-radius: 4px;
+  background: color-mix(in srgb, #e8a33d 14%, transparent);
+  font-size: 0.94em;
+}
+
+/* Хемингуэй: попытка стереть — красная вспышка */
+.live-host.hem-flash { animation: dk-hem 0.35s ease-out; }
+@keyframes dk-hem {
+  from { box-shadow: inset 0 0 0 2px var(--danger, #d33); }
+  to { box-shadow: inset 0 0 0 2px transparent; }
+}
+.dk-tool.on { border-color: var(--accent); background: var(--accent-soft); }
+.dk-modes { flex-wrap: wrap; }
+
+/* просмотр рядом с правкой */
+.dk-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.dk-preview {
+  border-inline-start: 1px solid var(--border);
+  padding-inline-start: 20px;
+  font-size: 1.04rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
+
+/* список замечаний справа */
+.dk-remarks { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dk-remarks li { display: flex; gap: 4px; align-items: flex-start; }
+.dk-remark-go {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 6px;
+  text-align: start;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+.dk-remark-go:hover { border-color: var(--accent); }
+.dk-remark-go > span:nth-child(2) { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.dk-remark-go > span:nth-child(3) { grid-column: 2; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dk-remarks li.gen .dk-remark-go { border-style: dashed; }
+.dk-remark-n { font-weight: 600; color: #c4821f; }
+.dk-remark-x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 2px 4px; }
+.dk-remark-x:hover { color: var(--danger, #d33); }
+/* направление абзаца в просмотре — по его первому сильному знаку: арабский справа */
+.dk-preview :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th) { unicode-bidi: plaintext; text-align: start; }

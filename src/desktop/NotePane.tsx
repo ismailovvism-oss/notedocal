@@ -24,6 +24,8 @@ import { checkNewTag, tagCards } from '../lib/kb/tags';
 import { OWN_KEYS, fieldsOf, schemas } from '../lib/kb/schema';
 import type { ScopeWhy } from '../lib/kb/scope';
 import { onFlush } from './flush';
+import { generalItems, parseRemarks, remarksText, removeRemark, writeGeneral, type Remark } from '../lib/kb/remarks';
+import { renderMarkdown } from '../lib/markdown';
 
 // не лениво: окно держит страницу открытой часами, а пересборка стирает старые куски —
 // догружаемый потом файл мог бы уже исчезнуть (так 02.11.2026 «Свойства» роняли страницу)
@@ -127,6 +129,9 @@ export function NotePane({
 
   // --- голос: метка %%🎤:id%% на месте курсора, распознанное встаёт перед ней ---
   const editor = useRef<LiveEditorHandle | null>(null);
+  // из md-редактора: режим Хемингуэя и просмотр рядом — для всех заметок, запоминаются
+  const [hem, setHem] = useLocalStorage<boolean>('dk.hemingway', false);
+  const [split, setSplit] = useLocalStorage<boolean>('dk.split', false);
   const [voice, setVoice] = useState<{ id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null>(null);
   // с какого микрофона писать: mic — какой стоит в системе по умолчанию; выбор запоминается
   const [mic, setMic] = useLocalStorage<string>('dk.mic', 'mic');
@@ -308,6 +313,8 @@ export function NotePane({
             .then((t) => t && h.replaceSelection(() => t))
             .catch(() => setMsg('Вставить из меню не дали — нажмите Ctrl+V')),
       },
+      'sep',
+      { label: 'Замечание к абзацу', icon: '✎', run: () => h.remark() },
       'sep',
     );
     if (sel) {
@@ -621,9 +628,11 @@ export function NotePane({
       {msg && <div className="dk-msg small">{msg}</div>}
       {picking && <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>}
 
+      <div className={split ? 'dk-split' : undefined}>
       <div onContextMenu={textMenu}>
       <LiveEditor
         key={note.id}
+        hemingway={hem}
         value={body}
         onChange={change}
         onCommit={save}
@@ -653,6 +662,20 @@ export function NotePane({
         ]}
       />
       </div>
+      {split && (
+        <div
+          className="dk-preview"
+          dangerouslySetInnerHTML={{ __html: arabicRuns(renderMarkdown(body, { index: kb.index, noteId: note.id })) }}
+          onClick={(e) => {
+            const a = (e.target as HTMLElement).closest<HTMLElement>('.kb-link');
+            if (!a) return;
+            e.preventDefault();
+            const { target, anchor, heading } = a.dataset;
+            kb.open(target ? { name: target, anchor, heading } : { id: note.id, anchor, heading });
+          }}
+        />
+      )}
+      </div>
       {toolsSlot &&
         createPortal(
           <Tools
@@ -673,6 +696,11 @@ export function NotePane({
             version={note.currentVersion ?? 'оригинал'}
             pickVersion={pickVersion}
             setMsg={setMsg}
+            remarks={parseRemarks(body)}
+            hem={hem}
+            setHem={setHem}
+            split={split}
+            setSplit={setSplit}
           />,
           toolsSlot,
         )}
@@ -729,12 +757,17 @@ const DROP_LIMIT = 20 * 1024 * 1024;
 
 const keep = (e: React.MouseEvent) => e.preventDefault();
 
+const AR = '\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff';
+const AR_RUN = new RegExp(`[${AR}](?:[${AR} \\t.,:;!?«»()\\-]*[${AR}])?`, 'g');
+/** Арабские куски в просмотре — в `<span class="ar">`: свой шрифт и кегль (как в правке). */
+const arabicRuns = (html: string) => html.replace(/>([^<]+)</g, (_, t: string) => '>' + t.replace(AR_RUN, '<span class="ar">$&</span>') + '<');
+
 /** Кнопка панели: не отнимает фокус у текста — выделение в редакторе остаётся. Отдельным
  *  компонентом, а не внутри Tools: панель перерисовывается 5 раз в секунду во время записи,
  *  и кнопка, объявленная внутри, пересоздавалась бы между нажатием и отпусканием. */
-function B({ t, title, on, wide }: { t: React.ReactNode; title: string; on: () => void; wide?: boolean }) {
+function B({ t, title, on, wide, active }: { t: React.ReactNode; title: string; on: () => void; wide?: boolean; active?: boolean }) {
   return (
-    <button className={`dk-tool ${wide ? 'wide' : ''}`} title={title} onMouseDown={keep} onClick={on}>
+    <button className={`dk-tool ${wide ? 'wide' : ''} ${active ? 'on' : ''}`} title={title} onMouseDown={keep} onClick={on}>
       {t}
     </button>
   );
@@ -774,6 +807,11 @@ function Tools({
   version,
   pickVersion,
   setMsg,
+  remarks,
+  hem,
+  setHem,
+  split,
+  setSplit,
 }: {
   editor: React.MutableRefObject<LiveEditorHandle | null>;
   voice: { id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null;
@@ -792,8 +830,27 @@ function Tools({
   version: string;
   pickVersion: (name: string) => void;
   setMsg: (m: string) => void;
+  remarks: Remark[];
+  hem: boolean;
+  setHem: (v: boolean) => void;
+  split: boolean;
+  setSplit: (v: boolean) => void;
 }) {
   const h = () => editor.current;
+  const [arScale, setArScale] = useLocalStorage<number>('dk.arScale', 1.3);
+  useEffect(() => document.documentElement.style.setProperty('--ar-scale', String(arScale)), [arScale]);
+  /** Замечание с тем же номером — по свежему тексту (позиции могли сдвинуться). */
+  const fresh = (r: Remark) => {
+    const t = h()?.text() ?? '';
+    return { t, r: parseRemarks(t).find((x) => x.n === r.n && x.kind === r.kind) };
+  };
+  const addGeneral = () => {
+    const v = prompt('Общее замечание — ко всему тексту, не к абзацу')?.trim();
+    const e = h();
+    if (!v || !e) return;
+    const t = e.text();
+    e.apply(writeGeneral(t, [...generalItems(t), v]));
+  };
   const menu = useMenu();
   /** Действие над словами — только когда они выделены. */
   const onWords = (a: Parameters<LiveEditorHandle['run']>[0]) => () => {
@@ -871,6 +928,68 @@ function Tools({
           <B t="—" title="Черта-разделитель" on={() => h()?.insertAtCursor('\n\n---\n\n')} />
           <B t="%%" title="Скрытый текст (виден только в правке)" on={() => h()?.wrap('%%')} />
         </div>
+        <div className="dk-seg dk-modes">
+          <B t="✒ Хемингуэй" title="Стирать написанное нельзя: пиши вперёд, правь потом" on={() => setHem(!hem)} active={hem} />
+          <B t="◫ Рядом" title="Просмотр рядом с правкой" on={() => setSplit(!split)} active={split} />
+        </div>
+        <div className="dk-seg">
+          <span className="muted small">арабский:</span>
+          <B t="ар −" title="Арабский мельче" on={() => setArScale(Math.max(0.8, Math.round((arScale - 0.1) * 10) / 10))} />
+          <span className="small">{Math.round(arScale * 100)}%</span>
+          <B t="ар +" title="Арабский крупнее" on={() => setArScale(Math.min(2.5, Math.round((arScale + 0.1) * 10) / 10))} />
+        </div>
+      </Block>
+
+      <Block id="remarks" title={`✎ Замечания${remarks.length ? ` · ${remarks.length}` : ''}`}>
+        <div className="dk-list-tools">
+          <B wide t="✎ К абзацу" title="Замечание к абзацу, где курсор: строкой {>>…<<} сразу после него, в самом файле" on={() => h()?.remark()} />
+          <B wide t="＋ Общее" title="Замечание ко всему тексту: в блок %%замечания в конце файла" on={addGeneral} />
+        </div>
+        {remarks.length > 0 && (
+          <>
+            <ol className="dk-remarks">
+              {remarks.map((r) => (
+                <li key={`${r.kind}-${r.n}`} className={r.kind}>
+                  <button
+                    className="dk-remark-go"
+                    title={r.kind === 'par' ? `К «${r.anchor}»` : 'Общее замечание'}
+                    onMouseDown={keep}
+                    onClick={() => {
+                      const { r: x } = fresh(r);
+                      if (x) h()?.goto(x.kind === 'par' ? (x.anchorAt ?? x.from) : x.from);
+                    }}
+                  >
+                    <span className="dk-remark-n">{r.n}</span>
+                    <span dir="auto">{r.text || '…'}</span>
+                    <span className="muted small" dir="auto">{r.kind === 'par' ? r.anchor : 'общее'}</span>
+                  </button>
+                  <button
+                    className="dk-remark-x"
+                    title="Убрать замечание"
+                    onMouseDown={keep}
+                    onClick={() => {
+                      const { t, r: x } = fresh(r);
+                      if (x) h()?.apply(removeRemark(t, x));
+                    }}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ol>
+            <B
+              wide
+              t="⧉ Скопировать все"
+              title="Все замечания списком вместе с местами — отдать Claude"
+              on={() =>
+                void navigator.clipboard
+                  .writeText(remarksText(remarks))
+                  .then(() => setMsg(`Скопировано замечаний: ${remarks.length}`))
+                  .catch(() => setMsg('Скопировать не дали'))
+              }
+            />
+          </>
+        )}
       </Block>
 
       <Block id="links" title="Метки и ссылки">

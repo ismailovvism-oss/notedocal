@@ -368,7 +368,54 @@ function build(state: EditorState): Built {
     const j = doc.indexOf('%%', i + 2);
     const end = j < 0 ? doc.length : j + 2;
     out.push(mark('cm-hidden-text').range(i, end));
+    // отдельная строка %%…%% — замечание (как {>>…<<}, src/lib/kb/remarks.ts); блок «%%замечания» — тоже
+    const ln = lineOf(i);
+    if (j >= 0 && ln.from === i - (doc.slice(ln.from, i).length) && !doc.slice(ln.from, i).trim() && lineOf(end).to >= end && !doc.slice(end, lineOf(end).to).trim() && !/^%%🎤:/.test(doc.slice(i))) {
+      for (let p = ln.from; p <= lineOf(end).from; p = lineOf(p).to + 1) out.push(Decoration.line({ class: 'cm-remark-line' }).range(p));
+    }
     i = j < 0 ? -1 : doc.indexOf('%%', end);
+  }
+
+  // замечания и правки CriticMarkup (из md-редактора, src/lib/kb/remarks.ts): {>>замечание<<},
+  // {==выделить==}, {++вставить++}, {--убрать--}, {~~было~>стало~~}
+  for (const m of masked.matchAll(/\{(>>|==|\+\+|--|~~)([\s\S]*?)(<<|==|\+\+|--|~~)\}/g)) {
+    const kind = m[1];
+    const close = { '>>': '<<', '==': '==', '++': '++', '--': '--', '~~': '~~' }[kind];
+    if (m[3] !== close) continue;
+    const from = m.index!;
+    const to = from + m[0].length;
+    const cls = ({ '>>': 'cm-crit-note', '==': 'cm-crit-hl', '++': 'cm-crit-ins', '--': 'cm-crit-del', '~~': 'cm-crit-sub' } as Record<string, string>)[kind];
+    if (kind === '>>') {
+      // замечание отдельной строкой — плашкой во всю строку
+      const a = lineOf(from);
+      const b = lineOf(to);
+      if (doc.slice(a.from, from).trim() === '' && doc.slice(to, b.to).trim() === '') {
+        for (let p = a.from; p <= b.from; p = lineOf(p).to + 1) out.push(Decoration.line({ class: 'cm-remark-line' }).range(p));
+      }
+    }
+    if (kind === '~~') {
+      const arrow = m[2].indexOf('~>');
+      if (arrow >= 0) {
+        out.push(mark('cm-crit-del').range(from + 3, from + 3 + arrow));
+        out.push(mark('cm-crit-ins').range(from + 3 + arrow + 2, to - 3));
+        if (!touches(state, from, to)) {
+          hideRange(from, from + 3);
+          hideRange(from + 3 + arrow, from + 3 + arrow + 2);
+          hideRange(to - 3, to);
+        }
+        continue;
+      }
+    }
+    out.push(mark(cls).range(from, to));
+    if (!touches(state, from, to)) {
+      hideRange(from, from + 3);
+      hideRange(to - 3, to);
+    }
+  }
+
+  // арабский — своим шрифтом и кеглем (окно «База»: Amiri, размер — кнопками «ар − +»)
+  for (const m of doc.matchAll(/[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff](?:[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff \t.,:;!?«»()\-]*[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff])?/g)) {
+    out.push(mark('cm-ar').range(m.index!, m.index! + m[0].length));
   }
 
   for (const m of masked.matchAll(/[ \t]\^([A-Za-z0-9-]+)[ \t]*$/gm)) {

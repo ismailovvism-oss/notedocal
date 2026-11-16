@@ -4,7 +4,7 @@
 // `#` — существующие теги. Вставка с оформлением (из браузера, Word) становится markdown.
 
 import { useEffect, useRef, useState } from 'react';
-import { EditorSelection, EditorState, type Extension } from '@codemirror/state';
+import { Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
@@ -21,6 +21,8 @@ import { fmtSeconds, useRecorder } from '../lib/recorder';
 import { attachmentsReady, uploadAttachment } from '../lib/attachments';
 import { useLocalStorage } from '../lib/storage';
 import { LANGS } from '../lib/quick';
+import { hemingway as hemingwayExt } from '../lib/kb/hemingway';
+import { remarkAt } from '../lib/kb/remarks';
 
 /** Минимальная правка вместо замены всего текста: курсор и история не прыгают. */
 function diff(a: string, b: string) {
@@ -111,8 +113,18 @@ export default function LiveEditor({
   voice = true,
   className,
   handle,
+  hemingway = false,
 }: LiveEditorProps) {
   const host = useRef<HTMLDivElement>(null);
+  // режим Хемингуэя включается и выключается на лету, без пересоздания редактора
+  const hemComp = useRef(new Compartment());
+  const flash = () => {
+    const el = host.current;
+    if (!el) return;
+    el.classList.remove('hem-flash');
+    void el.offsetWidth;
+    el.classList.add('hem-flash');
+  };
   const viewRef = useRef<EditorView | null>(null);
   const kb = useKb();
   const kbRef = useRef(kb);
@@ -158,6 +170,7 @@ export default function LiveEditor({
           EditorView.perLineTextDirection.of(true),
           cmPlaceholder(placeholder ?? ''),
           livePreview(),
+          hemComp.current.of(hemingway ? hemingwayExt(flash) : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
             if (u.selectionSet || u.docChanged || u.focusChanged || u.geometryChanged) updateBar(u.view);
@@ -226,6 +239,29 @@ export default function LiveEditor({
           if (at < 0) return null;
           return { before: doc.slice(Math.max(0, at - 1), at), after: doc.slice(at + find.length, at + find.length + 1) };
         },
+        remark: () => {
+          const res = remarkAt(view.state.doc.toString(), view.state.selection.main.head);
+          if ('existing' in res) {
+            // уже есть — выделить его текст внутри скобок: печатай, чтобы заменить
+            const r = res.existing;
+            const raw = view.state.sliceDoc(r.from, r.to);
+            const open = raw.startsWith('{>>') ? 3 : raw.startsWith('%%') ? 2 : 0;
+            const close = raw.endsWith('<<}') ? 3 : raw.endsWith('%%') ? 2 : 0;
+            view.dispatch({ selection: { anchor: r.from + open, head: r.to - close }, scrollIntoView: true });
+          } else {
+            view.dispatch({ changes: res.change, selection: { anchor: res.cursor }, scrollIntoView: true, filter: false });
+          }
+          view.focus();
+        },
+        apply: (change, cursor) => {
+          view.dispatch({ changes: change, filter: false, ...(cursor !== undefined ? { selection: { anchor: cursor }, scrollIntoView: true } : {}) });
+        },
+        goto: (pos) => {
+          const at = Math.min(pos, view.state.doc.length);
+          view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at, { y: 'center' }) });
+          view.focus();
+        },
+        text: () => view.state.doc.toString(),
       };
     }
     if (autoFocus) {
@@ -241,6 +277,10 @@ export default function LiveEditor({
     // редактор создаётся один раз; новые value приходят через setEditorText ниже
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: hemComp.current.reconfigure(hemingway ? hemingwayExt(flash) : []) });
+  }, [hemingway]);
 
   // текст поменяли снаружи (синхронизация, «Отменить») — привести редактор к нему
   useEffect(() => {

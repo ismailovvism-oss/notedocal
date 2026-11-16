@@ -25,6 +25,15 @@ export interface LiveEditorHandle {
   startLink: () => void;
   /** Выделенный текст (пусто — ничего не выделено). */
   selected: () => string;
+  /** Замечание к абзацу под курсором (src/lib/kb/remarks.ts): нет — завести `{>>|<<}` после
+   *  абзаца, есть — выделить его текст. */
+  remark: () => void;
+  /** Применить правку текста (замечания из панели); cursor — куда поставить курсор. */
+  apply: (change: { from: number; to: number; insert: string }, cursor?: number) => void;
+  /** Курсор на место и показать его. */
+  goto: (pos: number) => void;
+  /** Текст сейчас (с несохранённым). */
+  text: () => string;
 }
 
 export interface LiveEditorProps {
@@ -47,4 +56,6 @@ export interface LiveEditorProps {
   voice?: boolean;
   className?: string;
   handle?: React.MutableRefObject<LiveEditorHandle | null>;
+  /** Режим Хемингуэя: стирать написанное нельзя (src/lib/kb/hemingway.ts). */
+  hemingway?: boolean;
 }
