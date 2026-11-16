@@ -39,6 +39,9 @@ export interface QtLink {
   extRename: (s: string, cb: (s: string) => void) => void;
   extMove: (s: string, cb: (s: string) => void) => void;
   extReveal: (path: string) => void;
+  /** Режим тестировщика (baza.py bug*, zamechaniya.py); в окне со старой программой их нет. */
+  bugNotes?: (cb: (s: string) => void) => void;
+  bugDo?: (s: string, cb: (s: string) => void) => void;
   voice: (s: string) => void;
   process: (s: string) => void;
   mics: (cb: (s: string) => void) => void;
@@ -178,6 +181,86 @@ export const extApi = {
       cb(q);
     }
     return () => void openListeners.delete(cb);
+  },
+};
+
+/** Замечание тестировщика (как в Чатпате): где это было и что не так; ответ — от Claude. */
+export interface BugNote {
+  id: number;
+  ts: number;
+  when: string;
+  account: string;
+  place: string;
+  selector: string;
+  target: string;
+  ctx?: Record<string, unknown> | null;
+  note: string;
+  status: 'new' | 'ask' | 'done' | 'wont';
+  reply: string;
+  done_ts: number;
+}
+export type BugReq =
+  | { do: 'add'; note: string; place: string; selector: string; target: string; html: string; ctx: Record<string, unknown> }
+  | { do: 'edit'; id: number; note: string }
+  | { do: 'status'; id: number; status: BugNote['status']; reply?: string }
+  | { do: 'del'; id: number }
+  | { do: 'clear' };
+
+// Запас без окна (сервер разработки) и в окне со старой программой: замечания лежат в браузере
+// и сами переезжают в общую базу, как только у окна появятся нужные команды.
+const LOCAL_BUGS = 'dk.bugs';
+const localBugs = {
+  list(): BugNote[] {
+    try {
+      return JSON.parse(localStorage.getItem(LOCAL_BUGS) || '[]') as BugNote[];
+    } catch {
+      return [];
+    }
+  },
+  save(list: BugNote[]) {
+    try {
+      localStorage.setItem(LOCAL_BUGS, JSON.stringify(list));
+    } catch {
+      /* переполнено — не страшно */
+    }
+  },
+  act(r: BugReq) {
+    let list = this.list();
+    const now = Math.floor(Date.now() / 1000);
+    if (r.do === 'add') {
+      const id = Math.max(0, ...list.map((n) => n.id)) + 1;
+      const d = new Date();
+      const p = (x: number) => String(x).padStart(2, '0');
+      list.unshift({
+        id, ts: now, when: `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`, account: 'База',
+        place: r.place, selector: r.selector, target: r.target, ctx: r.ctx, note: r.note, status: 'new', reply: '', done_ts: 0,
+      });
+    } else if (r.do === 'edit') list = list.map((n) => (n.id === r.id ? { ...n, note: r.note } : n));
+    else if (r.do === 'status') list = list.map((n) => (n.id === r.id ? { ...n, status: r.status, reply: r.reply || n.reply, done_ts: r.status === 'done' || r.status === 'wont' ? now : 0 } : n));
+    else if (r.do === 'del') list = list.filter((n) => n.id !== r.id);
+    else if (r.do === 'clear') list = list.filter((n) => n.status === 'new' || n.status === 'ask');
+    this.save(list);
+  },
+};
+
+export const bugApi = {
+  /** Замечания доходят до Claude (`zametki замечания`): у окна есть общая база. */
+  shared: () => !!link?.bugNotes && !!link?.bugDo,
+  async list(): Promise<BugNote[]> {
+    if (!bugApi.shared()) return localBugs.list();
+    // записанное, пока общей базы не было, — перенести (один раз)
+    const waiting = localBugs.list();
+    if (waiting.length) {
+      for (const n of [...waiting].reverse()) {
+        await ask((l, d) => l.bugDo!(JSON.stringify({ do: 'add', note: n.note, place: n.place, selector: n.selector, target: n.target, html: '', ctx: n.ctx ?? {} }), d)).catch(() => {});
+      }
+      localBugs.save([]);
+    }
+    return ask<BugNote[]>((l, d) => l.bugNotes!(d));
+  },
+  async act(r: BugReq): Promise<void> {
+    if (!bugApi.shared()) return localBugs.act(r);
+    await ask((l, d) => l.bugDo!(JSON.stringify(r), d));
   },
 };
 

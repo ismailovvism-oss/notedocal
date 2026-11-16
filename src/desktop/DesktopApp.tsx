@@ -36,6 +36,7 @@ import { dirName, inVault, pathOfId } from '../lib/kb/vault';
 import { extPath, isExt, useExternal } from './useExternal';
 import { parseRemarks } from '../lib/kb/remarks';
 import { parseFootnotes } from '../lib/kb/footnotes';
+import { useTester } from './Tester';
 import { EditorView } from '@codemirror/view';
 
 interface Target extends PaneFocus {
@@ -925,6 +926,27 @@ function Desktop() {
 
   const byId = index.byId;
   const note = target ? byId.get(target.id) : undefined;
+  // режим тестировщика: замечания на месте (./Tester.tsx) — что было открыто в этот момент
+  const tester = useTester(
+    () => ({
+      window: 'База',
+      note_id: note?.id ?? '',
+      note: note?.title ?? '',
+      store: !note ? '' : inVault(note.id) ? 'хранилище' : isExt(note.id) ? 'файл вне хранилища' : 'облако',
+      view: (() => {
+        try {
+          return JSON.parse(localStorage.getItem('dk.view') || '"edit"') as string;
+        } catch {
+          return 'edit';
+        }
+      })(),
+      rail: railShut ? 'скрыта' : rightTab,
+      tree: sideShut ? 'скрыто' : 'видно',
+      vault: vault.info?.name ?? '',
+      theme: document.documentElement.dataset.theme ?? '',
+    }),
+    note?.title ?? '',
+  );
   // счётчики на вкладках правой панели
   const railCounts = useMemo(() => {
     const b = note && !note.vault?.mime ? (note.body ?? '') : '';
@@ -1072,6 +1094,17 @@ function Desktop() {
                 ＋
               </button>
             </div>
+            <button
+              className={`dk-icon dk-bug ${tester.fresh ? 'hot' : ''}`}
+              title={
+                tester.fresh
+                  ? 'Есть ответы на ваши замечания'
+                  : `Замечания тестировщика${tester.open ? ` — открытых: ${tester.open}` : ''}. Alt+щелчок по любому месту — замечание к нему (или F8, потом щелчок)`
+              }
+              onClick={tester.showList}
+            >
+              🐞{(tester.fresh || tester.open) > 0 && <span className="dk-bug-n">{tester.fresh || tester.open}</span>}
+            </button>
             <button className={`dk-icon dk-panel-btn ${focusOn ? 'on' : ''}`} title={focusOn ? 'Вернуть панели (F9)' : 'Фокус: только текст, без панелей (F9)'} onClick={toggleFocus}>
               ⛶
             </button>
@@ -1160,7 +1193,7 @@ function Desktop() {
                 ['tools', '🎛', 'Действия', 0],
                 ['remarks', '✎', 'Замечания', railCounts.remarks],
                 ['foot', '¹', 'Сноски', railCounts.foot],
-                ['note', '☰', 'Заметка', 0],
+                ['note', '☰', 'Обзор', 0],
                 ['tags', '#', 'Теги', selectedTags(sel).length],
               ] as [Rail, string, string, number][]
             ).map(([id, icon, label, n]) => (
@@ -1192,6 +1225,7 @@ function Desktop() {
           </div>
         </aside>
       </div>
+      {tester.overlay}
 
       {dialog?.kind === 'link' && (
         <LinkPicker
@@ -1558,8 +1592,28 @@ function Context({ note }: { note: Note }) {
   const headings = kb.index.parsed.get(note.id)?.headings ?? [];
   const comments = useCommentRefs(note.id);
   const anchors = kb.index.parsed.get(note.id)?.anchors;
+  const linked = (kb.index.incoming.get(note.id) ?? []).length;
   return (
     <div className="dk-context">
+      {/* чего нет — сказать, а не молчать: иначе непонятно, для чего вкладка */}
+      {headings.length === 0 && (
+        <section>
+          <h4>Оглавление</h4>
+          <p className="muted small dk-context-none">Заголовков нет. Строка с # в начале станет заголовком и появится здесь — щелчок переносит к ней.</p>
+        </section>
+      )}
+      {linked === 0 && (
+        <section>
+          <h4>Ссылаются сюда</h4>
+          <p className="muted small dk-context-none">Пока никто. Когда в другой заметке появится ссылка [[{note.title || 'эта заметка'}]], она будет видна здесь.</p>
+        </section>
+      )}
+      {comments.length === 0 && (
+        <section>
+          <h4>Комментарии</h4>
+          <p className="muted small dk-context-none">Нет. Выделите слова в тексте → «💬 Коммент.» во вкладке «Действия» — заметка на полях к этим словам.</p>
+        </section>
+      )}
       {headings.length > 0 && (
         <section>
           <h4>Оглавление</h4>
