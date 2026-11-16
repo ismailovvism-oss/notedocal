@@ -83,7 +83,12 @@ export function useExternal(onRenamed: (from: string, to: string) => void, onErr
       }
     };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    // и раз в несколько секунд: файл правит Claude (вычитка), окно при этом в фокусе
+    const t = setInterval(() => document.visibilityState === 'visible' && filesRef.current.size > 0 && onFocus(), 4000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(t);
+    };
   }, []);
 
   const open = useCallback(

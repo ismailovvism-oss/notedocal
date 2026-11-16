@@ -140,9 +140,4 @@ export function removeFootnote(doc: string, f: Footnote): Change[] {
   return out.sort((a, b) => a.from - b.from);
 }
 
-/** Применить несколько изменений (места — по исходному тексту). */
-export function applyAll(doc: string, changes: Change[]): string {
-  let out = doc;
-  for (const c of [...changes].sort((a, b) => b.from - a.from)) out = out.slice(0, c.from) + c.insert + out.slice(c.to);
-  return out;
-}
+export { applyAll } from './remarks.ts';

@@ -70,4 +70,8 @@ export interface LiveEditorProps {
   handle?: React.MutableRefObject<LiveEditorHandle | null>;
   /** Режим Хемингуэя: стирать написанное нельзя (src/lib/kb/hemingway.ts). */
   hemingway?: boolean;
+  /** Правка приостановлена: только читать (вычитка — Claude сейчас правит этот файл). */
+  locked?: boolean;
+  /** Окно «База»: замечания ездят с абзацем при вырезании, а у удалённого абзаца — уходят в общие. */
+  review?: boolean;
 }

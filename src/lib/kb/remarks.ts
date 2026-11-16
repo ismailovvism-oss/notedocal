@@ -8,15 +8,87 @@
 // Нумерация сквозная: общие первыми, к абзацам следом — «замечание четыре» понятно обоим.
 // Замечание всегда отдельной строкой: внутри арабской строки скобки прыгали бы не туда.
 //
+// Вычитка (16.11.2026, вместо артефакта «Редактура»): переписка лежит в самом замечании,
+// следующими строками, — отдельной базы нет:
+//
+//     {>>[к словам: довод слабый] Найди другой довод
+//     ✓ Заменил на хадис Ибн Умара<<}
+//
+// Первая часть — слова автора (в начале может стоять `[к словам: …]` — фраза, к которой
+// замечание, или `[к удалённому: …]` — абзац удалили, начало его текста). Дальше — ответы,
+// каждый с новой строки и со значка: `✓` сделано, `❓` вопрос автору, `✗` не принято — пишет
+// Claude; `↩` — приписка автора (ответ на вопрос, «не то»). Состояние — по последнему значку:
+// ✓ учтено, ❓ вопрос, ✗ не принято, иначе открыто. «Принять» — замечание убирается из файла.
+//
 // Без React и CodeMirror: правки — изменения {from, to, insert} по тексту; тесты —
 // scripts/kbremarks.test.mjs.
 
-export interface Remark {
+export type RemarkStatus = 'open' | 'done' | 'ask' | 'no';
+export type Mark = '✓' | '❓' | '✗' | '↩';
+export interface Msg {
+  /** Кто: Claude (✓ ❓ ✗) или автор (↩). */
+  by: 'claude' | 'author';
+  mark: Mark;
+  text: string;
+}
+
+/** Разобранное нутро замечания. */
+export interface Inner {
+  /** Слова автора — само замечание. */
+  text: string;
+  /** Фраза абзаца, к которой замечание (`[к словам: …]`). */
+  phrase?: string;
+  /** Абзац удалён — начало его текста (`[к удалённому: …]`). */
+  gone?: string;
+  thread: Msg[];
+  status: RemarkStatus;
+}
+
+const MARKS: Record<Mark, RemarkStatus> = { '✓': 'done', '❓': 'ask', '✗': 'no', '↩': 'open' };
+const MARK_LINE = /^\s*(✓|❓|✗|↩)\s*(.*)$/u;
+
+/** Нутро замечания: фраза, слова автора, переписка, состояние. */
+export function parseInner(raw: string): Inner {
+  const lines = raw.replace(/ ⏎ /g, '\n').split('\n');
+  const head: string[] = [];
+  const thread: Msg[] = [];
+  for (const l of lines) {
+    const m = l.match(MARK_LINE);
+    // первая строка — всегда слова автора, даже если начинается со значка
+    if (m && (head.length || thread.length)) thread.push({ by: m[1] === '↩' ? 'author' : 'claude', mark: m[1] as Mark, text: m[2].trim() });
+    else if (thread.length) thread[thread.length - 1].text += '\n' + l.trim();
+    else head.push(l);
+  }
+  let text = head.join('\n').trim();
+  let phrase: string | undefined;
+  let gone: string | undefined;
+  for (;;) {
+    const m = text.match(/^\[(к словам|к удалённому):\s*([^\]]*)\]\s*/i);
+    if (!m) break;
+    if (m[1].toLowerCase() === 'к словам') phrase = m[2].trim();
+    else gone = m[2].trim();
+    text = text.slice(m[0].length);
+  }
+  const last = thread[thread.length - 1];
+  return { text, phrase, gone, thread, status: last ? MARKS[last.mark] : 'open' };
+}
+
+/** Собрать нутро обратно в текст. */
+export function buildInner(x: Pick<Inner, 'text'> & Partial<Inner>): string {
+  const tag = (x.gone ? `[к удалённому: ${x.gone.replace(/[\]\n]/g, ' ')}] ` : '') + (x.phrase ? `[к словам: ${x.phrase.replace(/[\]\n]/g, ' ')}] ` : '');
+  const one = (t: string) => t.replace(/\n\s*\n+/g, '\n').trim();
+  return [tag + one(x.text), ...(x.thread ?? []).map((m) => `${m.mark} ${one(m.text)}`)].join('\n').replace(/<<\}/g, '<< }');
+}
+
+export interface Remark extends Inner {
   kind: 'gen' | 'par';
   /** Сквозной номер с 1. */
   n: number;
-  text: string;
-  /** Где лежит в тексте: строка(и) замечания (у общего — его строка в блоке). */
+  /** Нутро как в файле (с фразой и перепиской). */
+  raw: string;
+  /** Замечание посреди строки (а не отдельной строкой) — так писал md-редактор. */
+  inline?: boolean;
+  /** Где лежит в тексте: строка(и) замечания (у общего — его пункт в блоке). */
   from: number;
   to: number;
   /** К какому месту (у замечания к абзацу) — начало абзаца выше, коротко. */
@@ -52,14 +124,22 @@ const GEN_CLOSE = /^\s*%%\s*$/;
 const VOICE = /^%%🎤:[a-z0-9]+%%$/;
 
 /** Блок общих замечаний: строки начала и конца, пункты. null — блока нет. */
-function genBlock(L: Line[]): { a: number; b: number; items: { text: string; line: number }[] } | null {
+function genBlock(L: Line[]): { a: number; b: number; items: { text: string; line: number; last: number }[] } | null {
   for (let i = 0; i < L.length; i++) {
     if (!GEN_OPEN.test(L[i].text)) continue;
     let j = i + 1;
     while (j < L.length && !GEN_CLOSE.test(L[j].text)) j++;
-    const items: { text: string; line: number }[] = [];
+    // пункт — строка с номером; следующие без номера — его продолжение (переписка)
+    const items: { text: string; line: number; last: number }[] = [];
     for (let k = i + 1; k < j && k < L.length; k++) {
-      if (L[k].text.trim()) items.push({ text: L[k].text.replace(/^\s*\d+[.)]\s*/, '').trim(), line: k });
+      const t = L[k].text;
+      if (!t.trim()) continue;
+      if (/^\s*\d+[.)]\s/.test(t) || !items.length) items.push({ text: t.replace(/^\s*\d+[.)]\s*/, '').trim(), line: k, last: k });
+      else {
+        const it = items[items.length - 1];
+        it.text += '\n' + t.trim();
+        it.last = k;
+      }
     }
     return { a: i, b: Math.min(j, L.length - 1), items };
   }
@@ -105,7 +185,7 @@ export function parseRemarks(doc: string): Remark[] {
   const L = linesOf(doc);
   const out: Remark[] = [];
   const g = genBlock(L);
-  for (const it of g?.items ?? []) out.push({ kind: 'gen', n: 0, text: it.text, from: L[it.line].from, to: L[it.line].to });
+  for (const it of g?.items ?? []) out.push({ kind: 'gen', n: 0, raw: it.text, ...parseInner(it.text), from: L[it.line].from, to: L[it.last].to });
   let fence = false;
   for (let i = 0; i < L.length; i++) {
     if (/^\s*(```|~~~)/.test(L[i].text)) fence = !fence;
@@ -118,7 +198,9 @@ export function parseRemarks(doc: string): Remark[] {
         out.push({
           kind: 'par',
           n: 0,
-          text: m[1].trim(),
+          inline: true,
+          raw: m[1].trim(),
+          ...parseInner(m[1].trim()),
           from: L[i].from + m.index!,
           to: L[i].from + m.index! + m[0].length,
           anchor: at.length > 110 ? at.slice(0, 110) + '…' : at || '(в строке)',
@@ -137,7 +219,8 @@ export function parseRemarks(doc: string): Remark[] {
     out.push({
       kind: 'par',
       n: 0,
-      text,
+      raw: text,
+      ...parseInner(text),
       from: L[i].from,
       to: L[j].to,
       anchor: anchor ? (anchor.length > 110 ? anchor.slice(0, 110) + '…' : anchor) : '(начало текста)',
@@ -179,7 +262,14 @@ export function writeGeneral(doc: string, items: string[]): Change {
   const L = linesOf(doc);
   const g = genBlock(L);
   const list = items.map((t) => t.trim()).filter(Boolean);
-  const body = list.length ? '%%замечания\n' + list.map((t, i) => `${i + 1}. ${t}`).join('\n') + '\n%%' : '';
+  // переписка пункта — следующими строками с отступом
+  const item = (t: string, i: number) =>
+    t
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l, k) => (k ? '   ' + l.trim() : `${i + 1}. ${l.trim()}`))
+      .join('\n');
+  const body = list.length ? '%%замечания\n' + list.map(item).join('\n') + '\n%%' : '';
   if (g) {
     if (body) return { from: L[g.a].from, to: L[g.b].to, insert: body };
     return cut(doc, L, g.a, g.b);
@@ -198,12 +288,10 @@ export function generalRange(doc: string): { from: number; to: number } | null {
 }
 
 /** Замечание к блоку текста [from, to): уже стоит сразу за ним — оно; нет — куда вставить новое. */
-export function remarkAfter(doc: string, from: number, to: number, text: string): Change {
+export function remarkAfter(doc: string, from: number, to: number, text: string, phrase?: string): Change {
   const end = from + doc.slice(from, to).trimEnd().length;
-  return { from: end, to: end, insert: `\n\n{>>${cleanText(text)}<<}` };
+  return { from: end, to: end, insert: `\n\n{>>${buildInner({ text, phrase })}<<}` };
 }
-
-const cleanText = (t: string) => t.replace(/\n\s*\n+/g, '\n').replace(/<<\}/g, '<< }').trim();
 
 /** Общие замечания списком (без номеров). */
 export function generalItems(doc: string): string[] {
@@ -228,26 +316,69 @@ export function removeRemark(doc: string, r: Remark): Change {
     items.splice(idx, 1);
     return writeGeneral(doc, items);
   }
+  // посреди строки — только само замечание и пробел перед ним
+  if (r.inline) return { from: r.from > 0 && doc[r.from - 1] === ' ' ? r.from - 1 : r.from, to: r.to, insert: '' };
   const L = linesOf(doc);
   const a = L.findIndex((l) => l.from === r.from);
   const b = L.findIndex((l) => l.to === r.to);
   return cut(doc, L, a, b < 0 ? a : b);
 }
 
-/** Новый текст замечания на старом месте. */
-export function editRemark(doc: string, r: Remark, text: string): Change {
+/** Записать нутро замечания на его место. */
+export function setRaw(doc: string, r: Remark, raw: string): Change {
   if (r.kind === 'gen') {
     const items = generalItems(doc);
     const idx = parseRemarks(doc).filter((x) => x.kind === 'gen').findIndex((x) => x.from === r.from);
-    items[idx] = text;
+    items[idx] = raw;
     return writeGeneral(doc, items);
   }
-  return { from: r.from, to: r.to, insert: `{>>${cleanText(text)}<<}` };
+  // посреди строки — одной строкой: перевод строки разорвал бы предложение
+  return { from: r.from, to: r.to, insert: `{>>${r.inline ? raw.replace(/\n/g, ' ⏎ ') : raw}<<}` };
 }
 
-/** Все замечания одним куском — отдать Claude. */
+/** Новые слова автора на старом месте (фраза и переписка остаются). */
+export function editRemark(doc: string, r: Remark, text: string): Change {
+  return setRaw(doc, r, buildInner({ ...r, text }));
+}
+
+/** Дописать в замечание: ответ Claude (✓ сделано, ❓ вопрос, ✗ не принято) или приписку автора (↩). */
+export function replyRemark(doc: string, r: Remark, mark: Mark, text: string): Change {
+  return setRaw(doc, r, buildInner({ ...r, thread: [...r.thread, { by: mark === '↩' ? 'author' : 'claude', mark, text: text.trim() || (mark === '↩' ? 'вернул' : '') }] }));
+}
+
+/** Перенести замечание к другому блоку [from, to) (или из общих — к абзацу). Правки — по
+ *  возрастанию места, для applyAll. */
+export function moveRemark(doc: string, r: Remark, from: number, to: number): Change[] {
+  const inner = buildInner({ ...r, gone: undefined });
+  const end = from + doc.slice(from, to).trimEnd().length;
+  return [removeRemark(doc, r), { from: end, to: end, insert: `\n\n{>>${inner}<<}` }].sort((a, b) => a.from - b.from);
+}
+
+/** Абзац удалили, а замечание к нему осталось: в общие, с началом удалённого текста. */
+export function toGeneral(doc: string, r: Remark, gone: string): string {
+  const without = apply(doc, removeRemark(doc, r));
+  const raw = buildInner({ ...r, gone: gone.length > 80 ? gone.slice(0, 80) + '…' : gone });
+  return apply(without, writeGeneral(without, [...generalItems(without), raw]));
+}
+
+/** Применить несколько изменений (места — по исходному тексту). */
+export function applyAll(doc: string, changes: Change[]): string {
+  let out = doc;
+  for (const c of [...changes].sort((a, b) => b.from - a.from)) out = out.slice(0, c.from) + c.insert + out.slice(c.to);
+  return out;
+}
+
+export const STATUS_LABEL: Record<RemarkStatus, string> = { open: 'открыто', done: 'учтено', ask: 'вопрос', no: 'не принято' };
+
+/** Все замечания одним куском — отдать Claude: место, фраза, слова автора, переписка. */
 export function remarksText(list: Remark[]): string {
-  return list.map((r) => (r.kind === 'gen' ? `${r.n}. (общее) ${r.text}` : `${r.n}. К «${r.anchor}»:\n   ${r.text}`)).join('\n');
+  return list
+    .map((r) => {
+      const where = r.kind === 'gen' ? (r.gone ? `(к удалённому абзацу «${r.gone}»)` : '(общее)') : `К «${r.anchor}»${r.phrase ? `, слова «${r.phrase}»` : ''}:`;
+      const st = r.status === 'open' ? '' : ` [${STATUS_LABEL[r.status]}]`;
+      return [`${r.n}.${st} ${where}`, `   ${r.text.replace(/\n/g, '\n   ')}`, ...r.thread.map((m) => `   ${m.mark} ${m.text.replace(/\n/g, '\n   ')}`)].join('\n');
+    })
+    .join('\n');
 }
 
 /** Применить изменение к строке (для тестов и записи без редактора). */

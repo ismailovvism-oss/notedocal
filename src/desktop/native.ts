@@ -40,6 +40,9 @@ export interface QtLink {
   extMove: (s: string, cb: (s: string) => void) => void;
   extReveal: (path: string) => void;
   /** Режим тестировщика (baza.py bug*, zamechaniya.py); в окне со старой программой их нет. */
+  /** Вычитка: снимки и замок на время правки Claude (baza.py review*). */
+  reviewState?: (path: string, cb: (s: string) => void) => void;
+  reviewAccept?: (path: string, cb: (s: string) => void) => void;
   bugNotes?: (cb: (s: string) => void) => void;
   bugDo?: (s: string, cb: (s: string) => void) => void;
   voice: (s: string) => void;
@@ -182,6 +185,19 @@ export const extApi = {
     }
     return () => void openListeners.delete(cb);
   },
+};
+
+/** Вычитка статьи: Claude сейчас правит файл (lock); текст до его круга и после (с шапкой файла). */
+export interface ReviewState {
+  lock: boolean;
+  before: string | null;
+  after: string | null;
+}
+export const reviewApi = {
+  /** null — окно этого ещё не умеет (старая программа) или его нет. */
+  state: (path: string): Promise<ReviewState | null> => (link?.reviewState ? ask<ReviewState>((l, d) => l.reviewState!(path, d)).catch(() => null) : Promise.resolve(null)),
+  /** Автор принял правки: снимок «до» убрать — подсветка гаснет. */
+  accept: (path: string): Promise<unknown> => (link?.reviewAccept ? ask((l, d) => l.reviewAccept!(path, d)).catch(() => null) : Promise.resolve(null)),
 };
 
 /** Замечание тестировщика (как в Чатпате): где это было и что не так; ответ — от Claude. */

@@ -22,7 +22,8 @@ import { attachmentsReady, uploadAttachment } from '../lib/attachments';
 import { useLocalStorage } from '../lib/storage';
 import { LANGS } from '../lib/quick';
 import { hemingway as hemingwayExt } from '../lib/kb/hemingway';
-import { remarkAt } from '../lib/kb/remarks';
+import { parseRemarks, remarkAt, toGeneral } from '../lib/kb/remarks';
+import { blocksOf, unitRange } from '../lib/kb/blocks';
 import { find, findClear, findExt, findStep, replaceAll, replaceOne } from '../lib/kb/find';
 
 /** Минимальная правка вместо замены всего текста: курсор и история не прыгают. */
@@ -33,6 +34,9 @@ function diff(a: string, b: string) {
   while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
   return { from: s, to: a.length - e, insert: b.slice(s, b.length - e) };
 }
+
+/** Конец текста блока (без пустых строк после). */
+const b_end = (b: { from: number; raw: string }) => b.from + b.raw.trimEnd().length;
 
 /** Заменить текст редактора, не трогая спрятанные теги меток (filter: false — свои правки). */
 function setEditorText(view: EditorView, text: string) {
@@ -115,10 +119,16 @@ export default function LiveEditor({
   className,
   handle,
   hemingway = false,
+  locked = false,
+  review = false,
 }: LiveEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   // режим Хемингуэя включается и выключается на лету, без пересоздания редактора
   const hemComp = useRef(new Compartment());
+  // правка приостановлена (вычитка: Claude сейчас правит этот файл)
+  const lockComp = useRef(new Compartment());
+  const reviewRef = useRef(review);
+  reviewRef.current = review;
   const flash = () => {
     const el = host.current;
     if (!el) return;
@@ -173,11 +183,69 @@ export default function LiveEditor({
           livePreview(),
           findExt,
           hemComp.current.of(hemingway ? hemingwayExt(flash) : []),
+          lockComp.current.of(locked ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
             if (u.selectionSet || u.docChanged || u.focusChanged || u.geometryChanged) updateBar(u.view);
           }),
+          EditorView.updateListener.of((u) => {
+            // вычитка: абзац удалили целиком, а замечание к нему осталось — оно прилипло бы к
+            // соседу. Уводим в общие, с началом удалённого текста (src/lib/kb/remarks.ts, toGeneral)
+            if (!reviewRef.current || !u.docChanged || !u.transactions.some((tr) => tr.isUserEvent('delete') || tr.isUserEvent('input'))) return;
+            let big = false;
+            u.changes.iterChanges((fromA, toA) => {
+              if (toA - fromA > 12) big = true;
+            });
+            if (!big) return;
+            const old = u.startState.doc.toString();
+            const orphans: { at: number; gone: string }[] = [];
+            for (const b of blocksOf(old) ?? []) {
+              if (!b.notes.length || !b.raw.trim()) continue;
+              const end = b.from + b.raw.trimEnd().length;
+              // блок стёрт весь и на его месте ничего не написали (написали — это «переписал»)
+              const a = u.changes.mapPos(b.from, -1);
+              const z = u.changes.mapPos(end, 1);
+              if (u.changes.mapPos(b.from, 1) < u.changes.mapPos(end, -1) || u.state.sliceDoc(a, z).trim()) continue;
+              const gone = b.raw.replace(/\s+/g, ' ').trim();
+              for (const r of b.notes) {
+                const at = u.changes.mapPos(r.from, 1);
+                if (u.state.sliceDoc(at, u.changes.mapPos(r.to, -1)) === old.slice(r.from, r.to)) orphans.push({ at, gone });
+              }
+            }
+            if (!orphans.length) return;
+            const view = u.view;
+            setTimeout(() => {
+              let text = view.state.doc.toString();
+              // с конца: места выше не съезжают
+              for (const o of orphans.sort((x, y) => y.at - x.at)) {
+                const r = parseRemarks(text).find((x) => x.kind === 'par' && x.from === o.at);
+                if (r) text = toGeneral(text, r, o.gone);
+              }
+              setEditorText(view, text);
+            }, 0);
+          }),
           EditorView.domEventHandlers({
+            cut(e, v) {
+              // вырезали абзац целиком — его замечания едут с ним (вставишь в другом месте — они там)
+              const sel = v.state.selection.main;
+              if (!reviewRef.current || sel.empty || v.state.selection.ranges.length > 1 || !e.clipboardData) return false;
+              const doc = v.state.doc.toString();
+              const blocks = blocksOf(doc);
+              if (!blocks) return false;
+              const first = blocks.find((b) => b.raw.trim() && sel.from <= b.from + (b.raw.length - b.raw.trimStart().length) && sel.to >= b.from + b.raw.trimEnd().length);
+              if (!first) return false;
+              // последний блок, который выделение накрывает целиком
+              let last = first;
+              for (const b of blocks) if (b.from >= first.from && b.raw.trim() && sel.to >= b.from + b.raw.trimEnd().length) last = b;
+              const to = unitRange(last).to;
+              if (!last.notes.length || sel.to >= to) return false;
+              // хвост выделения — только пробелы до замечаний, иначе это не «весь абзац»
+              if (doc.slice(b_end(last), sel.to).trim()) return false;
+              e.preventDefault();
+              e.clipboardData.setData('text/plain', doc.slice(sel.from, to));
+              v.dispatch({ changes: { from: sel.from, to }, selection: { anchor: sel.from }, userEvent: 'delete.cut', filter: false });
+              return true;
+            },
             paste(e, v) {
               const html = e.clipboardData?.getData('text/html');
               if (!html) return false;
@@ -297,6 +365,9 @@ export default function LiveEditor({
   useEffect(() => {
     viewRef.current?.dispatch({ effects: hemComp.current.reconfigure(hemingway ? hemingwayExt(flash) : []) });
   }, [hemingway]);
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: lockComp.current.reconfigure(locked ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []) });
+  }, [locked]);
 
   // текст поменяли снаружи (синхронизация, «Отменить») — привести редактор к нему
   useEffect(() => {

@@ -10,7 +10,7 @@ import type { Note, NoteType } from '../types';
 import LiveEditor from '../components/LiveEditor';
 import type { LiveEditorHandle } from '../components/liveEditorTypes';
 import { useLocalStorage } from '../lib/storage';
-import { native, type Mics, type VoiceEvent } from './native';
+import { native, reviewApi, type Mics, type ReviewState, type VoiceEvent } from './native';
 import { useMenu, type MenuItem } from './Menu';
 import { fileIcon } from './FileView';
 import { calloutMeta } from '../lib/kb/callouts';
@@ -26,6 +26,9 @@ import type { ScopeWhy } from '../lib/kb/scope';
 import { onFlush } from './flush';
 import { dropEmptyRemarks, generalItems, parseRemarks, remarkAt, remarksText, removeRemark, writeGeneral, type Change, type Remark } from '../lib/kb/remarks';
 import { Preview } from './Preview';
+import { RemarkCard } from './RemarkCard';
+import { claudeChanges, shiftUnit, type BlocksDiff } from '../lib/kb/blocks';
+import { splitFrontmatter } from '../lib/kb/markdownFile';
 import { addFootnote, editFootnote, parseFootnotes, removeFootnote, type Footnote } from '../lib/kb/footnotes';
 
 // не лениво: окно держит страницу открытой часами, а пересборка стирает старые куски —
@@ -51,7 +54,10 @@ export function NotePane({
   onDelete,
   rail,
   onRail,
+  filePath,
 }: {
+  /** Полный путь файла заметки на диске (хранилище, открытый файл) — для вычитки с Claude. */
+  filePath?: string;
   /** Какая вкладка правой панели открыта: действия, замечания и сноски рисует эта заметка. */
   rail: string;
   /** Открыть вкладку правой панели (и показать панель, если спрятана). */
@@ -212,6 +218,47 @@ export function NotePane({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
+  // вычитка с Claude (`zametki вычитка`): пока он правит файл — полоска и правка приостановлена;
+  // после — его правки подсвечены, пока автор их не примет (src/lib/kb/blocks.ts, claudeChanges)
+  const [review, setReview] = useState<ReviewState | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
+  useEffect(() => {
+    setReview(null);
+    setUnlocked(false);
+    if (!filePath) return;
+    let alive = true;
+    const ask = () =>
+      document.visibilityState === 'visible' &&
+      void reviewApi.state(filePath).then((r) => {
+        if (!alive || !r) return;
+        setReview((old) => (old && old.lock === r.lock && old.before === r.before && old.after === r.after ? old : r));
+      });
+    const first = setTimeout(ask, 400);
+    const t = setInterval(ask, 3000);
+    return () => {
+      alive = false;
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, [filePath]);
+  const locked = !!review?.lock && !unlocked;
+  const fixes: BlocksDiff | null = useMemo(() => {
+    if (!review?.before || !review.after || review.lock) return null;
+    const d = claudeChanges(splitFrontmatter(review.before).body, splitFrontmatter(review.after).body, body);
+    return d.now.some((b) => b.kind !== 'same') || d.removed.length ? d : null;
+  }, [review, body]);
+  const fixCount = fixes ? fixes.now.filter((b) => b.kind !== 'same').length + fixes.removed.length : 0;
+  const acceptAll = () => {
+    if (!filePath) return;
+    void reviewApi.accept(filePath).then(() => setReview((r) => (r ? { ...r, before: null } : r)));
+  };
+  // замечание переносят к другому абзацу: следующий щелчок по блоку в просмотре — туда
+  const [moving, setMoving] = useState<Remark | null>(null);
+  const startMove = (r: Remark) => {
+    if (view === 'edit') setView('both');
+    setMoving(r);
+  };
+  useEffect(() => setMoving(null), [note.id]);
   // кружок ✎ у абзаца в правке — под мышью
   const edWrap = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ top: number; pos: number; has: boolean } | null>(null);
@@ -580,8 +627,12 @@ export function NotePane({
             ✒
           </button>
           <button
-            className={`dk-remark-chip ${remarks.length ? 'has' : ''}`}
-            title="Замечания к тексту — открыть вкладку справа"
+            className={`dk-remark-chip ${remarks.length ? 'has' : ''} ${remarks.some((r) => r.status === 'done' || r.status === 'ask' || r.status === 'no') ? 'answered' : ''}`}
+            title={
+              remarks.some((r) => r.status !== 'open')
+                ? 'Есть ответы Claude на замечания — открыть вкладку справа'
+                : 'Замечания к тексту — открыть вкладку справа'
+            }
             onClick={() => onRail('remarks')}
           >
             ✎ {remarks.length || ''}
@@ -756,6 +807,26 @@ export function NotePane({
       {msg && <div className="dk-msg small">{msg}</div>}
       {picking && <div className="kb-picking">✋ Выделите слова, на которые будет ссылка, и нажмите «🎯 Сюда»</div>}
 
+      {review?.lock && (
+        <div className="dk-review-bar lock">
+          <span>⏳ Claude сейчас правит эту статью. Правка приостановлена, чтобы не затереть друг друга, — текст обновится сам.</span>
+          {!unlocked && (
+            <button className="link-btn" title="Править можно, но ваша и его правка могут затереть друг друга" onClick={() => setUnlocked(true)}>
+              Всё равно править
+            </button>
+          )}
+        </div>
+      )}
+      {fixes && (
+        <div className="dk-review-bar fresh">
+          <span>
+            ✓ Claude поправил статью: изменений — {fixCount}. Они подсвечены зелёным{view === 'edit' ? ' в просмотре (◫ или 📖)' : ''}: «как было» и «вернуть» — у каждого абзаца.
+          </span>
+          <button className="link-btn" title="Правки устраивают — убрать подсветку" onClick={acceptAll}>
+            Принять все правки
+          </button>
+        </div>
+      )}
       {finder && (
         <div className="dk-find" onKeyDown={(e) => e.key === 'Escape' && (e.preventDefault(), closeFind())}>
           <input
@@ -857,6 +928,8 @@ export function NotePane({
       <LiveEditor
         key={note.id}
         hemingway={hem}
+        locked={locked}
+        review
         value={body}
         onChange={change}
         onCommit={save}
@@ -883,6 +956,15 @@ export function NotePane({
               return true;
             },
           },
+          // абзац под курсором — выше или ниже, вместе со своими замечаниями
+          ...([-1, 1] as const).map((dir) => ({
+            key: dir < 0 ? 'Alt-ArrowUp' : 'Alt-ArrowDown',
+            run: (v: { state: { doc: { toString: () => string }; selection: { main: { head: number } } }; dispatch: (tr: object) => void }) => {
+              const m = shiftUnit(v.state.doc.toString(), v.state.selection.main.head, dir);
+              if (m) v.dispatch({ changes: m.changes, selection: { anchor: m.cursor }, scrollIntoView: true, userEvent: 'move.line' });
+              return true;
+            },
+          })),
         ]}
       />
       </div>
@@ -900,7 +982,11 @@ export function NotePane({
           noteId={note.id}
           index={kb.index}
           remarks={remarks}
-          onApply={(c: Change) => editor.current?.apply(c)}
+          onApply={(c: Change | Change[]) => (locked ? setMsg('Claude сейчас правит статью — подождите, пока закончит') : editor.current?.apply(c))}
+          fixes={fixes}
+          moving={moving}
+          onMoveStart={startMove}
+          onMoveEnd={() => setMoving(null)}
           onOpenLink={({ target, anchor, heading }) => kb.open(target ? { name: target, anchor, heading } : { id: note.id, anchor, heading })}
           onJumpEdit={view === 'both' ? (pos) => editor.current?.goto(pos) : undefined}
           jump={jump}
@@ -937,6 +1023,7 @@ export function NotePane({
             jumpTo={jumpTo}
             canCursor={view !== 'read'}
             tab={rail}
+            onMove={startMove}
             foots={foots}
             onRail={onRail}
             openFind={openFind}
@@ -1052,7 +1139,10 @@ function Tools({
   foots,
   onRail,
   openFind,
+  onMove,
 }: {
+  /** Перенести замечание к другому абзацу (дальше — щелчок по абзацу в просмотре). */
+  onMove: (r: Remark) => void;
   /** Вкладка правой панели: действия (tools), замечания (remarks), сноски (foot). */
   tab: string;
   foots: Footnote[];
@@ -1089,21 +1179,14 @@ function Tools({
     const t = h()?.text() ?? '';
     return { t, r: parseRemarks(t).find((x) => x.n === r.n && x.kind === r.kind) };
   };
-  // общее замечание пишется и правится на месте: n — какое правим (null — новое)
-  const [gen, setGen] = useState<{ n: number | null; text: string } | null>(null);
+  // новое общее замечание пишется на месте
+  const [gen, setGen] = useState<string | null>(null);
   const saveGen = () => {
     const e = h();
-    if (!gen || !e) return setGen(null);
-    const t = e.text();
-    const items = generalItems(t);
-    const v = gen.text.trim();
-    if (gen.n === null) {
-      if (v) e.apply(writeGeneral(t, [...items, v]));
-    } else {
-      // номер общего замечания — его место в блоке (общие идут первыми, с единицы)
-      if (v) items[gen.n - 1] = v;
-      else items.splice(gen.n - 1, 1);
-      e.apply(writeGeneral(t, items));
+    const v = (gen ?? '').trim();
+    if (e && v) {
+      const t = e.text();
+      e.apply(writeGeneral(t, [...generalItems(t), v]));
     }
     setGen(null);
   };
@@ -1113,8 +1196,8 @@ function Tools({
         autoFocus
         dir="auto"
         placeholder="Замечание ко всему тексту…"
-        value={gen?.text ?? ''}
-        onChange={(e) => setGen({ n: gen?.n ?? null, text: e.target.value })}
+        value={gen ?? ''}
+        onChange={(e) => setGen(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
@@ -1130,8 +1213,26 @@ function Tools({
       </div>
     </div>
   );
-  const general = remarks.filter((r) => r.kind === 'gen');
-  const toPara = remarks.filter((r) => r.kind === 'par');
+  // что показывать: открытые, вопросы Claude, учтённые (с «не принято») или все
+  const [flt, setFlt] = useLocalStorage<'open' | 'ask' | 'done' | 'all'>('dk.remarkFilter', 'all');
+  const count = { open: remarks.filter((r) => r.status === 'open').length, ask: remarks.filter((r) => r.status === 'ask').length, done: remarks.filter((r) => r.status === 'done' || r.status === 'no').length };
+  const shown = remarks.filter((r) => flt === 'all' || (flt === 'done' ? r.status === 'done' || r.status === 'no' : r.status === flt));
+  const general = shown.filter((r) => r.kind === 'gen');
+  const toPara = shown.filter((r) => r.kind === 'par');
+  const card = (r: Remark) => (
+    <RemarkCard
+      key={`${r.kind}-${r.n}`}
+      r={r}
+      where
+      resolve={() => {
+        const { t, r: x } = fresh(r);
+        return x ? { doc: t, r: x } : null;
+      }}
+      onApply={(c) => h()?.apply(c)}
+      onJump={r.kind === 'par' ? () => jumpTo(fresh(r).r?.from ?? r.from) : undefined}
+      onMove={r.inline ? undefined : () => onMove(r)}
+    />
+  );
 
   // сноски: поле открытой (id) — пишется на месте, как в «Вычитке»
   const [fn, setFn] = useState<{ id: string; text: string } | null>(null);
@@ -1197,78 +1298,69 @@ function Tools({
             title={canCursor ? 'Замечание к абзацу, где курсор. Или кружок ✎ справа от абзаца' : 'В режиме чтения — кружок ✎ справа от абзаца'}
             on={() => (canCursor ? h()?.remark() : setMsg('В режиме чтения нажмите кружок ✎ справа от нужного абзаца'))}
           />
-          <B wide t="＋ Общее" title="Замечание ко всему тексту, не к абзацу" on={() => setGen({ n: null, text: '' })} />
+          <B wide t="＋ Общее" title="Замечание ко всему тексту, не к абзацу" on={() => setGen('')} />
         </div>
-        {gen && gen.n === null && genField}
-        {remarks.length === 0 && !gen && (
+        {gen !== null && genField}
+        {remarks.length > 0 && (
+          <div className="rk-filters">
+            {(
+              [
+                ['all', 'Все', remarks.length],
+                ['open', 'Открытые', count.open],
+                ['ask', 'Вопросы', count.ask],
+                ['done', 'Учтённые', count.done],
+              ] as const
+            ).map(([id, label, n]) => (
+              <button key={id} className={`${flt === id ? 'on' : ''} ${id}`} onMouseDown={keep} onClick={() => setFlt(id)}>
+                {label} {n || ''}
+              </button>
+            ))}
+          </div>
+        )}
+        {remarks.length === 0 && gen === null && (
           <p className="dk-remark-hint muted small">
-            Замечаний нет. Наведите на абзац и нажмите ✎ — замечание ляжет в сам файл, сразу после абзаца.
+            Замечаний нет. Наведите на абзац и нажмите ✎ — замечание ляжет в сам файл, сразу после абзаца. Выделите слова — будет замечание к этим словам.
           </p>
         )}
+        {remarks.length > 0 && shown.length === 0 && <p className="dk-remark-hint muted small">Таких сейчас нет.</p>}
         {general.length > 0 && (
           <>
             <div className="dk-remark-group">Общие</div>
-            {general.map((r) =>
-              gen && gen.n === r.n ? (
-                <div key={r.n}>{genField}</div>
-              ) : (
-                <div key={r.n} className="dk-remark-card gen" onMouseDown={keep} onClick={() => setGen({ n: r.n, text: r.text })} title="Щёлкните, чтобы поправить">
-                  <div className="dk-remark-at">{r.n}. ко всему тексту</div>
-                  <div dir="auto">{r.text || '…'}</div>
-                  <button
-                    className="dk-remark-x"
-                    title="Убрать замечание"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const { t, r: x } = fresh(r);
-                      if (x) h()?.apply(removeRemark(t, x));
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ),
-            )}
+            {general.map(card)}
           </>
         )}
         {toPara.length > 0 && (
           <>
             <div className="dk-remark-group">К абзацам</div>
-            {toPara.map((r) => (
-              <div
-                key={r.n}
-                className="dk-remark-card"
-                onMouseDown={keep}
-                onClick={() => {
-                  const { r: x } = fresh(r);
-                  if (x) jumpTo(x.anchorAt ?? x.from);
-                }}
-                title="Показать место в тексте"
-              >
-                <div className="dk-remark-at" dir="auto">
-                  {r.n}. {r.anchor}
-                </div>
-                <div dir="auto">{r.text || '…'}</div>
-                <button
-                  className="dk-remark-x"
-                  title="Убрать замечание"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const { t, r: x } = fresh(r);
-                    if (x) h()?.apply(removeRemark(t, x));
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            {toPara.map(card)}
           </>
+        )}
+        {count.done > 0 && (flt === 'done' || flt === 'all') && (
+          <B
+            wide
+            t={`✓ Принять все учтённые (${remarks.filter((r) => r.status === 'done').length})`}
+            title="Убрать из файла все замечания, на которые Claude ответил «сделано». Вопросы и «не принято» останутся"
+            on={() => {
+              const e = h();
+              if (!e) return;
+              // по одному с конца: места в тексте не съезжают
+              let t = e.text();
+              const before = t;
+              for (;;) {
+                const x = parseRemarks(t).reverse().find((r) => r.status === 'done');
+                if (!x) break;
+                const c = removeRemark(t, x);
+                t = t.slice(0, c.from) + c.insert + t.slice(c.to);
+              }
+              if (t !== before) e.apply({ from: 0, to: before.length, insert: t });
+            }}
+          />
         )}
         {remarks.length > 0 && (
           <B
             wide
             t="⧉ Скопировать все"
-            title="Все замечания списком вместе с местами — отдать Claude"
+            title="Все замечания списком вместе с местами и перепиской — отдать Claude"
             on={() =>
               void navigator.clipboard
                 .writeText(remarksText(remarks))

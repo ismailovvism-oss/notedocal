@@ -1167,6 +1167,9 @@ function Desktop() {
                 picking={!!picking && picking.tab === cur?.key}
                 rail={rightTab}
                 onRail={openRail}
+                filePath={
+                  note.id.startsWith('v:') && vault.info ? `${vault.info.path}/${pathOfId(note.id)}` : isExt(note.id) ? extPath(note.id) : undefined
+                }
                 onDelete={() =>
                   void removeNote(note.id, true).then((done) => {
                     if (!done) return;
