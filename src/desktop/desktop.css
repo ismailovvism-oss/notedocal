@@ -760,7 +760,8 @@ body.dk-dragging { cursor: col-resize; user-select: none; }
 }
 .ed-remark:hover, .pv-btn:hover { border-color: #e8a33d; color: #c4821f; }
 .ed-remark.on, .pv-btn.on { background: #e8a33d; border-color: #e8a33d; color: #fff; }
-.pv-btn.open { background: var(--surface); border-color: var(--border); color: var(--muted); }
+/* .writing — открыто поле нового замечания (не путать с состоянием замечания «open») */
+.pv-btn.writing { background: var(--surface); border-color: var(--border); color: var(--muted); }
 
 /* просмотр: блоки с кружком, карточки замечаний, поле замечания */
 .dk .dk-preview { font-size: 1.04rem; line-height: 1.65; overflow-wrap: anywhere; min-width: 0; padding-top: 4px; }
@@ -774,7 +775,21 @@ body.dk-dragging { cursor: col-resize; user-select: none; }
 .pv-block { position: relative; padding-inline-end: 34px; border-inline-start: 3px solid transparent; margin-inline-start: -11px; padding-inline-start: 8px; border-radius: 2px; }
 .pv-block.marked { border-inline-start-color: #e8a33d; }
 .pv-block .pv-btn { top: 2px; opacity: 0; }
-.pv-block:hover .pv-btn, .pv-btn.on, .pv-btn.open { opacity: 1; }
+.pv-block:hover .pv-btn, .pv-btn.on, .pv-btn.writing { opacity: 1; }
+/* список: свой кружок и свои замечания у каждого пункта (замечание лежит строкой под пунктом) */
+.pv-li { border-inline-start: 3px solid transparent; margin-inline-start: -11px; padding-inline-start: 8px; border-radius: 2px; }
+.pv-li.marked { border-inline-start-color: #e8a33d; }
+.pv-li.marked.done { border-inline-start-color: #2e8b57; }
+.pv-li.marked.ask { border-inline-start-color: #d9a400; }
+.pv-li.marked.no { border-inline-start-color: var(--muted); }
+.pv-li-text { position: relative; }
+.pv-li-text > .pv-btn { inset-inline-end: -32px; top: 1px; }
+.pv-block .pv-li:not(:hover) .pv-btn:not(.on):not(.writing) { opacity: 0; }
+.pv-list.loose > .pv-li + .pv-li { margin-top: 0.6em; }
+.pv-li .pv-note-wrap, .pv-li .pv-edit { margin-inline: 1.6em 0; }
+.pv-li.flash { animation: pv-flash 1.4s ease-out; }
+.pv-moving .pv-block.has-items:hover { background: none; }
+.pv-moving .pv-li:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .pv-html > :first-child { margin-top: 0; }
 .pv-html > :last-child { margin-bottom: 0; }
 .pv-item { margin: 0 0 0.85em; }

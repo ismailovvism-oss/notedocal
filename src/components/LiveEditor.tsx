@@ -199,7 +199,20 @@ export default function LiveEditor({
             if (!big) return;
             const old = u.startState.doc.toString();
             const orphans: { at: number; gone: string }[] = [];
+            const stay = (r: { from: number; to: number }) => {
+              const at = u.changes.mapPos(r.from, 1);
+              return u.state.sliceDoc(at, u.changes.mapPos(r.to, -1)) === old.slice(r.from, r.to) ? at : -1;
+            };
             for (const b of blocksOf(old) ?? []) {
+              // замечания под пунктом списка, под абзацем выноски: стёрли сам пункт (его слова),
+              // а строка замечания осталась — она прилипла бы к пункту выше
+              for (const r of b.inner) {
+                if (r.anchorAt === undefined || r.anchorTo === undefined) continue;
+                if (u.changes.mapPos(r.anchorAt, 1) < u.changes.mapPos(r.anchorTo, -1)) continue;
+                if (u.state.sliceDoc(u.changes.mapPos(r.anchorAt, -1), u.changes.mapPos(r.anchorTo, 1)).trim()) continue;
+                const at = stay(r);
+                if (at >= 0) orphans.push({ at, gone: r.anchor ?? '' });
+              }
               if (!b.notes.length || !b.raw.trim()) continue;
               const end = b.from + b.raw.trimEnd().length;
               // блок стёрт весь и на его месте ничего не написали (написали — это «переписал»)

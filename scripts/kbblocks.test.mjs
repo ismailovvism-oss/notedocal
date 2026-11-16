@@ -119,3 +119,65 @@ test('«как было» отдаётся с разметкой и строка
   const d = diffBlocks('- пункт один\n- пункт два про довод', '- пункт один\n- пункт два про хадис');
   assert.equal(d.now[0].was, '- пункт один\n- пункт два про довод');
 });
+
+// --- замечания внутри блока: под пунктом списка, под абзацем выноски ---
+import { bare } from '../src/lib/kb/blocks.ts';
+
+const LIST = `Вступление.
+
+- [x] пункт один
+  {>>к первому
+  ✓ исправил<<}
+- [ ] пункт два
+- [ ] пункт три
+  - вложенный
+    {>>к вложенному<<}
+
+{>>ко всему списку<<}
+
+> [!quote] Выноска
+> Первый абзац.
+> {>>к абзацу выноски<<}
+>
+> Второй абзац.
+
+Конец.
+`;
+
+test('список: пункты со своими замечаниями; замечание ко всему списку — у блока', () => {
+  const b = blocksOf(LIST);
+  const list = b[1];
+  assert.equal(list.items.length, 3);
+  assert.deepEqual(list.items.map((i) => i.notes.map((r) => r.text)), [['к первому'], [], ['к вложенному']]);
+  assert.deepEqual(list.notes.map((r) => r.text), ['ко всему списку']);
+  assert.deepEqual(list.inner.map((r) => r.text), ['к первому', 'к вложенному']);
+  // пункт без строк замечаний — как его показывать
+  assert.equal(bare(list.items[0], list.items[0].notes), '- [x] пункт один\n');
+  assert.equal(bare(list.items[2], list.items[2].notes), '- [ ] пункт три\n  - вложенный');
+  assert.equal(LIST.slice(list.items[1].from, list.items[1].to), '- [ ] пункт два\n');
+  // выноска: замечание внутри — при блоке, из текста для показа убрано
+  const quote = b[2];
+  assert.deepEqual(quote.inner.map((r) => [r.text, r.anchor]), [['к абзацу выноски', 'Выноска Первый абзац.']]);
+  assert.equal(bare(quote, quote.inner), '> [!quote] Выноска\n> Первый абзац.\n>\n> Второй абзац.');
+  assert.equal(quote.items, undefined);
+});
+
+test('список переезжает вместе с замечаниями пунктов и своим', () => {
+  const b = blocksOf(LIST);
+  const out = applyAll(LIST, moveUnit(LIST, b, 1, 0).changes);
+  assert.ok(out.startsWith('- [x] пункт один\n  {>>к первому\n  ✓ исправил<<}\n- [ ] пункт два'));
+  assert.ok(out.includes('    {>>к вложенному<<}\n\n{>>ко всему списку<<}\n\nВступление.\n\n> [!quote]'));
+  assert.equal(out.length, LIST.length);
+  assert.deepEqual(parseRemarks(out).map((r) => r.anchor), ['пункт один', 'вложенный', 'пункт один пункт два пункт три вложенный', 'Выноска Первый абзац.']);
+});
+
+test('сравнение версий: ответ Claude в замечании под пунктом — не правка списка', () => {
+  const was = '- пункт один про довод\n  {>>слабо<<}\n- пункт два\n\nАбзац.';
+  const replied = '- пункт один про довод\n  {>>слабо\n  ✓ усилил<<}\n- пункт два\n\nАбзац.';
+  assert.ok(diffBlocks(was, replied).now.every((x) => x.kind === 'same'));
+  const fixed = '- пункт один про хадис\n  {>>слабо\n  ✓ усилил<<}\n- пункт два\n\nАбзац.';
+  const d = diffBlocks(was, fixed);
+  assert.deepEqual(d.now.map((x) => x.kind), ['changed', 'same']);
+  // «как было» — без строк замечаний
+  assert.equal(d.now[0].was, '- пункт один про довод\n- пункт два');
+});

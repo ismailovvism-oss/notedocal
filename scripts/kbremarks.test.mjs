@@ -170,3 +170,176 @@ test('замечание посреди строки: ответ — той же
   assert.deepEqual([r.status, r.text], ['done', 'замечанием']);
   assert.equal(apply(out, removeRemark(out, r)), 'Фраза с посреди.');
 });
+
+// --- список, выноска, таблица, код: замечание — к своему месту, а не в конец всего блока ---
+import { remarkInItem } from '../src/lib/kb/remarks.ts';
+
+/** Нажать ✎ в месте `mark` и написать `text`. */
+function penAt(doc, mark, text = 'замечание') {
+  const r = remarkAt(doc, doc.indexOf(mark));
+  assert.ok('change' in r, 'ожидалась вставка нового замечания');
+  const out = apply(doc, r.change);
+  return out.slice(0, r.cursor) + text + out.slice(r.cursor);
+}
+
+test('список: замечание — строкой под своим пунктом, с его отступом', () => {
+  const doc = '- [x] пункт один\n- [ ] пункт два\n- [ ] пункт три\n\nАбзац после.';
+  const out = penAt(doc, 'пункт два');
+  assert.equal(out, '- [x] пункт один\n- [ ] пункт два\n  {>>замечание<<}\n- [ ] пункт три\n\nАбзац после.');
+  const [r] = parseRemarks(out);
+  assert.equal(r.anchor, 'пункт два');
+  assert.equal(out.slice(r.anchorAt, r.anchorTo), '- [ ] пункт два');
+  // у пункта уже есть замечание — править его; у соседнего — завести своё
+  assert.equal(remarkAt(out, out.indexOf('пункт два')).existing.text, 'замечание');
+  assert.ok('change' in remarkAt(out, out.indexOf('пункт три')));
+  // нумерованный список: отступ — по ширине номера
+  assert.equal(penAt('1. раз\n2. два\n10. десять', 'десять'), '1. раз\n2. два\n10. десять\n    {>>замечание<<}');
+  assert.equal(penAt('1. раз\n2. два', 'раз'), '1. раз\n   {>>замечание<<}\n2. два');
+});
+
+test('список: вложенные пункты, продолжение пункта, пустые строки между пунктами', () => {
+  const nested = '- внешний\n  - вложенный а\n  - вложенный б\n- второй';
+  // к вложенному — под ним, глубже; к внешнему — под его словами, до вложенных
+  const a = penAt(nested, 'вложенный а', 'к а');
+  assert.equal(a, '- внешний\n  - вложенный а\n    {>>к а<<}\n  - вложенный б\n- второй');
+  const both = penAt(a, 'внешний', 'к внешнему');
+  assert.equal(both, '- внешний\n  {>>к внешнему<<}\n  - вложенный а\n    {>>к а<<}\n  - вложенный б\n- второй');
+  assert.deepEqual(parseRemarks(both).map((r) => [r.text, r.anchor]), [['к внешнему', 'внешний'], ['к а', 'вложенный а']]);
+  // отступ замечания решает, чьё оно: с отступом внешнего пункта — его, хоть и стоит под вложенным
+  assert.equal(parseRemarks('- внешний\n  - вложенный\n  {>>чьё<<}')[0].anchor, 'внешний');
+  // пункт в две строки: замечание — после обеих, якорь — весь пункт
+  const wrapped = penAt('- начало пункта\n  и его продолжение\n- другой', 'начало');
+  assert.equal(wrapped, '- начало пункта\n  и его продолжение\n  {>>замечание<<}\n- другой');
+  assert.equal(parseRemarks(wrapped)[0].anchor, 'начало пункта и его продолжение');
+  // список с пустыми строками: остаётся таким же, замечание прижато к пункту
+  const loose = penAt('- раз\n\n- два\n\n- три', 'два');
+  assert.equal(loose, '- раз\n\n- два\n  {>>замечание<<}\n\n- три');
+  assert.equal(parseRemarks(loose)[0].anchor, 'два');
+});
+
+test('список: замечание ко всему списку (за ним, через пустую строку) — отдельно от замечаний пунктов', () => {
+  const doc = '- раз\n  {>>к первому<<}\n- два\n\n{>>ко всему списку<<}\n\nАбзац.';
+  const [one, all] = parseRemarks(doc);
+  assert.equal(one.anchor, 'раз');
+  assert.equal(all.anchor, 'раз два');
+  assert.equal(doc.slice(all.anchorAt, all.anchorAt + 5), '- раз');
+  // ✎ на последнем пункте — своё замечание пункту, а не правка замечания ко всему списку
+  assert.equal(penAt(doc, 'два'), '- раз\n  {>>к первому<<}\n- два\n  {>>замечание<<}\n\n{>>ко всему списку<<}\n\nАбзац.');
+  // два замечания у одного пункта: оба — его
+  const two = '- раз\n  {>>первое<<}\n  {>>второе<<}\n- два';
+  assert.deepEqual(parseRemarks(two).map((r) => r.anchor), ['раз', 'раз']);
+});
+
+test('список: ответ Claude, правка и снятие — отступ у каждой строки, соседний текст цел', () => {
+  const doc = '- раз\n- два\n  {>>слабо<<}\n\nАбзац после списка.';
+  const [r] = parseRemarks(doc);
+  const replied = apply(doc, replyRemark(doc, r, '✓', 'Усилил'));
+  assert.equal(replied, '- раз\n- два\n  {>>слабо\n  ✓ Усилил<<}\n\nАбзац после списка.');
+  const [r2] = parseRemarks(replied);
+  assert.deepEqual([r2.text, r2.status, r2.thread[0].text, r2.anchor], ['слабо', 'done', 'Усилил', 'два']);
+  const again = apply(replied, replyRemark(replied, r2, '↩', 'не то'));
+  assert.equal(again, '- раз\n- два\n  {>>слабо\n  ✓ Усилил\n  ↩ не то<<}\n\nАбзац после списка.');
+  // сняли — список и абзац за ним не слились
+  assert.equal(apply(again, removeRemark(again, parseRemarks(again)[0])), '- раз\n- два\n\nАбзац после списка.');
+  assert.equal(apply(doc, editRemark(doc, r, 'сильнее')), '- раз\n- два\n  {>>сильнее<<}\n\nАбзац после списка.');
+  // нажали ✎ и ничего не написали — в файл не идёт
+  const empty = apply(doc, remarkAt(doc, 0).change);
+  assert.equal(empty, '- раз\n  {>><<}\n- два\n  {>>слабо<<}\n\nАбзац после списка.');
+  assert.equal(dropEmptyRemarks(empty), doc);
+});
+
+test('список: арабский пункт цел, замечание — отдельной строкой', () => {
+  const ar = '- قَالَ رَسُولُ اللَّهِ ﷺ\n- إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ';
+  const out = penAt(ar, 'قَالَ', 'проверить огласовку');
+  assert.equal(out, '- قَالَ رَسُولُ اللَّهِ ﷺ\n  {>>проверить огласовку<<}\n- إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ');
+  const back = apply(out, removeRemark(out, parseRemarks(out)[0]));
+  assert.equal(back, ar);
+});
+
+test('просмотр: замечание к пункту (со словами) и перенос замечания к другому пункту', () => {
+  const doc = '- раз\n- два довод\n\nАбзац.';
+  const out = apply(doc, remarkInItem(doc, doc.indexOf('- два'), 'слабый', 'довод'));
+  assert.equal(out, '- раз\n- два довод\n  {>>[к словам: довод] слабый<<}\n\nАбзац.');
+  const [r] = parseRemarks(out);
+  assert.deepEqual([r.phrase, r.text, r.anchor], ['довод', 'слабый', 'два довод']);
+  // к другому пункту
+  const moved = applyAll(out, moveRemark(out, r, 0, 5, true));
+  assert.equal(moved, '- раз\n  {>>[к словам: довод] слабый<<}\n- два довод\n\nАбзац.');
+  // от пункта — к абзацу, и обратно к пункту
+  const [m] = parseRemarks(moved);
+  const toPar = applyAll(moved, moveRemark(moved, m, moved.indexOf('Абзац.'), moved.length));
+  assert.equal(toPar, '- раз\n- два довод\n\nАбзац.\n\n{>>[к словам: довод] слабый<<}');
+  const [p] = parseRemarks(toPar);
+  assert.equal(applyAll(toPar, moveRemark(toPar, p, toPar.indexOf('- два'), toPar.indexOf('\n\nАбзац'), true)), out);
+  // к своему же пункту — ничего не меняется
+  assert.deepEqual(moveRemark(out, r, out.indexOf('- два'), out.indexOf('\n\nАбзац'), true), []);
+  // от последнего пункта — ко всему списку
+  const toList = applyAll(out, moveRemark(out, r, 0, out.indexOf('\n\nАбзац')));
+  assert.equal(toList, '- раз\n- два довод\n\n{>>[к словам: довод] слабый<<}\n\nАбзац.');
+});
+
+test('выноска: замечание — под своим абзацем внутри неё, со знаком цитаты', () => {
+  const doc = '> [!quote] Ибн Таймия\n> Первый абзац цитаты.\n>\n> Второй абзац цитаты.\n\nТекст после.';
+  const out = penAt(doc, 'Первый');
+  assert.equal(out, '> [!quote] Ибн Таймия\n> Первый абзац цитаты.\n> {>>замечание<<}\n>\n> Второй абзац цитаты.\n\nТекст после.');
+  const [r] = parseRemarks(out);
+  assert.equal(r.anchor, 'Ибн Таймия Первый абзац цитаты.');
+  assert.equal(remarkAt(out, out.indexOf('Первый')).existing.text, 'замечание');
+  const second = penAt(out, 'Второй', 'ко второму');
+  assert.equal(second, '> [!quote] Ибн Таймия\n> Первый абзац цитаты.\n> {>>замечание<<}\n>\n> Второй абзац цитаты.\n> {>>ко второму<<}\n\nТекст после.');
+  assert.deepEqual(parseRemarks(second).map((x) => x.anchor), ['Ибн Таймия Первый абзац цитаты.', 'Второй абзац цитаты.']);
+  // ответ — со знаком цитаты у каждой строки; снятие возвращает выноску как была
+  const replied = apply(out, replyRemark(out, r, '❓', 'Какой перевод?'));
+  assert.equal(replied, '> [!quote] Ибн Таймия\n> Первый абзац цитаты.\n> {>>замечание\n> ❓ Какой перевод?<<}\n>\n> Второй абзац цитаты.\n\nТекст после.');
+  const [q] = parseRemarks(replied);
+  assert.deepEqual([q.text, q.status, q.thread[0].text], ['замечание', 'ask', 'Какой перевод?']);
+  assert.equal(apply(replied, removeRemark(replied, q)), doc);
+  assert.equal(dropEmptyRemarks(apply(doc, remarkAt(doc, doc.indexOf('Второй')).change)), doc);
+  // список внутри выноски — под пунктом, с отступом и знаком цитаты
+  assert.equal(penAt('> - раз\n> - два', 'раз'), '> - раз\n>   {>>замечание<<}\n> - два');
+});
+
+test('таблица: строку в неё не вставить — замечание за таблицей, со словами ячейки под курсором', () => {
+  const doc = '| Имя | Хукм |\n| --- | --- |\n| Зейд | **сахих** |\n| Амр | да‘иф |\n\nТекст после.';
+  const r = remarkAt(doc, doc.indexOf('да‘иф') + 2);
+  const out = apply(doc, r.change);
+  assert.equal(out, '| Имя | Хукм |\n| --- | --- |\n| Зейд | **сахих** |\n| Амр | да‘иф |\n\n{>>[к словам: да‘иф] <<}\n\nТекст после.');
+  assert.equal(out.slice(r.cursor, r.cursor + 3), '<<}');
+  // начало строки (кружок ✎ у строки) — первая ячейка; разметка в ячейке — без значков
+  assert.ok(apply(doc, remarkAt(doc, doc.indexOf('| Амр')).change).includes('{>>[к словам: Амр] <<}'));
+  assert.ok(apply(doc, remarkAt(doc, doc.indexOf('сахих')).change).includes('{>>[к словам: сахих] <<}'));
+  // разделитель — ко всей таблице; только фраза без слов автора в файл не идёт
+  assert.ok(apply(doc, remarkAt(doc, doc.indexOf('| ---')).change).includes('|\n\n{>><<}\n\nТекст'));
+  assert.equal(dropEmptyRemarks(out), doc);
+  // два замечания к разным строкам — оба за таблицей, таблица цела
+  const one = out.slice(0, r.cursor) + 'проверить' + out.slice(r.cursor);
+  const two = penAt(one, 'Зейд', 'кто это');
+  assert.ok(two.startsWith('| Имя | Хукм |\n| --- | --- |\n| Зейд | **сахих** |\n| Амр | да‘иф |\n\n{>>[к словам: Зейд] кто это<<}\n\n{>>[к словам: да‘иф] проверить<<}'));
+  assert.deepEqual(parseRemarks(two).map((x) => [x.phrase, x.text]), [['Зейд', 'кто это'], ['да‘иф', 'проверить']]);
+});
+
+test('блок кода: замечание — за блоком, а не внутри кода', () => {
+  const doc = 'Пример:\n\n```js\nconst a = 1;\n\nconst b = 2;\n```\n\nТекст после.';
+  const out = penAt(doc, 'const a');
+  assert.equal(out, 'Пример:\n\n```js\nconst a = 1;\n\nconst b = 2;\n```\n\n{>>замечание<<}\n\nТекст после.');
+  assert.equal(parseRemarks(out).length, 1);
+  assert.equal(remarkAt(out, out.indexOf('const b')).existing.text, 'замечание');
+  // строки кода, похожие на список, списком не считаются
+  assert.equal(penAt('```yaml\n- name: x\n- name: y\n```', 'name: x'), '```yaml\n- name: x\n- name: y\n```\n\n{>>замечание<<}');
+});
+
+test('абзац, за которым сразу другой блок: замечание — между ними, а не в конце следующего', () => {
+  // вступление и список без пустой строки
+  const out = penAt('Вот доводы:\n- первый\n- второй\n\nДальше.', 'Вот');
+  assert.equal(out, 'Вот доводы:\n\n{>>замечание<<}\n\n- первый\n- второй\n\nДальше.');
+  assert.equal(parseRemarks(out)[0].anchor, 'Вот доводы:');
+  assert.equal(remarkAt(out, 1).existing.text, 'замечание');
+  // заголовок, за которым сразу текст: к заголовку — под заголовком
+  assert.equal(penAt('## Глава\nТекст главы.', 'Глава'), '## Глава\n\n{>>замечание<<}\n\nТекст главы.');
+  // номер посреди абзаца («…в\n1986. году») — не список: замечание в конце абзаца
+  assert.equal(penAt('Это было в\n1986. году, давно\nи неправда.', 'было'), 'Это было в\n1986. году, давно\nи неправда.\n\n{>>замечание<<}');
+  // а список с номера 1 абзац прерывает
+  assert.equal(penAt('Шаги:\n1. раз\n2. два', 'два'), 'Шаги:\n1. раз\n2. два\n   {>>замечание<<}');
+  // два замечания подряд у одного абзаца: якорь у обоих — абзац
+  assert.deepEqual(parseRemarks('Абзац.\n\n{>>первое<<}\n\n{>>второе<<}').map((r) => r.anchor), ['Абзац.', 'Абзац.']);
+});

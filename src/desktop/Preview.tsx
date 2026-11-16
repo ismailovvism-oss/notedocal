@@ -2,16 +2,17 @@
 // Текст режется на блоки — абзац, список, таблица, выноска (src/lib/kb/blocks.ts) — и у каждого:
 // - справа кружок ✎: замечание к этому месту (выделили слова — к этим словам). Оно ложится в
 //   сам файл строкой `{>>…<<}` сразу за блоком и показывается карточкой под ним
-//   (./RemarkCard.tsx — с перепиской и состоянием);
+//   (./RemarkCard.tsx — с перепиской и состоянием). У списка кружок свой у каждого пункта:
+//   замечание ложится строкой под этим пунктом и показывается под ним же;
 // - слева ручка ⋮⋮ и стрелки: блок переставляется вместе со своими замечаниями.
 // Двойной щелчок по блоку ставит курсор правки на его место.
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../lib/markdown';
 import type { KbIndex } from '../lib/kb/index';
-import { moveRemark, remarkAfter, type Change, type Remark } from '../lib/kb/remarks';
+import { moveRemark, remarkAfter, remarkInItem, type Change, type Remark } from '../lib/kb/remarks';
 import { parseFootnotes } from '../lib/kb/footnotes';
-import { blocksOf, moveUnit, unitRange, type BlocksDiff } from '../lib/kb/blocks';
+import { bare, blocksOf, moveUnit, unitRange, type BlocksDiff } from '../lib/kb/blocks';
 import { RemarkCard } from './RemarkCard';
 
 const AR = '؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿';
@@ -117,17 +118,19 @@ export function Preview({
     return h;
   };
 
-  /** Новое замечание: к какому блоку (его начало) и к каким словам. */
-  const [draft, setDraft] = useState<{ at: number; phrase?: string; text: string } | null>(null);
+  /** Новое замечание: к какому месту (`b`+начало блока или `i`+начало пункта списка) и к каким словам. */
+  const [draft, setDraft] = useState<{ key: string; phrase?: string; text: string } | null>(null);
   useEffect(() => setDraft(null), [noteId]);
   const host = useRef<HTMLDivElement>(null);
-  const [flash, setFlash] = useState<number | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   useEffect(() => {
     if (!jump || !blocks) return;
-    const b = blocks.find((x) => x.notes.some((r) => r.from === jump.pos)) ?? [...blocks].reverse().find((x) => x.from <= jump.pos);
+    const b = blocks.find((x) => x.notes.some((r) => r.from === jump.pos) || x.inner.some((r) => r.from === jump.pos)) ?? [...blocks].reverse().find((x) => x.from <= jump.pos);
     if (!b) return;
-    setFlash(b.from);
-    host.current?.querySelector(`[data-from="${b.from}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // замечание к пункту списка — показать сам пункт
+    const it = b.items?.find((x) => x.notes.some((r) => r.from === jump.pos)) ?? (b.items && b.notes.every((r) => r.from !== jump.pos) ? [...b.items].reverse().find((x) => x.from <= jump.pos) : undefined);
+    setFlash(it ? `i${it.from}` : `b${b.from}`);
+    host.current?.querySelector(it ? `[data-item="${it.from}"]` : `[data-from="${b.from}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     const t = setTimeout(() => setFlash(null), 1400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -148,11 +151,87 @@ export function Preview({
     return <div className="dk-preview md pv-plain" dangerouslySetInnerHTML={{ __html: arabicRuns(renderMarkdown(body, { index, noteId })) }} />;
   }
 
-  const save = (from: number, to: number) => {
+  /** Сохранить новое замечание: к блоку — абзацем за ним, к пункту списка — строкой под пунктом. */
+  const save = (from: number, to: number, item = false) => {
     if (!draft) return;
     const text = draft.text.trim();
-    if (text) onApply(remarkAfter(body, from, to, text, draft.phrase));
+    if (text) onApply(item ? remarkInItem(body, from, text, draft.phrase) : remarkAfter(body, from, to, text, draft.phrase));
     setDraft(null);
+  };
+  const worstOf = (list: Remark[]) => (list.some((r) => r.status === 'open') ? 'open' : list.some((r) => r.status === 'ask') ? 'ask' : list.some((r) => r.status === 'done') ? 'done' : 'no');
+  /** Кружок ✎: новое замечание к этому месту (выделены слова — к ним). */
+  const pen = (key: string, list: Remark[], title: string) => {
+    const open = draft?.key === key;
+    return (
+      <button
+        className={`pv-btn ${list.length ? `on ${worstOf(list)}` : ''} ${open ? 'writing' : ''}`}
+        title={open ? 'Закрыть' : title}
+        onMouseDown={(e) => {
+          // слова выделены в этом месте — запомнить до щелчка (он снимет выделение)
+          e.preventDefault();
+          e.stopPropagation();
+          if (open) return setDraft(null);
+          setDraft({ key, phrase: pickPhrase(e.currentTarget.parentElement), text: '' });
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        {open ? '✕' : '✎'}
+      </button>
+    );
+  };
+  /** Карточки замечаний под своим местом. `own` — начало этого места: у замечания к другому
+   *  (вложенный пункт, абзац внутри выноски) подписано, к какому. */
+  const cards = (list: Remark[], key: string, lost: (r: Remark) => boolean, own?: number) =>
+    list.map((r) => (
+      <div key={r.n} className={`pv-note-wrap ${flash === key ? 'flash' : ''}`}>
+        <RemarkCard r={r} resolve={() => ({ doc: body, r })} onApply={onApply} onMove={r.inline ? undefined : () => onMoveStart(r)} where={own !== undefined && r.anchorAt !== own} missing={lost(r)} />
+      </div>
+    ));
+  /** Поле нового замечания. */
+  const box = (key: string, from: number, to: number, item = false) =>
+    draft?.key === key && (
+      <div className="pv-edit" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+        {draft.phrase && (
+          <div className="rk-quote" dir="auto">
+            к словам «{draft.phrase}»
+            <button className="pv-unphrase" title="Замечание ко всему месту, а не к этим словам" onClick={() => setDraft({ ...draft, phrase: undefined })}>
+              ×
+            </button>
+          </div>
+        )}
+        <textarea
+          autoFocus
+          dir="auto"
+          placeholder={draft.phrase ? 'Замечание к этим словам…' : item ? 'Замечание к этому пункту…' : 'Замечание к этому месту…'}
+          value={draft.text}
+          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              save(from, to, item);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setDraft(null);
+            }
+          }}
+        />
+        <div className="pv-edit-row">
+          <button className="btn-primary" onClick={() => save(from, to, item)}>
+            Сохранить
+          </button>
+          <button onClick={() => setDraft(null)}>Отмена</button>
+          <span className="muted small">Ctrl+Enter — сохранить · Esc — закрыть</span>
+        </div>
+      </div>
+    );
+  /** Перенос замечания: щёлкнули место, куда его. */
+  const dropHere = (e: React.MouseEvent, from: number, to: number, item = false) => {
+    if (!moving) return;
+    e.stopPropagation();
+    const fresh = remarks.find((x) => x.n === moving.n && x.kind === moving.kind);
+    if (fresh) onApply(moveRemark(body, fresh, from, to, item));
+    onMoveEnd();
   };
   const shift = (i: number, j: number) => {
     const m = moveUnit(body, blocks, i, j);
@@ -186,7 +265,7 @@ export function Preview({
     >
       {moving && (
         <div className="pv-move-hint">
-          ↪ Щёлкните абзац, к которому перенести замечание {moving.n} · Esc — отмена
+          ↪ Щёлкните абзац или пункт списка, к которому перенести замечание {moving.n} · Esc — отмена
           <button onClick={onMoveEnd}>Отмена</button>
         </div>
       )}
@@ -196,12 +275,15 @@ export function Preview({
         const k = b.raw.trim() ? blocks.slice(0, i).filter((x) => x.raw.trim()).length : -1;
         const fix = fixes && k >= 0 && fixes.now[k]?.kind !== 'same' ? fixes.now[k] : null;
         const gone = fixes && k >= 0 ? fixes.removed.filter((r) => r.before === k) : [];
-        const open = draft?.at === b.from;
-        const has = b.notes.length > 0;
-        const html = b.raw ? htmlOf(b.raw) : '';
-        const plain = b.raw && b.notes.some((r) => r.phrase) ? textOfHtml(html) : '';
+        const key = `b${b.from}`;
+        // у списка замечания пунктов — под пунктами; у прочих блоков внутренние — под блоком
+        const inItems = new Set((b.items ?? []).flatMap((x) => x.notes));
+        const mine = [...b.inner.filter((r) => !inItems.has(r)), ...b.notes];
+        const has = mine.length > 0;
+        const html = b.raw && !b.items ? htmlOf(bare(b, b.inner)) : '';
+        const plain = html && mine.some((r) => r.phrase) ? textOfHtml(html) : '';
         const found = (r: Remark) => !!r.phrase && plain.includes(squash(r.phrase));
-        const worst = b.notes.some((r) => r.status === 'open') ? 'open' : b.notes.some((r) => r.status === 'ask') ? 'ask' : b.notes.some((r) => r.status === 'done') ? 'done' : 'no';
+        const worst = worstOf(mine);
         return (
           <div key={b.from} className={`pv-item ${drag?.to === i ? 'drop-before' : ''} ${drag?.to === blocks.length && i === blocks.length - 1 ? 'drop-after' : ''}`}>
             {gone.map((g, gi) => (
@@ -214,16 +296,10 @@ export function Preview({
             ))}
             {b.raw && (
               <div
-                className={`pv-block ${has ? `marked ${worst}` : ''} ${fix ? 'fixed' : ''} ${flash === b.from ? 'flash' : ''} ${drag?.i === i ? 'dragging' : ''}`}
+                className={`pv-block ${b.items ? 'has-items' : ''} ${has ? `marked ${worst}` : ''} ${fix ? 'fixed' : ''} ${flash === key ? 'flash' : ''} ${drag?.i === i ? 'dragging' : ''}`}
                 data-from={b.from}
                 onDoubleClick={() => !moving && onJumpEdit?.(b.from)}
-                onClick={(e) => {
-                  if (!moving) return;
-                  e.stopPropagation();
-                  const fresh = remarks.find((x) => x.n === moving.n && x.kind === moving.kind);
-                  if (fresh) onApply(moveRemark(body, fresh, b.from, b.to));
-                  onMoveEnd();
-                }}
+                onClick={(e) => dropHere(e, b.from, b.to)}
                 onDragOver={(e) => {
                   if (!drag) return;
                   e.preventDefault();
@@ -259,25 +335,54 @@ export function Preview({
                     ▾
                   </button>
                 </div>
-                <Html
-                  html={html}
-                  phrases={b.notes
-                    .filter(found)
-                    .map((r) => squash(r.phrase!))
-                    .join('\u0001')}
-                />
-                <button
-                  className={`pv-btn ${has ? `on ${worst}` : ''} ${open ? 'open' : ''}`}
-                  title={open ? 'Закрыть' : 'Замечание к этому месту. Выделите слова — замечание будет к ним'}
-                  onMouseDown={(e) => {
-                    // слова выделены в этом блоке — запомнить до щелчка (он снимет выделение)
-                    e.preventDefault();
-                    if (open) return setDraft(null);
-                    setDraft({ at: b.from, phrase: pickPhrase(e.currentTarget.parentElement), text: '' });
-                  }}
-                >
-                  {open ? '✕' : '✎'}
-                </button>
+                {b.items ? (
+                  // список: у каждого пункта свой кружок и свои замечания
+                  <div className={`pv-list ${b.loose ? 'loose' : ''}`}>
+                    {b.items.map((it) => {
+                      const ik = `i${it.from}`;
+                      const ih = htmlOf(bare(it, it.notes));
+                      const itext = it.notes.some((r) => r.phrase) ? textOfHtml(ih) : '';
+                      const ifound = (r: Remark) => !!r.phrase && itext.includes(squash(r.phrase));
+                      return (
+                        <div
+                          key={it.from}
+                          className={`pv-li ${it.notes.length ? `marked ${worstOf(it.notes)}` : ''} ${flash === ik ? 'flash' : ''}`}
+                          data-item={it.from}
+                          onDoubleClick={(e) => {
+                            if (moving) return;
+                            e.stopPropagation();
+                            onJumpEdit?.(it.from);
+                          }}
+                          onClick={(e) => dropHere(e, it.from, it.to, true)}
+                        >
+                          <div className="pv-li-text">
+                            <Html
+                              html={ih}
+                              phrases={it.notes
+                                .filter(ifound)
+                                .map((r) => squash(r.phrase!))
+                                .join('\u0001')}
+                            />
+                            {pen(ik, it.notes, 'Замечание к этому пункту. Выделите слова — замечание будет к ним')}
+                          </div>
+                          {cards(it.notes, ik, (r) => !!r.phrase && !ifound(r), it.from)}
+                          {box(ik, it.from, it.to, true)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <>
+                    <Html
+                      html={html}
+                      phrases={mine
+                        .filter(found)
+                        .map((r) => squash(r.phrase!))
+                        .join('\u0001')}
+                    />
+                    {pen(key, mine, 'Замечание к этому месту. Выделите слова — замечание будет к ним')}
+                  </>
+                )}
               </div>
             )}
             {fix && (
@@ -285,7 +390,7 @@ export function Preview({
                 <span className="pv-fix-l">{fix.kind === 'added' ? '＋ добавлено Claude' : '✓ исправлено Claude'}</span>
                 {fix.was !== undefined && <button onClick={() => setWasOpen(wasOpen === b.from ? null : b.from)}>{wasOpen === b.from ? 'Скрыть «как было»' : 'Как было'}</button>}
                 {fix.was !== undefined ? (
-                  <button title="Вернуть прежний текст абзаца" onClick={() => onApply({ from: b.from, to: b.from + b.raw.trimEnd().length, insert: fix.was! })}>
+                  <button title="Вернуть прежний текст абзаца" onClick={() => onApply({ from: b.from, to: b.from + b.raw.trimEnd().length, insert: fix.was! + b.inner.map((r) => `\n\n{>>${r.raw}<<}`).join('') })}>
                     ↩ Вернуть как было
                   </button>
                 ) : (
@@ -313,52 +418,9 @@ export function Preview({
                   </div>
                 );
               })()}
-            {b.notes.map((r) => (
-              <div key={r.n} className={`pv-note-wrap ${flash === b.from ? 'flash' : ''}`} data-from={b.raw ? undefined : b.from}>
-                <RemarkCard
-                  r={r}
-                  resolve={() => ({ doc: body, r })}
-                  onApply={onApply}
-                  onMove={r.inline ? undefined : () => onMoveStart(r)}
-                  missing={!!r.phrase && !!b.raw && !found(r)}
-                />
-              </div>
-            ))}
-            {open && (
-              <div className="pv-edit">
-                {draft!.phrase && (
-                  <div className="rk-quote" dir="auto">
-                    к словам «{draft!.phrase}»
-                    <button className="pv-unphrase" title="Замечание ко всему абзацу, а не к этим словам" onClick={() => setDraft({ ...draft!, phrase: undefined })}>
-                      ×
-                    </button>
-                  </div>
-                )}
-                <textarea
-                  autoFocus
-                  dir="auto"
-                  placeholder={draft!.phrase ? 'Замечание к этим словам…' : 'Замечание к этому месту…'}
-                  value={draft!.text}
-                  onChange={(e) => setDraft({ ...draft!, text: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                      e.preventDefault();
-                      save(b.from, b.to);
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      setDraft(null);
-                    }
-                  }}
-                />
-                <div className="pv-edit-row">
-                  <button className="btn-primary" onClick={() => save(b.from, b.to)}>
-                    Сохранить
-                  </button>
-                  <button onClick={() => setDraft(null)}>Отмена</button>
-                  <span className="muted small">Ctrl+Enter — сохранить · Esc — закрыть</span>
-                </div>
-              </div>
-            )}
+            {!b.raw && <span data-from={b.from} />}
+            {cards(mine, key, (r) => !!r.phrase && !!b.raw && !b.items && !found(r), b.inner.length > 0 && !b.items ? b.from : undefined)}
+            {box(key, b.from, b.to)}
           </div>
         );
       })}

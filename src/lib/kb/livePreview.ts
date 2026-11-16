@@ -389,7 +389,8 @@ function build(state: EditorState): Built {
       // замечание отдельной строкой — плашкой во всю строку
       const a = lineOf(from);
       const b = lineOf(to);
-      if (doc.slice(a.from, from).trim() === '' && doc.slice(to, b.to).trim() === '') {
+      // перед ним могут стоять отступ пункта списка и знаки цитаты `>` (src/lib/kb/remarks.ts)
+      if (/^[\s>]*$/.test(doc.slice(a.from, from)) && doc.slice(to, b.to).trim() === '') {
         for (let p = a.from; p <= b.from; p = lineOf(p).to + 1) out.push(Decoration.line({ class: 'cm-remark-line' }).range(p));
       }
     }

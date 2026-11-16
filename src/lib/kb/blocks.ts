@@ -8,12 +8,27 @@
 import { marked } from 'marked';
 import { generalRange, parseRemarks, type Change, type Remark } from './remarks.ts';
 
+/** Пункт списка верхнего уровня: свой ✎ и свои замечания (строками под его словами). */
+export interface Item {
+  from: number;
+  to: number;
+  raw: string;
+  /** Замечания внутри пункта (и к вложенным в него пунктам). */
+  notes: Remark[];
+}
+
 export interface Block {
   from: number;
   to: number;
   raw: string;
   /** Замечания, стоящие сразу за блоком. */
   notes: Remark[];
+  /** Замечания внутри самого блока — строкой под пунктом списка, под абзацем выноски. */
+  inner: Remark[];
+  /** У списка — его пункты. */
+  items?: Item[];
+  /** Список с пустыми строками между пунктами. */
+  loose?: boolean;
 }
 
 const REMARK_ONLY = /^\s*(\{>>[\s\S]*<<\}|%%(?!🎤:)[\s\S]*%%)\s*$/;
@@ -26,7 +41,8 @@ export function blocksOf(src: string, remarks: Remark[] = parseRemarks(src)): Bl
   // места считаются по исходным кускам: разбор обязан вернуть текст как есть
   if (tokens.map((t) => t.raw).join('') !== src) return null;
   const gen = generalRange(src);
-  const standalone = new Map(remarks.filter((r) => r.kind === 'par' && !r.inline).map((r) => [r.from, r]));
+  const lone = remarks.filter((r) => r.kind === 'par' && !r.inline);
+  const standalone = new Map(lone.map((r) => [r.from, r]));
   const out: Block[] = [];
   let at = 0;
   for (const t of tokens) {
@@ -40,11 +56,38 @@ export function blocksOf(src: string, remarks: Remark[] = parseRemarks(src)): Bl
       const mine = [...standalone.values()].filter((r) => r.from >= from && r.from < at);
       if (mine.length) {
         if (out.length) out[out.length - 1].notes.push(...mine);
-        else out.push({ from, to: from, raw: '', notes: mine }); // замечание в самом начале текста
+        else out.push({ from, to: from, raw: '', notes: mine, inner: [] }); // замечание в самом начале текста
         continue;
       }
     }
-    out.push({ from, to: at, raw: t.raw, notes: [] });
+    const b: Block = { from, to: at, raw: t.raw, notes: [], inner: lone.filter((r) => r.from > from && r.from < at) };
+    if (t.type === 'list') {
+      // пункты — по кускам разбора; не сошлось с текстом — список остаётся одним блоком
+      const items: Item[] = [];
+      let p = 0;
+      for (const it of (t as { items: { raw: string }[] }).items) {
+        const a = it.raw ? t.raw.indexOf(it.raw, p) : -1;
+        if (a < 0) break;
+        p = a + it.raw.length;
+        items.push({ from: from + a, to: from + p, raw: it.raw, notes: b.inner.filter((r) => r.from >= from + a && r.from < from + p) });
+      }
+      if (items.length === (t as { items: unknown[] }).items.length) {
+        b.items = items;
+        b.loose = !!(t as { loose?: boolean }).loose;
+      }
+    }
+    out.push(b);
+  }
+  return out;
+}
+
+/** Текст блока или пункта без строк замечаний, что лежат внутри него: для показа и сравнения. */
+export function bare(x: { from: number; raw: string }, inner: Remark[]): string {
+  let out = x.raw;
+  for (const r of [...inner].sort((a, b) => b.from - a.from)) {
+    const a = r.from - x.from;
+    if (a < 0 || r.to - x.from > out.length) continue;
+    out = out.slice(0, a > 0 && out[a - 1] === '\n' ? a - 1 : a) + out.slice(r.to - x.from);
   }
   return out;
 }
@@ -142,7 +185,7 @@ function alike(a: string, b: string): number {
 
 /** Тексты блоков без замечаний: переписка в замечаниях правкой текста не считается. */
 function texts(doc: string): string[] {
-  return (blocksOf(doc) ?? []).filter((b) => b.raw.trim()).map((b) => b.raw.trimEnd());
+  return (blocksOf(doc) ?? []).filter((b) => b.raw.trim()).map((b) => bare(b, b.inner).trimEnd());
 }
 
 /** Что изменилось от старой версии к новой — по блокам. */
