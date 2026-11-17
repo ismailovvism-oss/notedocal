@@ -10,6 +10,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../lib/markdown';
 import type { KbIndex } from '../lib/kb/index';
+import { AR_SIGN } from '../lib/kb/livePreview';
 import { moveRemark, remarkAfter, remarkInItem, type Change, type Remark } from '../lib/kb/remarks';
 import { parseFootnotes } from '../lib/kb/footnotes';
 import { bare, blocksOf, moveUnit, unitRange, type BlocksDiff } from '../lib/kb/blocks';
@@ -18,7 +19,8 @@ import { RemarkCard } from './RemarkCard';
 const AR = '؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿';
 const AR_RUN = new RegExp(`[${AR}](?:[${AR} \\t.,:;!?«»()\\-]*[${AR}])?`, 'g');
 /** Арабские куски — в `<span class="ar">`: свой шрифт и кегль (как в правке). */
-const arabicRuns = (html: string) => html.replace(/>([^<]+)</g, (_, t: string) => '>' + t.replace(AR_RUN, '<span class="ar">$&</span>') + '<');
+const arabicRuns = (html: string) =>
+  html.replace(/>([^<]+)</g, (_, t: string) => '>' + t.replace(AR_RUN, (s) => `<span class="ar${AR_SIGN.test(s) ? ' ar-sign' : ''}">${s}</span>`) + '<');
 
 /** Текст сноски — одной строкой разметки (без обёртки абзаца). */
 const inline = (text: string) => arabicRuns(renderMarkdown(text)).replace(/^<p>|<\/p>\s*$/g, '');

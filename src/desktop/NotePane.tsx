@@ -261,6 +261,18 @@ export function NotePane({
   useEffect(() => setMoving(null), [note.id]);
   // кружок ✎ у абзаца в правке — под мышью
   const edWrap = useRef<HTMLDivElement>(null);
+  // шапка заметки закреплена у верха страницы; когда текст уходит под неё — снизу черта
+  const headRef = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const head = headRef.current;
+    const page = head?.closest('.dk-page');
+    if (!head || !page) return undefined;
+    const on = () => setStuck(page.scrollTop > 0 && head.getBoundingClientRect().top - page.getBoundingClientRect().top < 1);
+    on();
+    page.addEventListener('scroll', on, { passive: true });
+    return () => page.removeEventListener('scroll', on);
+  }, []);
   const [hover, setHover] = useState<{ top: number; pos: number; has: boolean } | null>(null);
   const overEditor = (e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
@@ -533,7 +545,7 @@ export function NotePane({
       onDragLeave={(e) => e.currentTarget === e.target && setDropping(false)}
       onDropCapture={onDrop}
     >
-      <div className="dk-note-head">
+      <div className={`dk-note-head ${stuck ? 'stuck' : ''}`} ref={headRef}>
         <select
           className="dk-type"
           value={type}

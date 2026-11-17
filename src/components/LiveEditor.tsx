@@ -179,6 +179,13 @@ export default function LiveEditor({
           autocompletion({ override: [wikiCompletion(kbRef), tagCompletion(kbRef)], icons: false }),
           EditorView.lineWrapping,
           EditorView.perLineTextDirection.of(true),
+          // окно «База»: над текстом висят закреплённые полосы (шапка заметки, поиск) —
+          // прокручивая к курсору, оставляем под них место, иначе строка уходит под полосу
+          EditorView.scrollMargins.of((v) => {
+            let top = 0;
+            v.dom.closest('.dk-note')?.querySelectorAll<HTMLElement>('.dk-note-head, .dk-find').forEach((el) => (top += el.offsetHeight));
+            return top ? { top: top + 6 } : null;
+          }),
           cmPlaceholder(placeholder ?? ''),
           livePreview(),
           findExt,

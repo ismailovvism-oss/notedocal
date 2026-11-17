@@ -23,6 +23,10 @@ export interface LiveCtx {
 }
 
 export const setLiveCtx = StateEffect.define<LiveCtx>();
+
+/** Одиночный знак-лигатура (ﷺ ﷻ ﷲ…) среди неарабского текста: шрифт арабский, но строку
+ *  он раздвигать не должен — у него свой класс (`cm-ar-sign` в правке, `ar-sign` в просмотре). */
+export const AR_SIGN = /^[﵀-﵏ﷰ-﷿]+$/;
 const ctxField = StateField.define<LiveCtx>({
   create: () => ({}),
   update: (v, tr) => tr.effects.find((e) => e.is(setLiveCtx))?.value ?? v,
@@ -416,7 +420,7 @@ function build(state: EditorState): Built {
 
   // арабский — своим шрифтом и кеглем (окно «База»: Amiri, размер — кнопками «ар − +»)
   for (const m of doc.matchAll(/[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff](?:[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff \t.,:;!?«»()\-]*[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff])?/g)) {
-    out.push(mark('cm-ar').range(m.index!, m.index! + m[0].length));
+    out.push(mark(AR_SIGN.test(m[0]) ? 'cm-ar cm-ar-sign' : 'cm-ar').range(m.index!, m.index! + m[0].length));
   }
 
   for (const m of masked.matchAll(/[ \t]\^([A-Za-z0-9-]+)[ \t]*$/gm)) {
