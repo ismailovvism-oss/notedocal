@@ -18,13 +18,16 @@ import { sendBridge } from './bridge';
 import { PropsView, SchemaView, ViewResult } from '../components/Props';
 import { PropsEditor, SchemaEditor, ViewEditor } from '../components/PropsEdit';
 import { TYPE_LABELS } from '../lib/noteTypes';
-import { useKb } from '../lib/kb/ui';
+import { useCommentRefs, useKb } from '../lib/kb/ui';
+import { findAnchors, findLinks, type WikiLink } from '../lib/kb/syntax';
+import type { LinkRef } from '../lib/kb/index';
+import { Backlinks } from '../components/Backlinks';
 import { dropEmptyAnchors } from '../lib/kb/edit';
 import { checkNewTag, tagCards } from '../lib/kb/tags';
 import { OWN_KEYS, fieldsOf, schemas } from '../lib/kb/schema';
 import type { ScopeWhy } from '../lib/kb/scope';
 import { onFlush } from './flush';
-import { dropEmptyRemarks, generalItems, parseRemarks, remarkAt, remarksText, removeRemark, writeGeneral, type Change, type Remark } from '../lib/kb/remarks';
+import { dropEmptyRemarks, generalItems, parseRemarks, phraseOf, remarksText, removeRemark, writeGeneral, type Change, type Remark } from '../lib/kb/remarks';
 import { Preview } from './Preview';
 import { RemarkCard } from './RemarkCard';
 import { claudeChanges, shiftUnit, type BlocksDiff } from '../lib/kb/blocks';
@@ -182,6 +185,39 @@ export function NotePane({
     setJump({ pos, n: ++jumpSeq.current });
   };
   const foots = useMemo(() => parseFootnotes(body), [body]);
+  // обратный путь — из текста к карточке на панели «Замечания»: щелчок по номеру на плашке
+  // замечания открывает панель на его карточке; курсор текста внутри замечания — подсвечивает её
+  const [cur, setCur] = useState<{ key: string; n: number; show: boolean } | null>(null);
+  const curSeq = useRef(0);
+  const railRef = useRef(rail);
+  railRef.current = rail;
+  const edCol = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = edCol.current;
+    if (!el) return undefined;
+    const on = (e: Event) => {
+      onRail('remarks');
+      setCur({ key: `par-${(e as CustomEvent<number>).detail}`, n: ++curSeq.current, show: true });
+    };
+    el.addEventListener('kb-remark', on);
+    return () => el.removeEventListener('kb-remark', on);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const onCursor = (pos: number) => {
+    if (railRef.current !== 'remarks') return;
+    const r = parseRemarks(editor.current?.text() ?? '').find((x) => pos >= x.from && pos <= x.to);
+    const key = r ? `${r.kind}-${r.n}` : '';
+    setCur((c) => ((c?.key ?? '') === key ? c : key ? { key, n: ++curSeq.current, show: false } : null));
+  };
+  // вкладки «Ссылки» и «Комментарии»: ссылки — по тексту, как он сейчас набран; комментарии —
+  // заметки роли «комментарий», привязанные к меткам этой заметки (место — по метке в тексте)
+  const links = useMemo(() => (rail === 'links' ? findLinks(body) : []), [rail, body]);
+  const commentRefs = useCommentRefs(note.id);
+  const comments = useMemo(() => {
+    if (rail !== 'comments') return [];
+    const anchors = findAnchors(body);
+    return commentRefs.map((ref) => ({ ref, pos: ref.anchor ? (anchors.get(ref.anchor)?.[0]?.start ?? anchors.get(ref.anchor.toLowerCase())?.[0]?.start) : undefined, frag: ref.anchor ? anchors.get(ref.anchor)?.map((p) => p.text).join(' … ') : ref.heading }));
+  }, [rail, body, commentRefs]);
   // поиск и замена в тексте (Ctrl+F, Ctrl+H) — src/lib/kb/find.ts
   const [finder, setFinder] = useState<{ q: string; rep: string; cased: boolean; replace: boolean } | null>(null);
   const [found, setFound] = useState({ i: 0, n: 0 });
@@ -260,7 +296,6 @@ export function NotePane({
   };
   useEffect(() => setMoving(null), [note.id]);
   // кружок ✎ у абзаца в правке — под мышью
-  const edWrap = useRef<HTMLDivElement>(null);
   // шапка заметки закреплена у верха страницы; когда текст уходит под неё — снизу черта
   const headRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
@@ -273,19 +308,6 @@ export function NotePane({
     page.addEventListener('scroll', on, { passive: true });
     return () => page.removeEventListener('scroll', on);
   }, []);
-  const [hover, setHover] = useState<{ top: number; pos: number; has: boolean } | null>(null);
-  const overEditor = (e: React.MouseEvent) => {
-    const t = e.target as HTMLElement;
-    if (t.closest('.ed-remark')) return;
-    const line = t.closest<HTMLElement>('.cm-line');
-    const h = editor.current;
-    if (!line || !h || !edWrap.current || !line.textContent?.trim() || line.classList.contains('cm-remark-line')) return;
-    const pos = h.posAtDOM(line);
-    if (pos === null) return;
-    const top = line.getBoundingClientRect().top - edWrap.current.getBoundingClientRect().top;
-    if (hover && hover.pos === pos && Math.abs(hover.top - top) < 1) return;
-    setHover({ top, pos, has: 'existing' in remarkAt(h.text(), pos) });
-  };
   const [voice, setVoice] = useState<{ id: string; state: string; seconds: number; level: number; waiting: number; mic: string } | null>(null);
   // с какого микрофона писать: mic — какой стоит в системе по умолчанию; выбор запоминается
   const [mic, setMic] = useLocalStorage<string>('dk.mic', 'mic');
@@ -468,7 +490,7 @@ export function NotePane({
             .catch(() => setMsg('Вставить из меню не дали — нажмите Ctrl+V')),
       },
       'sep',
-      { label: 'Замечание к абзацу', icon: '✎', run: () => h.remark() },
+      { label: phraseOf(sel) ? 'Замечание к выделенным словам' : 'Замечание к абзацу', icon: '✎', keys: 'Ctrl+Alt+M', run: () => h.remark() },
       'sep',
     );
     if (sel) {
@@ -926,26 +948,14 @@ export function NotePane({
         ref={work}
         style={view === 'both' ? ({ '--dk-ratio': String(ratio) } as React.CSSProperties) : undefined}
       >
-      <div className="dk-edit-col" ref={edWrap} onContextMenu={textMenu} onMouseMove={overEditor} onMouseLeave={() => setHover(null)}>
-      {hover && (
-        <button
-          className={`ed-remark ${hover.has ? 'on' : ''}`}
-          style={{ top: hover.top }}
-          title={hover.has ? 'Поправить замечание к этому абзацу' : 'Замечание к этому абзацу'}
-          onMouseDown={keep}
-          onClick={() => {
-            editor.current?.remark(hover.pos);
-            setHover(null);
-          }}
-        >
-          ✎
-        </button>
-      )}
+      {/* значки ✎ справа от текста — полоса редактора (src/lib/kb/remarkGutter.ts) */}
+      <div className="dk-edit-col" ref={edCol} onContextMenu={textMenu}>
       <LiveEditor
         key={note.id}
         hemingway={hem}
         locked={locked}
         review
+        onCursor={onCursor}
         value={body}
         onChange={change}
         onCommit={save}
@@ -1070,6 +1080,10 @@ export function NotePane({
             foots={foots}
             onRail={onRail}
             openFind={openFind}
+            cur={cur}
+            links={links}
+            comments={comments}
+            noteId={note.id}
           />,
           toolsSlot,
         )}
@@ -1183,7 +1197,18 @@ function Tools({
   onRail,
   openFind,
   onMove,
+  cur,
+  links,
+  comments,
+  noteId,
 }: {
+  /** Карточка замечания, на которую показали из текста (show — открыть на ней панель). */
+  cur: { key: string; n: number; show: boolean } | null;
+  /** Ссылки в тексте заметки — по порядку. */
+  links: WikiLink[];
+  /** Комментарии к словам этой заметки: заметка-комментарий, место её метки в тексте, слова. */
+  comments: { ref: LinkRef; pos?: number; frag?: string }[];
+  noteId: string;
   /** Перенести замечание к другому абзацу (дальше — щелчок по абзацу в просмотре). */
   onMove: (r: Remark) => void;
   /** Вкладка правой панели: действия (tools), замечания (remarks), сноски (foot). */
@@ -1263,19 +1288,30 @@ function Tools({
   const general = shown.filter((r) => r.kind === 'gen');
   const toPara = shown.filter((r) => r.kind === 'par');
   const card = (r: Remark) => (
-    <RemarkCard
-      key={`${r.kind}-${r.n}`}
-      r={r}
-      where
-      resolve={() => {
-        const { t, r: x } = fresh(r);
-        return x ? { doc: t, r: x } : null;
-      }}
-      onApply={(c) => h()?.apply(c)}
-      onJump={r.kind === 'par' ? () => jumpTo(fresh(r).r?.from ?? r.from) : undefined}
-      onMove={r.inline ? undefined : () => onMove(r)}
-    />
+    <div key={`${r.kind}-${r.n}`} data-rk={`${r.kind}-${r.n}`} className={cur?.key === `${r.kind}-${r.n}` ? 'rk-cur' : undefined}>
+      <RemarkCard
+        r={r}
+        where
+        resolve={() => {
+          const { t, r: x } = fresh(r);
+          return x ? { doc: t, r: x } : null;
+        }}
+        onApply={(c) => h()?.apply(c)}
+        onJump={r.kind === 'par' ? () => jumpTo(fresh(r).r?.from ?? r.from) : undefined}
+        onMove={r.inline ? undefined : () => onMove(r)}
+      />
+    </div>
   );
+  // из текста показали на замечание: карточка должна быть видна — и в списке, и на экране
+  const pane = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!cur || tab !== 'remarks') return;
+    if (cur.show && !shown.some((r) => `${r.kind}-${r.n}` === cur.key)) return setFlt('all');
+    pane.current?.querySelector(`[data-rk="${cur.key}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cur?.n, tab, flt]);
+  const kb = useKb()!;
+  const [backAnchor, setBackAnchor] = useState('');
 
   // сноски: поле открытой (id) — пишется на месте, как в «Вычитке»
   const [fn, setFn] = useState<{ id: string; text: string } | null>(null);
@@ -1333,12 +1369,12 @@ function Tools({
   const native_ = native.available();
   if (tab === 'remarks') {
     return (
-      <div className="dk-tools dk-rail-pane">
+      <div className="dk-tools dk-rail-pane" ref={pane}>
         <div className="dk-list-tools">
           <B
             wide
             t="✎ К абзацу"
-            title={canCursor ? 'Замечание к абзацу, где курсор. Или кружок ✎ справа от абзаца' : 'В режиме чтения — кружок ✎ справа от абзаца'}
+            title={canCursor ? 'Замечание к абзацу, где курсор; выделены слова — к ним (Ctrl+Alt+M). Или значок ✎ справа от абзаца' : 'В режиме чтения — значок ✎ справа от абзаца'}
             on={() => (canCursor ? h()?.remark() : setMsg('В режиме чтения нажмите кружок ✎ справа от нужного абзаца'))}
           />
           <B wide t="＋ Общее" title="Замечание ко всему тексту, не к абзацу" on={() => setGen('')} />
@@ -1362,7 +1398,7 @@ function Tools({
         )}
         {remarks.length === 0 && gen === null && (
           <p className="dk-remark-hint muted small">
-            Замечаний нет. Наведите на абзац и нажмите ✎ — замечание ляжет в сам файл, сразу после абзаца. Выделите слова — будет замечание к этим словам.
+            Замечаний нет. Нажмите значок ✎ справа от абзаца — замечание ляжет в сам файл, сразу после абзаца. Выделите слова — будет замечание к этим словам.
           </p>
         )}
         {remarks.length > 0 && shown.length === 0 && <p className="dk-remark-hint muted small">Таких сейчас нет.</p>}
@@ -1412,6 +1448,93 @@ function Tools({
             }
           />
         )}
+      </div>
+    );
+  }
+  if (tab === 'comments') {
+    return (
+      <div className="dk-tools dk-rail-pane">
+        <div className="dk-rail-actions">
+          <B wide t="💬 К выделенным словам" title="Комментарий — отдельная заметка в Базе, привязанная к этим словам" on={onWords('comment')} />
+        </div>
+        {comments.length === 0 && (
+          <p className="dk-remark-hint muted small">
+            Комментариев нет. Выделите слова в тексте и нажмите кнопку выше. Комментарий — ваша мысль об этом месте: отдельная заметка, остаётся в Базе насовсем. Нужно
+            что-то исправить в самом тексте — это замечание (вкладка ✎): оно снимается, когда исправлено.
+          </p>
+        )}
+        {comments.map(({ ref, pos, frag }, i) => (
+          <div
+            key={`${ref.from}-${i}`}
+            className="dk-remark-card"
+            onMouseDown={keep}
+            onClick={() => (pos !== undefined ? jumpTo(pos) : kb.open({ id: ref.from }))}
+            title={pos !== undefined ? 'Показать место в тексте' : 'Открыть комментарий'}
+          >
+            {frag && (
+              <div className="dk-remark-at" dir="auto">
+                «{frag.slice(0, 120)}»
+              </div>
+            )}
+            <div dir="auto">{(kb.index.byId.get(ref.from)?.body ?? '').slice(0, 300) || 'пусто'}</div>
+            <button
+              className="dk-remark-x"
+              title="Открыть комментарий как заметку — поправить, добавить теги"
+              onClick={(e) => {
+                e.stopPropagation();
+                kb.open({ id: ref.from });
+              }}
+            >
+              ↗
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (tab === 'links') {
+    return (
+      <div className="dk-tools dk-rail-pane">
+        <div className="dk-rail-actions">
+          <B wide t="[[ Ссылка" title="Ссылка на заметку — у курсора" on={() => (canCursor ? h()?.startLink() : setMsg('Ссылка ставится у курсора — переключитесь в правку (✏ или ◫)'))} />
+          <B wide t="🔗 Словами" title="Сослаться выделенными словами на заметку или её место" on={onWords('link')} />
+        </div>
+        <div className="dk-remark-group">В тексте · {links.length}</div>
+        {links.length === 0 && <p className="dk-remark-hint muted small">В тексте ссылок нет. Наберите [[ и начните название заметки — или выделите слова и нажмите «🔗 Словами».</p>}
+        {links.map((l, i) => {
+          const to = l.target ? kb.index.byName.get(l.target.toLowerCase())?.[0] : kb.index.byId.get(noteId);
+          const part = l.anchor ? ` · ^${l.anchor}` : l.heading ? ` · ${l.heading}` : '';
+          return (
+            <div key={`${l.start}-${i}`} className={`dk-remark-card ${to ? '' : 'warn'}`} onMouseDown={keep} onClick={() => jumpTo(l.start)} title="Показать место в тексте">
+              <div dir="auto">
+                {l.embed ? '⧉ ' : ''}
+                {l.alias || l.target || 'эта заметка'}
+              </div>
+              <div className="dk-remark-at" dir="auto">
+                {l.alias && l.target ? `→ ${l.target}` : l.target ? '' : '→ эта заметка'}
+                {part}
+                {!to && ' · такой заметки нет'}
+              </div>
+              <button
+                className="dk-remark-x"
+                title={to ? 'Открыть заметку, на которую ссылка' : 'Заметки нет — открыть, чтобы создать'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  kb.open(l.target ? { name: l.target, anchor: l.anchor, heading: l.heading } : { id: noteId, anchor: l.anchor, heading: l.heading });
+                }}
+              >
+                ↗
+              </button>
+            </div>
+          );
+        })}
+        {(kb.index.incoming.get(noteId) ?? []).every((r) => r.kind === 'comment') && (
+          <>
+            <div className="dk-remark-group">Ссылаются сюда</div>
+            <p className="dk-remark-hint muted small">Пока никто. Когда в другой заметке появится ссылка на эту, она будет видна здесь.</p>
+          </>
+        )}
+        <Backlinks noteId={noteId} anchor={backAnchor} setAnchor={setBackAnchor} noComments />
       </div>
     );
   }
@@ -1570,7 +1693,7 @@ function Tools({
           <B
             wide
             t="✎ Замечание"
-            title="Замечание к абзацу, где курсор"
+            title="Замечание к абзацу, где курсор; выделены слова — к ним (Ctrl+Alt+M)"
             on={() => (canCursor ? h()?.remark() : setMsg('В режиме чтения нажмите кружок ✎ справа от нужного абзаца'))}
           />
         </div>

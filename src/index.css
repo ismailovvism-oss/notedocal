@@ -5115,3 +5115,6 @@ button.chip {
   animation: kb-voice-pulse 1.6s ease-in-out infinite;
 }
 @keyframes kb-voice-pulse { 50% { opacity: 0.55; } }
+
+/* номер замечания на плашке в правке — только в окне «База» (там он ведёт к карточке на панели) */
+.cm-remark-n { display: none; }

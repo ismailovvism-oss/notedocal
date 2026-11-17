@@ -11,16 +11,15 @@ import type { Attachment, Note, Relation } from '../types';
 import { uid, useListActions, useLocalStorage, visible } from '../lib/storage';
 import { persistParse, useNotesStore } from '../lib/notesStore';
 import { buildIndex, planRename } from '../lib/kb/index';
-import { KbContext, useCommentRefs, useKb, type KbApi, type KbFragment, type KbPicked } from '../lib/kb/ui';
+import { KbContext, useKb, type KbApi, type KbFragment, type KbPicked } from '../lib/kb/ui';
 import { OTHER, planTagRename, computeFacets, searchTags, selectedTags, tagCards, toggleTag, type Facets, type Selection } from '../lib/kb/tags';
-import { normTag } from '../lib/kb/syntax';
+import { findLinks, normTag } from '../lib/kb/syntax';
 import { linkText } from '../lib/kb/edit';
 import { searchNotes } from '../lib/kb/search';
 import { SERVICE_FOLDERS, folderTitles, scopeOf, type ScopeWhy } from '../lib/kb/scope';
 import { TYPE_BADGE } from '../lib/noteTypes';
 import { TagTree } from '../components/Facets';
 import { FolderTree } from './Tree';
-import { Backlinks } from '../components/Backlinks';
 import { CommentComposer, LinkPicker, SetPicker } from '../components/KbDialogs';
 import { PropsView } from '../components/Props';
 import { NotePane, type PaneFocus } from './NotePane';
@@ -180,7 +179,7 @@ function Desktop() {
   const facets = useMemo(() => computeFacets(index, cards, sel, showAll ? undefined : shown), [index, cards, sel, showAll, shown]);
   // правая панель — вкладками (как в «Вычитке»): действия, замечания, сноски — открытой заметки
   // (их рисует NotePane), «заметка» — оглавление и связи, «теги» — отбор по всей базе
-  type Rail = 'tools' | 'remarks' | 'foot' | 'note' | 'tags';
+  type Rail = 'tools' | 'remarks' | 'foot' | 'comments' | 'links' | 'note' | 'tags';
   const [rightTab, setRightTab] = useLocalStorage<Rail>('dk.rail', 'tools');
   // панели прячутся: слева дерево, справа инструменты; «Фокус» — обе разом, остаётся текст
   const [sideShut, setSideShut] = useLocalStorage<boolean>('dk.sideShut', false);
@@ -995,8 +994,13 @@ function Desktop() {
   // счётчики на вкладках правой панели
   const railCounts = useMemo(() => {
     const b = note && !note.vault?.mime ? (note.body ?? '') : '';
-    return { remarks: b ? parseRemarks(b).length : 0, foot: b ? parseFootnotes(b).length : 0 };
-  }, [note]);
+    return {
+      remarks: b ? parseRemarks(b).length : 0,
+      foot: b ? parseFootnotes(b).length : 0,
+      comments: note ? (index.incoming.get(note.id) ?? []).filter((r) => r.kind === 'comment').length : 0,
+      links: b ? findLinks(b).length : 0,
+    };
+  }, [note, index]);
 
   // Карточка файла хранилища: `X.md` рядом с `X.pdf` — его теги, свойства, иконка и заметки о нём.
   // В дереве пара — один пункт (сам файл), карточка открывается из шапки просмотра.
@@ -1251,24 +1255,28 @@ function Desktop() {
                 ['tools', '🎛', 'Действия', 0],
                 ['remarks', '✎', 'Замечания', railCounts.remarks],
                 ['foot', '¹', 'Сноски', railCounts.foot],
-                ['note', '☰', 'Обзор', 0],
+                ['comments', '💬', 'Комментарии', railCounts.comments, true],
+                ['links', '🔗', 'Ссылки', railCounts.links, true],
+                ['note', '☰', 'Оглавление', 0],
                 ['tags', '#', 'Теги', selectedTags(sel).length],
-              ] as [Rail, string, string, number][]
-            ).map(([id, icon, label, n]) => (
-              <button key={id} role="tab" aria-selected={rightTab === id} className={rightTab === id ? 'on' : ''} title={label} onClick={() => setRightTab(id)}>
+              ] as [Rail, string, string, number, boolean?][]
+            ).map(([id, icon, label, n, quiet]) => (
+              <button key={id} role="tab" aria-selected={rightTab === id} className={rightTab === id ? 'on' : ''} title={n > 0 ? `${label} · ${n}` : label} onClick={() => setRightTab(id)}>
                 <span className="dk-rail-ico">{icon}</span>
                 <span className="dk-rail-label">{label}</span>
-                {n > 0 && <span className="dk-rail-badge">{n}</span>}
+                {n > 0 && <span className={`dk-rail-badge ${quiet ? 'quiet' : ''}`}>{n}</span>}
               </button>
             ))}
           </div>
           <div className="dk-rail-body">
-            {/* действия, замечания и сноски открытой заметки рисует NotePane (createPortal) */}
+            {/* действия, замечания, сноски, комментарии и ссылки открытой заметки рисует NotePane (createPortal) */}
             <div className="dk-tools-slot" ref={setToolsSlot} hidden={rightTab === 'note' || rightTab === 'tags'} />
-            {(rightTab === 'tools' || rightTab === 'remarks' || rightTab === 'foot') && (!note || note.vault?.mime) && (
-              <p className="muted small dk-rail-empty">Откройте заметку — здесь будут её {rightTab === 'tools' ? 'действия' : rightTab === 'remarks' ? 'замечания' : 'сноски'}.</p>
+            {rightTab !== 'note' && rightTab !== 'tags' && (!note || note.vault?.mime) && (
+              <p className="muted small dk-rail-empty">
+                Откройте заметку — здесь будут её {{ tools: 'действия', remarks: 'замечания', foot: 'сноски', comments: 'комментарии', links: 'ссылки' }[rightTab]}.
+              </p>
             )}
-            {rightTab === 'note' && (note ? <Context note={note} /> : <p className="muted small dk-rail-empty">Откройте заметку — здесь будут её оглавление и связи.</p>)}
+            {rightTab === 'note' && (note ? <Context note={note} /> : <p className="muted small dk-rail-empty">Откройте заметку — здесь будет её оглавление.</p>)}
             {rightTab === 'tags' && (
               <TagsPanel facets={facets} sel={sel} setSel={setSel} cards={cards} onCard={(tag) => {
                 const c = cards.get(tag.toLowerCase());
@@ -1656,65 +1664,28 @@ function Marked({ text, marks }: { text: string; marks: [number, number][] }) {
 /** Правая колонка: оглавление, кто ссылается сюда, комментарии. */
 function Context({ note }: { note: Note }) {
   const kb = useKb()!;
-  const [anchor, setAnchor] = useState('');
-  useEffect(() => setAnchor(''), [note.id]);
   const headings = kb.index.parsed.get(note.id)?.headings ?? [];
-  const comments = useCommentRefs(note.id);
-  const anchors = kb.index.parsed.get(note.id)?.anchors;
-  const linked = (kb.index.incoming.get(note.id) ?? []).length;
+  // комментарии и ссылки — на своих вкладках правой панели (💬 и 🔗, их рисует NotePane)
   return (
     <div className="dk-context">
-      {/* чего нет — сказать, а не молчать: иначе непонятно, для чего вкладка */}
-      {headings.length === 0 && (
-        <section>
-          <h4>Оглавление</h4>
+      <section>
+        <h4>Оглавление</h4>
+        {/* чего нет — сказать, а не молчать: иначе непонятно, для чего вкладка */}
+        {headings.length === 0 && (
           <p className="muted small dk-context-none">Заголовков нет. Строка с # в начале станет заголовком и появится здесь — щелчок переносит к ней.</p>
-        </section>
-      )}
-      {linked === 0 && (
-        <section>
-          <h4>Ссылаются сюда</h4>
-          <p className="muted small dk-context-none">Пока никто. Когда в другой заметке появится ссылка [[{note.title || 'эта заметка'}]], она будет видна здесь.</p>
-        </section>
-      )}
-      {comments.length === 0 && (
-        <section>
-          <h4>Комментарии</h4>
-          <p className="muted small dk-context-none">Нет. Выделите слова в тексте → «💬 Коммент.» во вкладке «Действия» — заметка на полях к этим словам.</p>
-        </section>
-      )}
-      {headings.length > 0 && (
-        <section>
-          <h4>Оглавление</h4>
-          {headings.map((h, i) => (
-            <button
-              key={i}
-              className="dk-outline"
-              style={{ paddingInlineStart: (h.level - 1) * 12 + 4 }}
-              onClick={() => kb.open({ id: note.id, heading: h.text })}
-              dir="auto"
-            >
-              {h.text}
-            </button>
-          ))}
-        </section>
-      )}
-      {comments.length > 0 && (
-        <section>
-          <h4>Комментарии · {comments.length}</h4>
-          {comments.map((r, i) => {
-            const c = kb.index.byId.get(r.from);
-            const frag = r.anchor ? anchors?.get(r.anchor)?.map((p) => p.text).join(' … ') : r.heading;
-            return (
-              <button key={`${r.from}-${i}`} className="dk-comment" onClick={() => kb.open({ id: r.from })} dir="auto">
-                {frag && <span className="dk-comment-frag">«{frag.slice(0, 80)}»</span>}
-                <span>{(c?.body ?? '').slice(0, 240) || 'пусто'}</span>
-              </button>
-            );
-          })}
-        </section>
-      )}
-      <Backlinks noteId={note.id} anchor={anchor} setAnchor={setAnchor} />
+        )}
+        {headings.map((h, i) => (
+          <button
+            key={i}
+            className="dk-outline"
+            style={{ paddingInlineStart: (h.level - 1) * 12 + 4 }}
+            onClick={() => kb.open({ id: note.id, heading: h.text })}
+            dir="auto"
+          >
+            {h.text}
+          </button>
+        ))}
+      </section>
     </div>
   );
 }

@@ -10,7 +10,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { autocompletion, completionKeymap, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import TurndownService from 'turndown';
-import { renderMarkdown } from '../lib/markdown';
+import { plainOf, renderMarkdown } from '../lib/markdown';
 import { addPiece, clearPieces, deleteSkippingTags, livePreview, pendingPieces, setLiveCtx } from '../lib/kb/livePreview';
 import { runFragmentAction, type FragmentAction } from '../lib/kb/fragmentActions';
 import { FragmentButtons } from './FragmentButtons';
@@ -22,7 +22,8 @@ import { attachmentsReady, uploadAttachment } from '../lib/attachments';
 import { useLocalStorage } from '../lib/storage';
 import { LANGS } from '../lib/quick';
 import { hemingway as hemingwayExt } from '../lib/kb/hemingway';
-import { parseRemarks, remarkAt, toGeneral } from '../lib/kb/remarks';
+import { parseRemarks, phraseOf, remarkAt, toGeneral } from '../lib/kb/remarks';
+import { remarkGutter } from '../lib/kb/remarkGutter';
 import { blocksOf, unitRange } from '../lib/kb/blocks';
 import { find, findClear, findExt, findStep, replaceAll, replaceOne } from '../lib/kb/find';
 
@@ -104,6 +105,39 @@ function tagCompletion(kbRef: { current: KbApi | null }) {
   };
 }
 
+/** Замечание к месту `pos` (без него — к месту курсора): нет — завести `{>>|<<}` у этого места,
+ *  есть — выделить его текст. Выделены слова в этом же месте — новое замечание к ним
+ *  (`[к словам: …]`, src/lib/kb/remarks.ts). `whole` — ко всей таблице, а не к её ячейке. */
+function remarkHere(view: EditorView, pos?: number, whole = false) {
+  const doc = view.state.doc.toString();
+  const sel = view.state.selection.main;
+  let at = pos ?? sel.head;
+  let phrase = sel.empty ? undefined : phraseOf(plainOf(view.state.sliceDoc(sel.from, sel.to)));
+  if (phrase) {
+    // значок нажали у другого места, чем то, где выделены слова, — значит, замечание не к ним
+    const end = (p: number) => {
+      const r = remarkAt(doc, p);
+      return 'existing' in r ? (r.existing.anchorTo ?? -1) : r.change.from;
+    };
+    if (pos !== undefined && end(pos) !== end(sel.from)) phrase = undefined;
+    else at = sel.from;
+  }
+  const res = remarkAt(doc, at, phrase, whole);
+  if ('existing' in res) {
+    // уже есть — выделить его текст внутри скобок: печатай, чтобы заменить
+    const r = res.existing;
+    const raw = view.state.sliceDoc(r.from, r.to);
+    // перед скобкой могут стоять отступ пункта списка и знаки цитаты
+    const brace = raw.indexOf('{>>');
+    const open = brace >= 0 ? brace + 3 : raw.startsWith('%%') ? 2 : 0;
+    const close = raw.endsWith('<<}') ? 3 : raw.endsWith('%%') ? 2 : 0;
+    view.dispatch({ selection: { anchor: r.from + open, head: r.to - close }, scrollIntoView: true });
+  } else {
+    view.dispatch({ changes: res.change, selection: { anchor: res.cursor }, scrollIntoView: true, filter: false });
+  }
+  view.focus();
+}
+
 export default function LiveEditor({
   value,
   onChange,
@@ -121,6 +155,7 @@ export default function LiveEditor({
   hemingway = false,
   locked = false,
   review = false,
+  onCursor,
 }: LiveEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   // режим Хемингуэя включается и выключается на лету, без пересоздания редактора
@@ -129,6 +164,8 @@ export default function LiveEditor({
   const lockComp = useRef(new Compartment());
   const reviewRef = useRef(review);
   reviewRef.current = review;
+  const onCursorRef = useRef(onCursor);
+  onCursorRef.current = onCursor;
   const flash = () => {
     const el = host.current;
     if (!el) return;
@@ -188,12 +225,15 @@ export default function LiveEditor({
           }),
           cmPlaceholder(placeholder ?? ''),
           livePreview(),
+          // вычитка: полоса значков ✎ справа от текста — замечание к абзацу или к выделенным словам
+          reviewRef.current ? [remarkGutter(remarkHere), keymap.of([{ key: 'Mod-Alt-m', run: (v) => (remarkHere(v), true) }])] : [],
           findExt,
           hemComp.current.of(hemingway ? hemingwayExt(flash) : []),
           lockComp.current.of(locked ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
             if (u.selectionSet || u.docChanged || u.focusChanged || u.geometryChanged) updateBar(u.view);
+            if (u.selectionSet || u.docChanged) onCursorRef.current?.(u.state.selection.main.head);
           }),
           EditorView.updateListener.of((u) => {
             // вычитка: абзац удалили целиком, а замечание к нему осталось — оно прилипло бы к
@@ -336,20 +376,7 @@ export default function LiveEditor({
             return null;
           }
         },
-        remark: (pos) => {
-          const res = remarkAt(view.state.doc.toString(), pos ?? view.state.selection.main.head);
-          if ('existing' in res) {
-            // уже есть — выделить его текст внутри скобок: печатай, чтобы заменить
-            const r = res.existing;
-            const raw = view.state.sliceDoc(r.from, r.to);
-            const open = raw.startsWith('{>>') ? 3 : raw.startsWith('%%') ? 2 : 0;
-            const close = raw.endsWith('<<}') ? 3 : raw.endsWith('%%') ? 2 : 0;
-            view.dispatch({ selection: { anchor: r.from + open, head: r.to - close }, scrollIntoView: true });
-          } else {
-            view.dispatch({ changes: res.change, selection: { anchor: res.cursor }, scrollIntoView: true, filter: false });
-          }
-          view.focus();
-        },
+        remark: (pos) => remarkHere(view, pos),
         apply: (change, cursor) => {
           view.dispatch({ changes: change, filter: false, ...(cursor !== undefined ? { selection: { anchor: cursor }, scrollIntoView: true } : {}) });
         },

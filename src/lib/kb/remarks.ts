@@ -484,8 +484,10 @@ function itemSlot(S: Scan, pos: number): { at: number; pfx: string } | null {
 /** Замечание к месту, где стоит курсор: уже есть — где его текст (править); нет — что вставить.
  *  `cursor` — куда поставить курсор после вставки (внутрь `{>>|<<}`).
  *  Пункт списка и абзац выноски — замечание строкой прямо под ними; обычный абзац, таблица и
- *  блок кода — отдельным абзацем следом (в таблице — со словами ячейки под курсором). */
-export function remarkAt(doc: string, pos: number): { existing: Remark } | { change: Change; cursor: number } {
+ *  блок кода — отдельным абзацем следом (в таблице — со словами ячейки под курсором).
+ *  `phrase` — выделенные слова (см. phraseOf): замечание к ним всегда новое, `[к словам: …]`.
+ *  `whole` — ко всей таблице, без слов ячейки (значок у таблицы, нарисованной целиком). */
+export function remarkAt(doc: string, pos: number, phrase?: string, whole = false): { existing: Remark } | { change: Change; cursor: number } {
   const S = scan(doc);
   const { L, rem, list } = S;
   let i = L.findIndex((l) => pos >= l.from && pos <= l.to);
@@ -515,6 +517,8 @@ export function remarkAt(doc: string, pos: number): { existing: Remark } | { cha
     return list.find((r) => r.kind === 'par' && !r.inline && r.from === L[k].from && r.anchorTo === L[j].to) ?? null;
   };
   const done = (j: number, pfx: string, glue: boolean) => {
+    // к выделенным словам — всегда своё замечание, даже если к этому месту уже есть другое
+    if (phrase) return put(j, pfx, glue, buildInner({ text: '', phrase }));
     const r = below(j, glue);
     return r ? { existing: r } : put(j, pfx, glue);
   };
@@ -526,9 +530,9 @@ export function remarkAt(doc: string, pos: number): { existing: Remark } | { cha
   if (table) {
     const t = R.T(i)!;
     const col = row === i ? pos - L[i].from - (L[i].text.length - t.length) : 0;
-    const phrase = i > table[0] && DELIM.test(t) ? '' : cellAt(t, col);
-    if (!phrase) return done(table[1], pre, false);
-    return put(table[1], pre, false, buildInner({ text: '', phrase }));
+    const cell = phrase || (whole || (i > table[0] && DELIM.test(t)) ? '' : cellAt(t, col));
+    if (!cell) return done(table[1], pre, false);
+    return put(table[1], pre, false, buildInner({ text: '', phrase: cell }));
   }
   // пункт списка: строкой под его словами, с отступом пункта
   const it = R.itemOf(i);
@@ -537,6 +541,35 @@ export function remarkAt(doc: string, pos: number): { existing: Remark } | { cha
   let j = i;
   if (!HEADING.test(R.T(i)!)) while (R.live(j + 1) && !R.starts(j + 1)) j++;
   return done(j, pre, d > 0);
+}
+
+/** Выделенные слова как фраза замечания: пробелы сжаты; пусто, длиннее 200 знаков или через
+ *  границу абзаца (пустую строку) — не фраза (тогда замечание ко всему месту). */
+export function phraseOf(selected: string): string | undefined {
+  if (/\n[ \t>]*\n/.test(selected.trim())) return undefined;
+  const t = selected.replace(/\s+/g, ' ').trim();
+  return t && t.length <= 200 ? t : undefined;
+}
+
+/** Строки, у которых в правке стоит значок ✎ (src/lib/kb/remarkGutter.ts): начало строки и
+ *  есть ли уже замечание к её тексту. Без значка — пустые строки, сами замечания, нутро блока
+ *  кода (значок у его первой строки) и строка-разделитель таблицы. */
+export function remarkSpots(doc: string): { at: number; on: boolean }[] {
+  const { L, rem, list } = scan(doc);
+  const g = genBlock(L);
+  const owned = list.filter((r) => r.kind === 'par' && !r.inline && r.anchorAt !== undefined && r.anchorTo !== undefined);
+  const out: { at: number; on: boolean }[] = [];
+  let fence = false;
+  for (let i = 0; i < L.length; i++) {
+    const t = bodyOf(L[i].text);
+    const edge = FENCE.test(t);
+    if (edge) fence = !fence;
+    // внутри кода и на закрывающей ограде значка нет: замечание к блоку ставится у его начала
+    if (edge ? !fence : fence) continue;
+    if (!t.trim() || rem[i] || (g && i >= g.a && i <= g.b) || (!edge && DELIM.test(t))) continue;
+    out.push({ at: L[i].from, on: owned.some((r) => L[i].from >= r.anchorAt! && L[i].to <= r.anchorTo!) });
+  }
+  return out;
 }
 
 /** Переписать блок общих замечаний (номера — заново подряд); пусто — блок убрать. */

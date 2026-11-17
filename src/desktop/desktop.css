@@ -204,7 +204,7 @@
 }
 .dk-rail-tabs button {
   flex: none;
-  min-width: 34px;
+  min-width: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -215,13 +215,13 @@
   background: none;
   color: var(--muted);
   font: inherit;
-  padding: 7px 8px;
+  padding: 7px 6px;
   cursor: pointer;
   margin-bottom: -1px;
 }
 .dk-rail-tabs button:hover { color: var(--text); background: color-mix(in srgb, var(--surface) 60%, transparent); }
 /* открытая вкладка — со словом, остальные — значком (название в подсказке) */
-.dk-rail-tabs button.on { flex: 1; background: var(--surface); color: var(--text); border-color: var(--border); font-weight: 600; }
+.dk-rail-tabs button.on { flex: 1; min-width: 0; background: var(--surface); color: var(--text); border-color: var(--border); font-weight: 600; }
 .dk-rail-tabs button { position: relative; }
 .dk-rail-ico { font-size: 15px; line-height: 1; }
 .dk-rail-label { display: none; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -242,6 +242,29 @@
   text-align: center;
 }
 .dk-rail-tabs button.on .dk-rail-badge { position: static; flex: none; }
+/* счётчик-справка (комментарии, ссылки) — серый: оранжевый оставлен тому, что ждёт дела */
+.dk-rail-badge.quiet { background: var(--surface-2); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
+/* карточка замечания, на которую показали из текста */
+.rk-cur > .rk-card { box-shadow: 0 0 0 2px #e8a33d; }
+/* номер замечания на его плашке в правке — тот же, что на карточке; щелчок ведёт к ней */
+.dk .live-host .cm-remark-n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-inline-end: 6px;
+  border-radius: 9px;
+  background: #e8a33d;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: 1px;
+  cursor: pointer;
+  user-select: none;
+}
+.dk .live-host .cm-remark-n:hover { background: #c4821f; }
 .dk-rail-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .dk-rail-actions .dk-tool { flex: 1 1 auto; text-align: center; }
 .dk-rail-tabs .dk-rail-hide { flex: none; min-width: 26px; padding-inline: 4px; font-size: 14px; }
@@ -739,7 +762,7 @@
 .dk-work.both.swap .dk-divider { order: 2; }
 .dk-work.both.swap .dk-preview { order: 1; }
 .dk-work.read .dk-edit-col { display: none; }
-.dk-edit-col { position: relative; padding-inline-end: 34px; min-width: 0; }
+.dk-edit-col { position: relative; padding-inline-end: 4px; min-width: 0; }
 .dk-divider {
   align-self: stretch;
   min-height: 50vh;
@@ -761,10 +784,11 @@
 body.dk-dragging { cursor: col-resize; user-select: none; }
 .dk-stat { margin-top: 18px; padding-top: 8px; border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 
-/* кружок ✎ у абзаца — в правке (под мышью) и в просмотре */
-.ed-remark, .pv-btn {
-  position: absolute;
-  inset-inline-end: 2px;
+/* значок ✎ у абзаца: в правке — полоса редактора (.cm-pen-gutter, src/lib/kb/remarkGutter.ts),
+   в просмотре — кнопка-полоса .pv-btn. Кружок бледный, но виден всегда — искать его мышью не
+   надо; щёлкнуть можно по всей высоте полосы рядом с абзацем, а не только по кружку */
+.pv-pen, .cm-pen {
+  flex: none;
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -775,14 +799,43 @@ body.dk-dragging { cursor: col-resize; user-select: none; }
   line-height: 1;
   display: grid;
   place-items: center;
-  cursor: pointer;
-  padding: 0;
+  opacity: 0.4;
   transition: border-color 0.12s, color 0.12s, background 0.12s, opacity 0.12s;
 }
-.ed-remark:hover, .pv-btn:hover { border-color: #e8a33d; color: #c4821f; }
-.ed-remark.on, .pv-btn.on { background: #e8a33d; border-color: #e8a33d; color: #fff; }
+.pv-btn {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 2px 0 0;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.dk .live-host .cm-gutters { background: none; border: none; color: inherit; z-index: 1; }
+.dk .live-host .cm-pen-gutter { width: 30px; }
+.dk .live-host .cm-pen-gutter .cm-gutterElement {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+/* абзац, где стоит курсор текста, — его значок заметнее */
+.dk .live-host .cm-pen-gutter .cm-activeLineGutter { background: none; }
+.dk .live-host .cm-pen-gutter .cm-activeLineGutter .cm-pen { opacity: 0.9; }
+.pv-btn:hover, .dk .live-host .cm-pen-gutter .cm-gutterElement:hover { background: color-mix(in srgb, #e8a33d 14%, transparent); }
+.pv-btn:hover .pv-pen, .dk .live-host .cm-pen-gutter .cm-gutterElement:hover .cm-pen { opacity: 1; border-color: #e8a33d; color: #c4821f; }
+.pv-btn.on .pv-pen, .dk .live-host .cm-pen.on { opacity: 1; background: #e8a33d; border-color: #e8a33d; color: #fff; }
 /* .writing — открыто поле нового замечания (не путать с состоянием замечания «open») */
-.pv-btn.writing { background: var(--surface); border-color: var(--border); color: var(--muted); }
+.pv-btn.writing .pv-pen { opacity: 1; background: var(--surface); border-color: var(--border); color: var(--muted); }
 
 /* просмотр: блоки с кружком, карточки замечаний, поле замечания */
 .dk .dk-preview { font-size: 1.04rem; line-height: 1.65; overflow-wrap: anywhere; min-width: 0; padding-top: 4px; }
@@ -795,8 +848,7 @@ body.dk-dragging { cursor: col-resize; user-select: none; }
 .pv-plain { padding-inline-end: 34px; }
 .pv-block { position: relative; padding-inline-end: 34px; border-inline-start: 3px solid transparent; margin-inline-start: -11px; padding-inline-start: 8px; border-radius: 2px; }
 .pv-block.marked { border-inline-start-color: #e8a33d; }
-.pv-block .pv-btn { top: 2px; opacity: 0; }
-.pv-block:hover .pv-btn, .pv-btn.on, .pv-btn.writing { opacity: 1; }
+.pv-block:hover > .pv-btn .pv-pen, .pv-li:hover > .pv-li-text > .pv-btn .pv-pen { opacity: 1; }
 /* список: свой кружок и свои замечания у каждого пункта (замечание лежит строкой под пунктом) */
 .pv-li { border-inline-start: 3px solid transparent; margin-inline-start: -11px; padding-inline-start: 8px; border-radius: 2px; }
 .pv-li.marked { border-inline-start-color: #e8a33d; }
@@ -804,8 +856,7 @@ body.dk-dragging { cursor: col-resize; user-select: none; }
 .pv-li.marked.ask { border-inline-start-color: #d9a400; }
 .pv-li.marked.no { border-inline-start-color: var(--muted); }
 .pv-li-text { position: relative; }
-.pv-li-text > .pv-btn { inset-inline-end: -32px; top: 1px; }
-.pv-block .pv-li:not(:hover) .pv-btn:not(.on):not(.writing) { opacity: 0; }
+.pv-li-text > .pv-btn { inset-inline-end: -34px; }
 .pv-list.loose > .pv-li + .pv-li { margin-top: 0.6em; }
 .pv-li .pv-note-wrap, .pv-li .pv-edit { margin-inline: 1.6em 0; }
 .pv-li.flash { animation: pv-flash 1.4s ease-out; }
@@ -1101,9 +1152,9 @@ body.bugpick, body.bugpick * { cursor: crosshair !important; }
 .pv-block.marked.done { border-inline-start-color: #2e8b57; }
 .pv-block.marked.ask { border-inline-start-color: #d9a400; }
 .pv-block.marked.no { border-inline-start-color: var(--muted); }
-.pv-btn.on.done { background: #2e8b57; border-color: #2e8b57; }
-.pv-btn.on.ask { background: #d9a400; border-color: #d9a400; }
-.pv-btn.on.no { background: var(--muted); border-color: var(--muted); }
+.pv-btn.on.done .pv-pen { background: #2e8b57; border-color: #2e8b57; }
+.pv-btn.on.ask .pv-pen { background: #d9a400; border-color: #d9a400; }
+.pv-btn.on.no .pv-pen { background: var(--muted); border-color: var(--muted); }
 .pv-phrase { background: color-mix(in srgb, #e8a33d 30%, transparent); border-bottom: 2px solid #e8a33d; border-radius: 2px; color: inherit; }
 .pv-unphrase { border: none; background: none; color: var(--muted); cursor: pointer; margin-inline-start: 6px; font-size: 13px; }
 

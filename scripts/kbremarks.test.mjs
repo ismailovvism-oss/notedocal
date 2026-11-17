@@ -1,7 +1,7 @@
 // Тесты замечаний в файле ({>>…<<} к абзацу, блок %%замечания), как в md-редакторе. npm test.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apply, applyAll, buildInner, dropEmptyRemarks, editRemark, moveRemark, parseInner, replyRemark, toGeneral, generalItems, parseRemarks, remarkAt, remarksText, removeRemark, writeGeneral } from '../src/lib/kb/remarks.ts';
+import { apply, applyAll, buildInner, dropEmptyRemarks, editRemark, moveRemark, parseInner, replyRemark, toGeneral, generalItems, parseRemarks, phraseOf, remarkAt, remarkSpots, remarksText, removeRemark, writeGeneral } from '../src/lib/kb/remarks.ts';
 
 const DOC = `# Заголовок
 
@@ -342,4 +342,78 @@ test('абзац, за которым сразу другой блок: заме
   assert.equal(penAt('Шаги:\n1. раз\n2. два', 'два'), 'Шаги:\n1. раз\n2. два\n   {>>замечание<<}');
   // два замечания подряд у одного абзаца: якорь у обоих — абзац
   assert.deepEqual(parseRemarks('Абзац.\n\n{>>первое<<}\n\n{>>второе<<}').map((r) => r.anchor), ['Абзац.', 'Абзац.']);
+});
+
+test('замечание к выделенным словам из правки: всегда новое, с пометкой «к словам»', () => {
+  const put = (doc, word, phrase) => {
+    const r = remarkAt(doc, doc.indexOf(word), phrase);
+    return [apply(doc, r.change), r.cursor];
+  };
+  // абзац: отдельным абзацем следом, курсор — после пометки, внутри скобок
+  const [a, cur] = put('Первый абзац о доводе.\n\nВторой.', 'доводе', 'о доводе');
+  assert.equal(a, 'Первый абзац о доводе.\n\n{>>[к словам: о доводе] <<}\n\nВторой.');
+  assert.equal(a.slice(cur), '<<}\n\nВторой.');
+  const r = parseRemarks(a)[0];
+  assert.equal(r.phrase, 'о доводе');
+  assert.equal(r.anchor, 'Первый абзац о доводе.');
+  // к этому месту замечание уже есть — к словам заводится своё, старое не трогается
+  const [b] = put('Абзац с доводом.\n\n{>>ко всему абзацу<<}', 'доводом', 'доводом');
+  assert.deepEqual(parseRemarks(b).map((x) => [x.phrase ?? '', x.text]), [['доводом', ''], ['', 'ко всему абзацу']]);
+  // пункт списка: строкой под ним, с его отступом
+  assert.equal(put('- первый довод\n- второй', 'довод', 'довод')[0], '- первый довод\n  {>>[к словам: довод] <<}\n- второй');
+  // таблица: выделенные слова вместо слов ячейки
+  assert.equal(put('| Имя | Хукм |\n| --- | --- |\n| Зейд ибн Амр | сахих |', 'Зейд', 'ибн Амр')[0], '| Имя | Хукм |\n| --- | --- |\n| Зейд ибн Амр | сахих |\n\n{>>[к словам: ибн Амр] <<}');
+  // значок у таблицы, нарисованной целиком: замечание ко всей таблице, без слов ячейки
+  const tb = '| Имя | Хукм |\n| --- | --- |\n| Зейд | сахих |';
+  assert.equal(apply(tb, remarkAt(tb, 0, undefined, true).change), tb + '\n\n{>><<}');
+  // арабские слова с огласовками остаются как были
+  const ar = 'إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ';
+  assert.equal(parseRemarks(put(`قَالَ ${ar}`, 'إِنَّمَا', ar)[0])[0].phrase, ar);
+  // пустое замечание к словам — тоже пустое: убирается при уходе
+  assert.equal(dropEmptyRemarks(a), 'Первый абзац о доводе.\n\nВторой.');
+});
+
+test('что считается фразой: одна строка мысли, не длиннее 200 знаков', () => {
+  assert.equal(phraseOf('  два   слова\nс переносом '), 'два слова с переносом');
+  assert.equal(phraseOf(''), undefined);
+  assert.equal(phraseOf('   '), undefined);
+  assert.equal(phraseOf('конец абзаца.\n\nНачало другого'), undefined);
+  assert.equal(phraseOf('> цитата\n>\n> ещё'), undefined);
+  assert.equal(phraseOf('я'.repeat(200)), 'я'.repeat(200));
+  assert.equal(phraseOf('я'.repeat(201)), undefined);
+});
+
+test('значки ✎ в правке: у каких строк стоят и где замечание уже есть', () => {
+  const doc = [
+    '# Заголовок', // 0 ✎
+    '', // 1
+    'Абзац первый.', // 2 ✎ on
+    '', // 3
+    '{>>к первому<<}', // 4
+    '', // 5
+    '- пункт', // 6 ✎ on
+    '  {>>к пункту<<}', // 7
+    '- второй', // 8 ✎
+    '', // 9
+    '| а | б |', // 10 ✎
+    '| --- | --- |', // 11
+    '| 1 | 2 |', // 12 ✎
+    '', // 13
+    '```js', // 14 ✎
+    'const a = 1;', // 15
+    '', // 16
+    '```', // 17
+    '', // 18
+    '> цитата', // 19 ✎
+    '', // 20
+    '%%замечания', // 21
+    '1. общее', // 22
+    '%%', // 23
+  ];
+  const text = doc.join('\n');
+  const starts = doc.map((_, i) => doc.slice(0, i).join('\n').length + (i ? 1 : 0));
+  const spots = remarkSpots(text);
+  assert.deepEqual(spots.map((s) => starts.indexOf(s.at)), [0, 2, 6, 8, 10, 12, 14, 19]);
+  assert.deepEqual(spots.filter((s) => s.on).map((s) => starts.indexOf(s.at)), [2, 6]);
+  assert.deepEqual(remarkSpots(''), []);
 });

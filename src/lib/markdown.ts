@@ -71,3 +71,17 @@ export function renderMarkdown(src: string, kb?: RenderCtx): string {
     ADD_ATTR: ['class', 'target', 'rel'],
   });
 }
+
+/** Видимый текст куска разметки — без значков оформления, одной строкой (слова, к которым
+ *  ставят замечание: такими их видит просмотр). */
+export function plainOf(md: string): string {
+  return renderMarkdown(md)
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

@@ -8,10 +8,21 @@ import { useKb } from '../lib/kb/ui';
 const kindLabel = (k: string) => KIND_LABELS[k] ?? k;
 
 /** «Обратные ссылки»: кто ссылается на заметку и на её фрагменты, с текстом вокруг ссылки. */
-export function Backlinks({ noteId, anchor, setAnchor }: { noteId: string; anchor: string; setAnchor: (a: string) => void }) {
+export function Backlinks({
+  noteId,
+  anchor,
+  setAnchor,
+  noComments,
+}: {
+  noteId: string;
+  anchor: string;
+  setAnchor: (a: string) => void;
+  /** Без комментариев: в окне «База» у них своя вкладка. */
+  noComments?: boolean;
+}) {
   const kb = useKb();
   const [open, setOpen] = useState(true);
-  const all = useMemo(() => (kb ? backlinks(kb.index, noteId) : []), [kb, noteId]);
+  const all = useMemo(() => (kb ? backlinks(kb.index, noteId).filter((r) => !noComments || r.kind !== 'comment') : []), [kb, noteId, noComments]);
   if (!kb || all.length === 0) return null;
   const anchors = kb.index.parsed.get(noteId)?.anchors;
   const shown = anchor ? all.filter((r) => r.anchor?.toLowerCase() === anchor.toLowerCase()) : all;

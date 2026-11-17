@@ -178,7 +178,7 @@ export function Preview({
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        {open ? '✕' : '✎'}
+        <span className="pv-pen">{open ? '✕' : '✎'}</span>
       </button>
     );
   };

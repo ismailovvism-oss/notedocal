@@ -14,6 +14,7 @@ import type { KbIndex } from './index.ts';
 import { anchorCounts, fragmentOf, resolveName } from './index.ts';
 import { maskInert, splitLinkInner } from './syntax.ts';
 import { calloutMeta } from './callouts.ts';
+import { parseRemarks } from './remarks.ts';
 
 /** Что редактор знает о базе: указатель (для ссылок и встраиваний) и чья это заметка. */
 export interface LiveCtx {
@@ -173,6 +174,33 @@ class VoiceMark extends WidgetType {
     s.textContent = '🎤 …';
     s.title = 'Сюда встанет надиктованное, когда окно на компьютере его распознает';
     return s;
+  }
+}
+
+/** Номер замечания на его плашке — тот же, что на карточке в панели «Замечания». Щелчок шлёт
+ *  событие `kb-remark` (номер в `detail`): окно «База» открывает панель на этой карточке. */
+class RemarkNo extends WidgetType {
+  readonly n: number;
+  constructor(n: number) {
+    super();
+    this.n = n;
+  }
+  eq(other: RemarkNo) {
+    return other.n === this.n;
+  }
+  toDOM() {
+    const s = document.createElement('span');
+    s.className = 'cm-remark-n';
+    s.textContent = String(this.n);
+    s.title = 'Показать это замечание на панели справа';
+    s.onmousedown = (e) => {
+      e.preventDefault();
+      s.dispatchEvent(new CustomEvent('kb-remark', { bubbles: true, detail: this.n }));
+    };
+    return s;
+  }
+  ignoreEvent() {
+    return true;
   }
 }
 
@@ -382,6 +410,9 @@ function build(state: EditorState): Built {
 
   // замечания и правки CriticMarkup (из md-редактора, src/lib/kb/remarks.ts): {>>замечание<<},
   // {==выделить==}, {++вставить++}, {--убрать--}, {~~было~>стало~~}
+  // номера замечаний — как в панели (src/lib/kb/remarks.ts): по началу строки или самой скобки
+  const remarkNo = new Map<number, number>();
+  if (doc.includes('{>>')) for (const r of parseRemarks(doc)) if (r.kind === 'par') remarkNo.set(r.from, r.n);
   for (const m of masked.matchAll(/\{(>>|==|\+\+|--|~~)([\s\S]*?)(<<|==|\+\+|--|~~)\}/g)) {
     const kind = m[1];
     const close = { '>>': '<<', '==': '==', '++': '++', '--': '--', '~~': '~~' }[kind];
@@ -393,6 +424,9 @@ function build(state: EditorState): Built {
       // замечание отдельной строкой — плашкой во всю строку
       const a = lineOf(from);
       const b = lineOf(to);
+      const no = remarkNo.get(a.from) ?? remarkNo.get(from);
+      // `keep` — не замена: стоит перед спрятанной скобкой и с ней не спорит (см. dedupe)
+      if (no) out.push(Decoration.widget({ widget: new RemarkNo(no), side: -1, keep: true }).range(from));
       // перед ним могут стоять отступ пункта списка и знаки цитаты `>` (src/lib/kb/remarks.ts)
       if (/^[\s>]*$/.test(doc.slice(a.from, from)) && doc.slice(to, b.to).trim() === '') {
         for (let p = a.from; p <= b.from; p = lineOf(p).to + 1) out.push(Decoration.line({ class: 'cm-remark-line' }).range(p));
@@ -482,7 +516,7 @@ function build(state: EditorState): Built {
 
 /** Замены не должны пересекаться: CodeMirror падает на перекрытых заменах. */
 function dedupe(list: Range<Decoration>[]): Range<Decoration>[] {
-  const replaces = list.filter((r) => r.value.spec.widget !== undefined || (r.from < r.to && r.value === hide) || r.value.spec.block);
+  const replaces = list.filter((r) => (r.value.spec.widget !== undefined && !r.value.spec.keep) || (r.from < r.to && r.value === hide) || r.value.spec.block);
   const others = list.filter((r) => !replaces.includes(r));
   replaces.sort((a, b) => a.from - b.from || b.to - a.to);
   const kept: Range<Decoration>[] = [];
